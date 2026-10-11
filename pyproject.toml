@@ -4,19 +4,21 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpha-grid"
-version = "0.3.0"
-description = "NSE market-data foundation with Dhan 20-level depth and local journal"
+version = "0.4.0"
+description = "NSE market-data foundation with Dhan depth, journal, and research Parquet"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "mypy>=1.10", "ruff>=0.6"]
+dev = ["pytest>=8", "mypy>=1.10", "ruff>=0.6", "pyarrow>=18,<26", "polars>=1,<2"]
+research = ["pyarrow>=18,<26"]
 dhan = ["dhanhq>=2.3,<2.4", "websockets>=14,<18"]
 
 [project.scripts]
 quant-diagnostics = "quant.apps.diagnostics:main"
 quant-collect-depth = "quant.apps.collect_depth:main"
+quant-export-parquet = "quant.apps.export_parquet:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -32,6 +34,10 @@ packages = ["quant"]
 
 [[tool.mypy.overrides]]
 module = ["dhanhq", "dhanhq.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["pyarrow", "pyarrow.*"]
 ignore_missing_imports = true
 
 [tool.ruff]

@@ -79,6 +79,34 @@ and `never` trade crash durability for throughput. The journal exposes appended
 record, byte, and fsync counts. Keep the journal volume persistent and monitor
 free disk space; local `fsync` does not protect against loss of the entire host.
 
+## Research Parquet replay
+
+Install `.[research]` (or `.[dev]` for tests), set
+`QUANT_JOURNAL_SESSION_ID` to the session to replay, then run
+`python -m quant.apps.export_parquet`. The exporter reads only validated raw
+journal records. It batches depth events by size (default 5,000) or receive-time
+span (default 15 minutes), writes Arrow tables as Parquet 2.6 with Zstandard,
+and partitions by India date, instrument, and hour. Price columns use exact
+`decimal128(38,18)`; timestamps use UTC nanoseconds. Level counts and nullable
+level columns preserve incomplete snapshots and missing order counts.
+[PyArrow's Parquet writer](https://arrow.apache.org/docs/python/generated/pyarrow.parquet.write_table.html)
+documents the version 2.6 nanosecond and Zstandard support.
+
+Each replay builds a complete generation and atomically switches the
+`QUANT_PARQUET_DIR/session=<session ID>` symlink when all files are durable.
+Other sessions remain available. Failed runs leave the published dataset intact.
+Replaying the same journal produces one final copy of each event. Older
+generations remain in a hidden sibling directory so readers already using them
+can finish; remove old generations during planned maintenance to reclaim space.
+Trade events remain in the raw journal and are reported as
+skipped by this depth-only exporter. If an event's price exceeds the schema's
+decimal scale, export fails and the raw journal remains available.
+
+Run `PYTHONPATH=src python benchmarks/parquet_benchmark.py --events 2000` for
+conversion events/sec and compressed bytes/event on synthetic 20-level books.
+The benchmark disables journal fsync only for input generation; production
+collection retains its configured journal policy.
+
 ## Layout and contracts
 
 - `quant.domain`: immutable instrument, depth, trade, and feed-health records.
@@ -87,7 +115,8 @@ free disk space; local `fsync` does not protect against loss of the entire host.
 - `quant.feeds`: asynchronous normalized market-event source protocol and Dhan
   depth adapter. The adapter uses the official DhanHQ decoder and a direct
   WebSocket receive path to timestamp packets before decoding.
-- `quant.storage`: asynchronous sink contract and single-writer local journal.
+- `quant.storage`: asynchronous sink contract, raw journal, and replayable
+  research Parquet exporter.
 - `quant.health`: feed freshness assessment.
 - `quant.apps`: operational entry points only.
 

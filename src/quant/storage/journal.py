@@ -72,8 +72,58 @@ class RecoveryStats:
     repaired_files: int = 0
 
 
+@dataclass(frozen=True, slots=True)
+class JournalRecord:
+    source_file: Path
+    offset: int
+    envelope: dict[str, Any]
+
+
 class JournalCorruptionError(OSError):
     """Non-tail corruption; the journal is left untouched for investigation."""
+
+
+def iter_journal_records(settings: JournalSettings) -> Iterator[JournalRecord]:
+    """Read validated records without taking the writer's session lock."""
+    session_dir = settings.root / f"session={settings.session_id}"
+    files = [
+        (path, path.stat().st_size)
+        for path in sorted(session_dir.glob("date=*/events.qj"))
+    ]
+    for path, snapshot_size in files:
+        with path.open("rb") as stream:
+            while stream.tell() < snapshot_size:
+                offset = stream.tell()
+                header = stream.read(min(_HEADER.size, snapshot_size - offset))
+                if len(header) != _HEADER.size:
+                    raise JournalCorruptionError(
+                        f"incomplete record at {path}:{offset}"
+                    )
+                magic, length, checksum = _HEADER.unpack(header)
+                if magic != _MAGIC or not 0 < length <= _MAX_RECORD_BYTES:
+                    raise JournalCorruptionError(
+                        f"invalid record header at {path}:{offset}"
+                    )
+                if stream.tell() + length > snapshot_size:
+                    raise JournalCorruptionError(
+                        f"incomplete record at {path}:{offset}"
+                    )
+                payload = stream.read(length)
+                if len(payload) != length or zlib.crc32(payload) != checksum:
+                    raise JournalCorruptionError(
+                        f"invalid record body at {path}:{offset}"
+                    )
+                try:
+                    value = json.loads(payload)
+                except (ValueError, UnicodeDecodeError) as exc:
+                    raise JournalCorruptionError(
+                        f"invalid JSON record at {path}:{offset}"
+                    ) from exc
+                if not isinstance(value, dict):
+                    raise JournalCorruptionError(
+                        f"invalid record type at {path}:{offset}"
+                    )
+                yield JournalRecord(path, offset, value)
 
 
 def _timestamp(value: datetime) -> str:
@@ -307,21 +357,8 @@ class EventJournal:
                 os.close(self._lock_fd)
 
     def records(self) -> Iterator[dict[str, Any]]:
-        for path in sorted(self._session_dir.glob("date=*/events.qj")):
-            with path.open("rb") as stream:
-                while header := stream.read(_HEADER.size):
-                    if len(header) != _HEADER.size:
-                        raise JournalCorruptionError(f"incomplete record at {path}")
-                    magic, length, checksum = _HEADER.unpack(header)
-                    if magic != _MAGIC or not 0 < length <= _MAX_RECORD_BYTES:
-                        raise JournalCorruptionError(f"invalid record header at {path}")
-                    payload = stream.read(length)
-                    if len(payload) != length or zlib.crc32(payload) != checksum:
-                        raise JournalCorruptionError(f"invalid record body at {path}")
-                    value = json.loads(payload)
-                    if not isinstance(value, dict):
-                        raise JournalCorruptionError(f"invalid record type at {path}")
-                    yield value
+        for record in iter_journal_records(self.settings):
+            yield record.envelope
 
     def __enter__(self) -> EventJournal:
         return self
