@@ -3,7 +3,7 @@ requires = ["setuptools>=69"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "quant-nse-foundation"
+name = "alpha-grid"
 version = "0.1.0"
 description = "Broker-independent foundation for NSE quantitative research"
 readme = "README.md"

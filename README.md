@@ -1,4 +1,4 @@
-# NSE quantitative platform foundation
+# Alpha Grid
 
 Python 3.12+ foundation for a cloud-native NSE research and trading platform. This
 repository contains only configuration, normalized market-event contracts, logging,
