@@ -16,6 +16,10 @@ ruff format --check .
 mypy
 ```
 
+The `dev` extra includes all dependencies for the full test suite, including
+DhanHQ, websockets and pandas. For exact resolved versions, use
+`uv sync --extra dev --locked` with the committed `uv.lock`.
+
 `quant-diagnostics` validates the environment settings and writes a JSON startup
 log. Copy `.env.example` to `.env` if useful, then export its variables; the
 application deliberately does not load `.env` files or embed credentials.

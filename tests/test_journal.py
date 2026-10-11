@@ -181,6 +181,21 @@ def test_fsync_policy_counts_and_env_validation(tmp_path: Path) -> None:
         JournalSettings(tmp_path, "../escape")
 
 
+def test_manual_group_sync_covers_date_switch(tmp_path: Path) -> None:
+    settings = _settings(tmp_path, FsyncPolicy.ON_CLOSE)
+    with EventJournal(settings) as journal:
+        journal.append(_depth(at=datetime(2026, 10, 10, 18, 29, tzinfo=UTC)))
+        assert journal.fsync_count == 0
+        journal.append(_depth(at=datetime(2026, 10, 10, 18, 30, tzinfo=UTC)))
+        assert journal.fsync_count == 1  # Previous date committed before close.
+        assert journal.sync() >= 0
+        assert journal.fsync_count == 2
+        assert journal.sync() == 0  # No redundant fsync for a clean segment.
+    assert journal.fsync_count == 2
+    with EventJournal(settings) as recovered:
+        assert recovered.recovery.records == 2
+
+
 def test_collector_journals_before_downstream_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

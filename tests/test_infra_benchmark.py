@@ -99,20 +99,51 @@ def test_network_probe_reuses_https_connection(monkeypatch: pytest.MonkeyPatch) 
     class FakeConnection:
         def __init__(self, host: str, port: int, timeout: float) -> None:
             connections.append(self)
+            self.connect_count = 0
 
         def close(self) -> None:
             pass
 
-    monkeypatch.setattr(network_bench.http.client, "HTTPSConnection", FakeConnection)
+    monkeypatch.setattr(network_bench, "_TrackingHTTPSConnection", FakeConnection)
     monkeypatch.setattr(network_bench, "_probe_dns", lambda: 1.0)
     monkeypatch.setattr(network_bench, "_probe_tcp", lambda timeout: 2.0)
     monkeypatch.setattr(network_bench, "_probe_tls", lambda timeout, context: 3.0)
-    monkeypatch.setattr(network_bench, "_probe_https", lambda connection: (4.0, 404))
+
+    def probe(connection: FakeConnection) -> tuple[float, int]:
+        connection.connect_count = 1
+        return 4.0, 404
+
+    monkeypatch.setattr(network_bench, "_probe_https", probe)
     result = network_bench.run_network(samples=3, interval=0)
     assert len(connections) == 1
     assert result["latency_ms"]["https"]["count"] == 3
     assert result["https_status_codes"] == {"404": 3}
+    assert result["https_new_connections"] == 1
+    assert result["https_reused_requests"] == 2
     assert result["packet_loss"] is None
+
+
+def test_network_probe_detects_reconnects(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeConnection:
+        def __init__(self, host: str, port: int, timeout: float) -> None:
+            self.connect_count = 0
+
+        def close(self) -> None:
+            pass
+
+    def reconnect(connection: FakeConnection) -> tuple[float, int]:
+        connection.connect_count += 1
+        return 5.0, 200
+
+    monkeypatch.setattr(network_bench, "_TrackingHTTPSConnection", FakeConnection)
+    monkeypatch.setattr(network_bench, "_probe_dns", lambda: 1.0)
+    monkeypatch.setattr(network_bench, "_probe_tcp", lambda timeout: 2.0)
+    monkeypatch.setattr(network_bench, "_probe_tls", lambda timeout, context: 3.0)
+    monkeypatch.setattr(network_bench, "_probe_https", reconnect)
+    result = network_bench.run_network(samples=3, interval=0)
+    assert result["https_new_connections"] == 3
+    assert result["https_reused_requests"] == 0
+    assert result["https_connection_reused"] is False
 
 
 def test_authenticated_profile_discards_body_and_never_serializes_token(

@@ -7,6 +7,7 @@ import json
 import os
 import re
 import struct
+import time
 import zlib
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
@@ -263,9 +264,11 @@ class EventJournal:
         self._fd: int | None = None
         self._path: Path | None = None
         self._closed = False
+        self._dirty = False
         self.appended_records = 0
         self.appended_bytes = 0
         self.fsync_count = 0
+        self.last_fsync_ns: int | None = None
         try:
             records = lost = repaired = 0
             for path in sorted(self._session_dir.glob("date=*/events.qj")):
@@ -301,15 +304,40 @@ class EventJournal:
                 if written <= 0:
                     raise OSError("journal write made no progress")
                 view = view[written:]
+            self._dirty = True
+            self.last_fsync_ns = None
             if self.settings.fsync_policy is FsyncPolicy.ALWAYS:
-                os.fsync(self._fd)
-                self.fsync_count += 1
+                self.sync()
             self.appended_records += 1
             self.appended_bytes += len(record)
         except BaseException:
             # A partial write is repaired only after restart; do not append again.
             self.close()
             raise
+
+    def sync(self) -> int:
+        """Commit all appended records; return monotonic fsync duration in ns.
+
+        A failed sync closes the journal so no later append can hide the failure.
+        """
+        if self._closed:
+            raise ValueError("journal is closed")
+        if self._fd is None or not self._dirty:
+            return 0
+        start = time.perf_counter_ns()
+        try:
+            os.fsync(self._fd)
+        except BaseException:
+            try:
+                self.close()
+            except OSError:
+                pass
+            raise
+        elapsed = time.perf_counter_ns() - start
+        self.last_fsync_ns = elapsed
+        self.fsync_count += 1
+        self._dirty = False
+        return elapsed
 
     async def write(self, event: MarketEvent) -> None:
         self.append(event)
@@ -340,13 +368,17 @@ class EventJournal:
     def _close_segment(self) -> None:
         if self._fd is not None:
             try:
-                if self.settings.fsync_policy is FsyncPolicy.ON_CLOSE:
+                if self.settings.fsync_policy is FsyncPolicy.ON_CLOSE and self._dirty:
+                    started_ns = time.perf_counter_ns()
                     os.fsync(self._fd)
+                    self.last_fsync_ns = time.perf_counter_ns() - started_ns
                     self.fsync_count += 1
+                    self._dirty = False
             finally:
                 os.close(self._fd)
                 self._fd = None
                 self._path = None
+                self._dirty = False
 
     def close(self) -> None:
         if not self._closed:

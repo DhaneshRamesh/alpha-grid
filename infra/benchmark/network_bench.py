@@ -20,6 +20,18 @@ HOST = "api.dhan.co"
 PORT = 443
 
 
+class _TrackingHTTPSConnection(http.client.HTTPSConnection):
+    """Count actual TLS connections, including transparent reconnects."""
+
+    def __init__(self, host: str, port: int, timeout: float) -> None:
+        super().__init__(host, port, timeout=timeout)
+        self.connect_count = 0
+
+    def connect(self) -> None:
+        super().connect()
+        self.connect_count += 1
+
+
 class _ConnectionProbe:
     def __init__(self) -> None:
         self.started_ns = time.perf_counter_ns()
@@ -88,14 +100,23 @@ def _probe_dns() -> float:
 
 
 def _probe_tcp(timeout: float) -> float:
-    start = time.perf_counter_ns()
-    with socket.create_connection((HOST, PORT), timeout=timeout):
+    family, kind, proto, _, address = socket.getaddrinfo(
+        HOST, PORT, type=socket.SOCK_STREAM
+    )[0]
+    with socket.socket(family, kind, proto) as raw:
+        raw.settimeout(timeout)
+        start = time.perf_counter_ns()
+        raw.connect(address)
         return (time.perf_counter_ns() - start) / 1_000_000
 
 
 def _probe_tls(timeout: float, context: ssl.SSLContext) -> float:
-    with socket.create_connection((HOST, PORT), timeout=timeout) as raw:
+    family, kind, proto, _, address = socket.getaddrinfo(
+        HOST, PORT, type=socket.SOCK_STREAM
+    )[0]
+    with socket.socket(family, kind, proto) as raw:
         raw.settimeout(timeout)
+        raw.connect(address)
         start = time.perf_counter_ns()
         with context.wrap_socket(raw, server_hostname=HOST):
             return (time.perf_counter_ns() - start) / 1_000_000
@@ -112,7 +133,7 @@ def _probe_https(connection: http.client.HTTPSConnection) -> tuple[float, int]:
 def run_network(
     samples: int = 30, timeout: float = 5.0, interval: float = 1.0
 ) -> dict[str, Any]:
-    """Each phase is isolated; HTTPS reuses one connection per probe run."""
+    """Time phase-specific probes; report whether HTTPS actually reused a socket."""
     if samples < 1 or timeout <= 0 or interval < 0:
         raise ValueError("invalid network probe settings")
     data: dict[str, list[float]] = {name: [] for name in ("dns", "tcp", "tls", "https")}
@@ -120,7 +141,9 @@ def run_network(
     status_codes: dict[str, int] = {}
     observations: list[dict[str, Any]] = []
     context = ssl.create_default_context()
-    connection: http.client.HTTPSConnection | None = None
+    connection: _TrackingHTTPSConnection | None = None
+    https_connections = 0
+    reused_requests = 0
     try:
         for index in range(samples):
             for name, action in (
@@ -151,10 +174,13 @@ def run_network(
                     )
             try:
                 if connection is None:
-                    connection = http.client.HTTPSConnection(
-                        HOST, PORT, timeout=timeout
-                    )
+                    connection = _TrackingHTTPSConnection(HOST, PORT, timeout=timeout)
+                before_connects = connection.connect_count
                 elapsed, status = _probe_https(connection)
+                new_connections = connection.connect_count - before_connects
+                https_connections += new_connections
+                reused = new_connections == 0 and before_connects > 0
+                reused_requests += int(reused)
                 data["https"].append(elapsed)
                 status_codes[str(status)] = status_codes.get(str(status), 0) + 1
                 observations.append(
@@ -164,6 +190,8 @@ def run_network(
                         "at": datetime.now(UTC).isoformat(),
                         "elapsed_ms": elapsed,
                         "status": status,
+                        "new_connections": new_connections,
+                        "reused_connection": reused,
                     }
                 )
             except (OSError, TimeoutError, http.client.HTTPException):
@@ -187,7 +215,9 @@ def run_network(
     return {
         "target": f"{HOST}:{PORT}",
         "https_path": "/v2/",
-        "https_connection_reused": True,
+        "https_connection_reused": reused_requests > 0,
+        "https_reused_requests": reused_requests,
+        "https_new_connections": https_connections,
         "attempts": samples,
         "latency_ms": {name: distribution(values) for name, values in data.items()},
         "failures": failures,

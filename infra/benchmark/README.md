@@ -1,8 +1,10 @@
 # Mumbai infrastructure verification and benchmark (11 October 2026)
 
-**Next operation:** [one-VM Utho Mumbai pilot](utho_pilot.md). It starts with an account-specific checkout quote and a short baseline run; it does not require other-provider quotes.
+**Completed:** [one-VM Utho Mumbai pilot](utho-pilot-20261011.md). The VM and EBS were deleted. [Pilot diagnosis and synthetic ingestion-capacity benchmark](ingestion.md) is the next offline step.
 
-**Status: no provider VM has been provisioned, billed or measured. No production deployment or order API is involved.** Published prices are inputs to an experiment, not a winner. `UNVERIFIED` means no current official source or live account evidence establishes the claim. The same Git commit and command parameters must run on every VM.
+**Status: one temporary Utho VM was measured and deleted; OCI and Akamai remain unmeasured. No production deployment or order API is involved.** Published prices are inputs to an experiment, not a winner. `UNVERIFIED` means no current official source or live account evidence establishes the claim. The same Git commit and command parameters must run on every VM.
+
+The provider tables below are the earlier research snapshot. Use the linked pilot and ingestion reports for observed results and current blockers.
 
 ## Utho Basic 1: eight decision questions
 
