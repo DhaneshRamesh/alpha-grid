@@ -4,17 +4,19 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpha-grid"
-version = "0.1.0"
-description = "Broker-independent foundation for NSE quantitative research"
+version = "0.2.0"
+description = "NSE quantitative market-data foundation with Dhan 20-level depth"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "mypy>=1.10", "ruff>=0.6"]
+dhan = ["dhanhq>=2.3,<2.4", "websockets>=14,<18"]
 
 [project.scripts]
 quant-diagnostics = "quant.apps.diagnostics:main"
+quant-collect-depth = "quant.apps.collect_depth:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -27,6 +29,10 @@ python_version = "3.12"
 strict = true
 mypy_path = "src"
 packages = ["quant"]
+
+[[tool.mypy.overrides]]
+module = ["dhanhq", "dhanhq.*"]
+ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py312"

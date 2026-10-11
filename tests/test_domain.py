@@ -67,3 +67,9 @@ def test_trade_requires_positive_finite_price_and_quantity() -> None:
         TradeEvent("NSE", "NSE_EQ", "1", None, now, Decimal("NaN"), 1)
     with pytest.raises(ValueError, match="quantity"):
         TradeEvent("NSE", "NSE_EQ", "1", None, now, Decimal("1"), 0)
+
+
+def test_depth_level_accepts_empty_wire_placeholder_only_as_nonnegative_price() -> None:
+    assert DepthLevel(Decimal("0"), 0, 0).price == 0
+    with pytest.raises(ValueError, match="depth price"):
+        DepthLevel(Decimal("-1"), 0)

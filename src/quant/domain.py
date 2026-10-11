@@ -42,7 +42,8 @@ class DepthLevel:
     order_count: int | None = None
 
     def __post_init__(self) -> None:
-        _positive_price(self.price)
+        if not self.price.is_finite() or self.price < 0:
+            raise ValueError("depth price must be finite and nonnegative")
         if self.quantity < 0:
             raise ValueError("quantity must be nonnegative")
         if self.order_count is not None and self.order_count < 0:
