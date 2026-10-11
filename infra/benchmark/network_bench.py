@@ -27,6 +27,11 @@ class _ConnectionProbe:
         self.connect_ms: list[float] = []
         self.connection_events: list[dict[str, Any]] = []
         self._disconnected_ns: int | None = None
+        self.packet_counts: dict[str, int] = {}
+        self.malformed_counts: dict[str, int] = {}
+        self.packet_interarrival_ms: dict[str, list[float]] = {}
+        self.packet_observations: list[dict[str, Any]] = []
+        self._last_packet_ns: dict[str, int] = {}
 
     def connection_changed(
         self, connected: bool, at: datetime, reason: str = "transport"
@@ -50,10 +55,26 @@ class _ConnectionProbe:
             self._disconnected_ns = time.perf_counter_ns()
 
     def packet_received(self, key: tuple[str, str], at: datetime) -> None:
-        pass
+        name = f"{key[0]}:{key[1]}"
+        now = time.perf_counter_ns()
+        self.packet_counts[name] = self.packet_counts.get(name, 0) + 1
+        last = self._last_packet_ns.get(name)
+        if last is not None:
+            self.packet_interarrival_ms.setdefault(name, []).append(
+                (now - last) / 1_000_000
+            )
+        self._last_packet_ns[name] = now
+        self.packet_observations.append(
+            {
+                "instrument": name,
+                "at": at.isoformat(),
+                "elapsed_from_start_ms": (now - self.started_ns) / 1_000_000,
+            }
+        )
 
     def malformed(self, key: tuple[str, str] | None, reason: str, at: datetime) -> None:
-        pass
+        name = f"{key[0]}:{key[1]}" if key is not None else "unknown"
+        self.malformed_counts[name] = self.malformed_counts.get(name, 0) + 1
 
 
 def _timed_call(action: Callable[[], object]) -> float:
@@ -89,7 +110,7 @@ def _probe_https(connection: http.client.HTTPSConnection) -> tuple[float, int]:
 
 
 def run_network(
-    samples: int = 30, timeout: float = 5.0, interval: float = 0.2
+    samples: int = 30, timeout: float = 5.0, interval: float = 1.0
 ) -> dict[str, Any]:
     """Each phase is isolated; HTTPS reuses one connection per probe run."""
     if samples < 1 or timeout <= 0 or interval < 0:
@@ -212,6 +233,8 @@ def run_authenticated_api(
                     latencies.append(elapsed)
                 else:
                     failures += 1
+                    if response.status in {401, 403, 429}:
+                        break
             except (OSError, TimeoutError, http.client.HTTPException):
                 failures += 1
                 observations.append(
@@ -231,7 +254,8 @@ def run_authenticated_api(
             connection.close()
     return {
         "path": "/v2/profile",
-        "attempts": samples,
+        "attempts": len(observations),
+        "requested_samples": samples,
         "latency_ms": distribution(latencies),
         "failures": failures,
         "observations": observations,
@@ -343,6 +367,9 @@ async def run_feed(
     deadline = time.monotonic() + duration_seconds
     started_ns = time.perf_counter_ns()
     observations: list[dict[str, Any]] = []
+    exchange_timestamp_count = 0
+    sequence_count = 0
+    full_book_count = 0
     iterator = cast(AsyncGenerator[DepthEvent, None], feed.__aiter__())
     try:
         while (remaining := deadline - time.monotonic()) > 0:
@@ -357,7 +384,16 @@ async def run_feed(
                     "instrument": key,
                     "at": datetime.now(UTC).isoformat(),
                     "elapsed_from_start_ms": (received_ns - started_ns) / 1_000_000,
+                    "bid_levels": len(event.bid_levels),
+                    "ask_levels": len(event.ask_levels),
+                    "exchange_timestamp_present": event.exchange_timestamp is not None,
+                    "sequence_present": event.sequence_number is not None,
                 }
+            )
+            exchange_timestamp_count += event.exchange_timestamp is not None
+            sequence_count += event.sequence_number is not None
+            full_book_count += (
+                len(event.bid_levels) == 20 and len(event.ask_levels) == 20
             )
             item = per_instrument.setdefault(
                 key, {"events": 0, "interarrival_ms": [], "stalls": 0}
@@ -387,6 +423,13 @@ async def run_feed(
     instruments = {
         key: {
             "events": item["events"],
+            "events_per_second": item["events"] / duration_seconds,
+            "packets": probe.packet_counts.get(key, 0),
+            "packets_per_second": probe.packet_counts.get(key, 0) / duration_seconds,
+            "packet_interarrival_ms": distribution(
+                probe.packet_interarrival_ms.get(key, [])
+            ),
+            "malformed_packets": probe.malformed_counts.get(key, 0),
             "interarrival_ms": distribution(item["interarrival_ms"]),
             "stalls_over_threshold": item["stalls"],
             "tail_gap_ms": item.get("tail_gap_ms"),
@@ -397,6 +440,22 @@ async def run_feed(
         "duration_seconds": duration_seconds,
         "events": counters.depth_events,
         "messages": counters.messages,
+        "configured_instruments": sorted(configured),
+        "packet_observations": probe.packet_observations,
+        "exchange_timestamp_coverage": (
+            exchange_timestamp_count / counters.depth_events
+            if counters.depth_events
+            else None
+        ),
+        "sequence_coverage": (
+            sequence_count / counters.depth_events if counters.depth_events else None
+        ),
+        "full_20x20_book_events": full_book_count,
+        "book_semantics": (
+            "Each source side packet contains 20 aggregate price levels; normalized "
+            "events pair bid and ask sides. Individual add/cancel/trade events "
+            "cannot be reconstructed from these aggregates."
+        ),
         "websocket_first_connect_ms": probe.first_connect_ms,
         "websocket_connect_ms": distribution(probe.connect_ms),
         "connection_events": probe.connection_events,
@@ -404,6 +463,13 @@ async def run_feed(
         "reconnects": counters.reconnects,
         "malformed": counters.malformed_messages,
         "interarrival_ms": distribution(interarrival),
+        "websocket_packet_interarrival_ms": distribution(
+            [
+                value
+                for values in probe.packet_interarrival_ms.values()
+                for value in values
+            ]
+        ),
         "stalls_over_threshold": stalls,
         "per_instrument": instruments,
         "missing_instruments": sorted(configured - instruments.keys()),

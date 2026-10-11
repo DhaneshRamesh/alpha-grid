@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import ipaddress
 import json
 import math
 import os
@@ -118,6 +119,18 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         raise RuntimeError("benchmarks must run on a Linux candidate server")
     if args.monthly_cost is not None and args.monthly_cost < 0:
         raise ValueError("monthly cost must be nonnegative")
+    if args.output.suffix not in {".json", ".parquet"} or args.output.exists():
+        raise ValueError("output must be a new .json or .parquet file")
+    if not args.journal_dir.is_dir():
+        raise ValueError("journal directory must already exist")
+    if args.expected_egress_ip is not None:
+        ipaddress.IPv4Address(args.expected_egress_ip)
+    if args.feed_seconds:
+        from quant.feeds.dhan_depth import DhanDepthSettings
+
+        DhanDepthSettings.from_env(os.environ)
+    if os.environ.get("DHAN_ACCESS_TOKEN") and args.api_interval < 1.0:
+        raise ValueError("Dhan profile requests must be at least 1s apart")
     result: dict[str, Any] = {
         "schema_version": 2,
         "benchmark_version": "0.2.0",
@@ -156,6 +169,11 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             result["feed"] = {"error_type": type(exc).__name__}
     result["finished_at"] = datetime.now(UTC).isoformat()
     _write_result(args.output, result)
+    if args.feed_seconds and (
+        result.get("feed", {}).get("events", 0) == 0
+        or result.get("authenticated_api", {}).get("latency_ms") is None
+    ):
+        raise RuntimeError("live Dhan benchmark failed; partial result was saved")
     return result
 
 
@@ -389,7 +407,7 @@ def main() -> None:
     runner.add_argument("--storage-samples", type=int, default=1000)
     runner.add_argument("--cpu-seconds", type=float, default=30.0)
     runner.add_argument("--timeout", type=float, default=5.0)
-    runner.add_argument("--interval", type=float, default=0.2)
+    runner.add_argument("--interval", type=float, default=1.0)
     runner.add_argument("--ws-url", help="Public WSS URL with no credentials")
     runner.add_argument("--feed-seconds", type=float, default=0.0)
     runner.add_argument("--stall-seconds", type=float, default=5.0)

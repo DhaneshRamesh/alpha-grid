@@ -64,7 +64,7 @@ mkdir -p benchmark-data/results
 .venv/bin/python -m infra.benchmark.run_benchmark run \
   --provider Utho --region Mumbai --plan Basic-1 \
   --journal-dir benchmark-data --network-samples 300 --api-samples 300 \
-  --api-interval 1 --storage-samples 2000 --cpu-seconds 120 \
+  --interval 1 --api-interval 1 --storage-samples 2000 --cpu-seconds 120 \
   --feed-seconds 180 --stall-seconds 5 \
   --expected-egress-ip RESERVED_IPV4_FROM_PROVIDER \
   --output "benchmark-data/results/utho-$(date -u +%Y%m%dT%H%M%SZ).json"
@@ -72,6 +72,8 @@ mkdir -p benchmark-data/results
 ```
 
 Change only provider, region, plan, reserved IP and output prefix on the other VMs. Add `--monthly-cost`, `--currency INR` and `--static-ip-supported` **only** after a complete cost quote and outbound IP lifecycle verification; otherwise comparison remains ineligible. Keep credentials out of command arguments. The benchmark performs GET `/v2/profile`, discards its account response, uses the existing read-only Dhan depth adapter, and has no order path. `benchmark-data/` is ignored by Git. Encrypt and restrict raw outputs because feed observations and host IPs may be sensitive.
+
+For a live feed run, missing Dhan credentials or instruments now fail before any probe. A run with zero feed events or no successful authenticated profile response saves its partial result and exits with an error, so unattended scheduling can flag it. At `--interval 1 --api-interval 1`, three simultaneous candidates make at most roughly six REST requests per second from these probes, leaving room under Dhan's [20-per-second non-trading limit](https://dhanhq.co/docs/v2/). Check other account activity and the [five-WebSocket connection limit](https://dhanhq.co/docs/v2/full-market-depth/) before concurrent runs.
 
 ### Raw results and gates
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
+from argparse import Namespace
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from infra.benchmark.run_benchmark import (
     _write_result,
     compare,
     market_window,
+    run,
     score_records,
 )
 from infra.benchmark.storage_bench import run_storage
@@ -57,6 +59,38 @@ def test_market_windows_are_nse_local() -> None:
 def test_websocket_rejects_credential_bearing_url() -> None:
     with pytest.raises(ValueError, match="without query"):
         run_websocket("wss://example.com/feed?access_token=secret")
+
+
+def test_live_run_fails_before_probes_without_dhan_settings(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(
+        "infra.benchmark.run_benchmark.platform.system", lambda: "Linux"
+    )
+    monkeypatch.delenv("DHAN_CLIENT_ID", raising=False)
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    monkeypatch.delenv("QUANT_DEPTH_INSTRUMENTS", raising=False)
+    args = Namespace(
+        monthly_cost=None,
+        output=tmp_path / "result.json",
+        journal_dir=tmp_path,
+        expected_egress_ip=None,
+        feed_seconds=180,
+    )
+    with pytest.raises(ValueError, match="Dhan client ID and access token"):
+        run(args)
+    assert not args.output.exists()
+
+
+def test_packet_probe_tracks_instrument_interarrival() -> None:
+    probe = network_bench._ConnectionProbe()
+    now = datetime.now(UTC)
+    probe.packet_received(("NSE_EQ", "123"), now)
+    probe.packet_received(("NSE_EQ", "123"), now)
+    probe.malformed(("NSE_EQ", "123"), "invalid_length", now)
+    assert probe.packet_counts["NSE_EQ:123"] == 2
+    assert len(probe.packet_interarrival_ms["NSE_EQ:123"]) == 1
+    assert probe.malformed_counts["NSE_EQ:123"] == 1
 
 
 def test_network_probe_reuses_https_connection(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -116,6 +150,38 @@ def test_authenticated_profile_discards_body_and_never_serializes_token(
     assert "private" not in json.dumps(result)
     with pytest.raises(ValueError, match="at least 1s"):
         network_bench.run_authenticated_api("top-secret", interval=0.1)
+
+
+def test_authenticated_profile_stops_after_auth_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    class FakeResponse:
+        status = 401
+
+        def read(self) -> bytes:
+            return b"invalid token"
+
+    class FakeConnection:
+        def __init__(self, host: str, port: int, timeout: float) -> None:
+            pass
+
+        def request(self, method: str, path: str, headers: dict[str, str]) -> None:
+            nonlocal calls
+            calls += 1
+
+        def getresponse(self) -> FakeResponse:
+            return FakeResponse()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", FakeConnection)
+    result = network_bench.run_authenticated_api("token", samples=30)
+    assert calls == 1
+    assert result["attempts"] == result["failures"] == 1
+    assert "invalid token" not in json.dumps(result)
 
 
 def test_egress_ip_must_match_reserved_ip(monkeypatch: pytest.MonkeyPatch) -> None:
