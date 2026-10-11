@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import http.client
+import ipaddress
 import os
 import socket
 import ssl
 import time
 from collections.abc import AsyncGenerator, Callable, Mapping
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any, cast
 from urllib.parse import urlsplit
 
@@ -23,14 +24,30 @@ class _ConnectionProbe:
     def __init__(self) -> None:
         self.started_ns = time.perf_counter_ns()
         self.first_connect_ms: float | None = None
+        self.connect_ms: list[float] = []
+        self.connection_events: list[dict[str, Any]] = []
+        self._disconnected_ns: int | None = None
 
     def connection_changed(
         self, connected: bool, at: datetime, reason: str = "transport"
     ) -> None:
+        self.connection_events.append(
+            {
+                "at": datetime.now(UTC).isoformat(),
+                "connected": connected,
+                "reason": reason,
+            }
+        )
         if connected and self.first_connect_ms is None:
             self.first_connect_ms = (
                 time.perf_counter_ns() - self.started_ns
             ) / 1_000_000
+        if connected:
+            origin = self._disconnected_ns or self.started_ns
+            self.connect_ms.append((time.perf_counter_ns() - origin) / 1_000_000)
+            self._disconnected_ns = None
+        else:
+            self._disconnected_ns = time.perf_counter_ns()
 
     def packet_received(self, key: tuple[str, str], at: datetime) -> None:
         pass
@@ -80,19 +97,37 @@ def run_network(
     data: dict[str, list[float]] = {name: [] for name in ("dns", "tcp", "tls", "https")}
     failures: dict[str, int] = {name: 0 for name in data}
     status_codes: dict[str, int] = {}
+    observations: list[dict[str, Any]] = []
     context = ssl.create_default_context()
     connection: http.client.HTTPSConnection | None = None
     try:
-        for _ in range(samples):
+        for index in range(samples):
             for name, action in (
                 ("dns", _probe_dns),
                 ("tcp", lambda: _probe_tcp(timeout)),
                 ("tls", lambda: _probe_tls(timeout, context)),
             ):
                 try:
-                    data[name].append(action())
+                    elapsed = action()
+                    data[name].append(elapsed)
+                    observations.append(
+                        {
+                            "sample": index,
+                            "phase": name,
+                            "at": datetime.now(UTC).isoformat(),
+                            "elapsed_ms": elapsed,
+                        }
+                    )
                 except (OSError, TimeoutError):
                     failures[name] += 1
+                    observations.append(
+                        {
+                            "sample": index,
+                            "phase": name,
+                            "at": datetime.now(UTC).isoformat(),
+                            "error": "transport",
+                        }
+                    )
             try:
                 if connection is None:
                     connection = http.client.HTTPSConnection(
@@ -101,8 +136,25 @@ def run_network(
                 elapsed, status = _probe_https(connection)
                 data["https"].append(elapsed)
                 status_codes[str(status)] = status_codes.get(str(status), 0) + 1
+                observations.append(
+                    {
+                        "sample": index,
+                        "phase": "https",
+                        "at": datetime.now(UTC).isoformat(),
+                        "elapsed_ms": elapsed,
+                        "status": status,
+                    }
+                )
             except (OSError, TimeoutError, http.client.HTTPException):
                 failures["https"] += 1
+                observations.append(
+                    {
+                        "sample": index,
+                        "phase": "https",
+                        "at": datetime.now(UTC).isoformat(),
+                        "error": "transport",
+                    }
+                )
                 if connection is not None:
                     connection.close()
                 connection = None
@@ -120,6 +172,110 @@ def run_network(
         "failures": failures,
         "https_status_codes": status_codes,
         "packet_loss": None,  # TCP failures are not a packet-loss measurement.
+        "observations": observations,
+    }
+
+
+def run_authenticated_api(
+    token: str, *, samples: int = 30, timeout: float = 5.0, interval: float = 1.0
+) -> dict[str, Any]:
+    """Rate-limited, read-only profile GET; discard sensitive response bodies."""
+    if not token or samples < 1 or timeout <= 0 or interval < 1.0:
+        raise ValueError("profile probe needs a token and at least 1s spacing")
+    connection: http.client.HTTPSConnection | None = None
+    observations: list[dict[str, Any]] = []
+    latencies: list[float] = []
+    failures = 0
+    try:
+        for index in range(samples):
+            try:
+                if connection is None:
+                    connection = http.client.HTTPSConnection(
+                        HOST, PORT, timeout=timeout
+                    )
+                start = time.perf_counter_ns()
+                connection.request(
+                    "GET", "/v2/profile", headers={"access-token": token}
+                )
+                response = connection.getresponse()
+                response.read()
+                elapsed = (time.perf_counter_ns() - start) / 1_000_000
+                observations.append(
+                    {
+                        "sample": index,
+                        "at": datetime.now(UTC).isoformat(),
+                        "elapsed_ms": elapsed,
+                        "status": response.status,
+                    }
+                )
+                if response.status == 200:
+                    latencies.append(elapsed)
+                else:
+                    failures += 1
+            except (OSError, TimeoutError, http.client.HTTPException):
+                failures += 1
+                observations.append(
+                    {
+                        "sample": index,
+                        "at": datetime.now(UTC).isoformat(),
+                        "error": "transport",
+                    }
+                )
+                if connection is not None:
+                    connection.close()
+                connection = None
+            if index + 1 < samples:
+                time.sleep(interval)
+    finally:
+        if connection is not None:
+            connection.close()
+    return {
+        "path": "/v2/profile",
+        "attempts": samples,
+        "latency_ms": distribution(latencies),
+        "failures": failures,
+        "observations": observations,
+    }
+
+
+def run_egress_ipv4(
+    expected: str | None = None, *, timeout: float = 5.0
+) -> dict[str, Any]:
+    """Observe outward IPv4 through two independent HTTPS reflectors."""
+    if expected is not None:
+        expected = str(ipaddress.IPv4Address(expected))
+    if timeout <= 0:
+        raise ValueError("timeout must be positive")
+    addresses: list[str] = []
+    failures = 0
+    for host in ("checkip.amazonaws.com", "api.ipify.org"):
+        connection = http.client.HTTPSConnection(host, 443, timeout=timeout)
+        try:
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            body = response.read(64).decode("ascii").strip()
+            if response.status != 200:
+                raise ValueError("reflector returned non-200")
+            addresses.append(str(ipaddress.IPv4Address(body)))
+        except (
+            OSError,
+            TimeoutError,
+            ValueError,
+            UnicodeError,
+            http.client.HTTPException,
+        ):
+            failures += 1
+        finally:
+            connection.close()
+    consistent = len(addresses) == 2 and addresses[0] == addresses[1]
+    return {
+        "observed_ipv4": addresses[0] if consistent else None,
+        "expected_ipv4": expected,
+        "consistent": consistent,
+        "matches_reserved_ip": consistent
+        and expected is not None
+        and addresses[0] == expected,
+        "failures": failures,
     }
 
 
@@ -133,19 +289,36 @@ def run_websocket(url: str, samples: int = 5, timeout: float = 5.0) -> dict[str,
     if samples < 1 or timeout <= 0:
         raise ValueError("invalid WebSocket probe settings")
     measurements: list[float] = []
+    observations: list[dict[str, Any]] = []
     failures = 0
-    for _ in range(samples):
+    for index in range(samples):
         try:
             start = time.perf_counter_ns()
             with connect(url, open_timeout=timeout, close_timeout=timeout):
-                measurements.append((time.perf_counter_ns() - start) / 1_000_000)
+                elapsed = (time.perf_counter_ns() - start) / 1_000_000
+                measurements.append(elapsed)
+                observations.append(
+                    {
+                        "sample": index,
+                        "at": datetime.now(UTC).isoformat(),
+                        "elapsed_ms": elapsed,
+                    }
+                )
         except Exception:
             failures += 1
+            observations.append(
+                {
+                    "sample": index,
+                    "at": datetime.now(UTC).isoformat(),
+                    "error": "transport",
+                }
+            )
     return {
         "attempts": samples,
         "latency_ms": distribution(measurements),
         "failures": failures,
         "target_host": parts.hostname,
+        "observations": observations,
     }
 
 
@@ -163,12 +336,13 @@ async def run_feed(
     settings = DhanDepthSettings.from_env(os.environ if environ is None else environ)
     probe = _ConnectionProbe()
     feed = DhanDepthFeed(settings, observer=probe)
-    delays: list[float] = []
     interarrival: list[float] = []
     per_instrument: dict[str, dict[str, Any]] = {}
-    last_received: dict[str, datetime] = {}
+    last_received: dict[str, int] = {}
     stalls = 0
     deadline = time.monotonic() + duration_seconds
+    started_ns = time.perf_counter_ns()
+    observations: list[dict[str, Any]] = []
     iterator = cast(AsyncGenerator[DepthEvent, None], feed.__aiter__())
     try:
         while (remaining := deadline - time.monotonic()) > 0:
@@ -177,26 +351,35 @@ async def run_feed(
             except TimeoutError:
                 break
             key = f"{event.exchange_segment}:{event.instrument_id}"
+            received_ns = time.perf_counter_ns()
+            observations.append(
+                {
+                    "instrument": key,
+                    "at": datetime.now(UTC).isoformat(),
+                    "elapsed_from_start_ms": (received_ns - started_ns) / 1_000_000,
+                }
+            )
             item = per_instrument.setdefault(
-                key, {"events": 0, "interarrival_ms": [], "delay_ms": [], "stalls": 0}
+                key, {"events": 0, "interarrival_ms": [], "stalls": 0}
             )
             item["events"] += 1
             if key in last_received:
-                gap = (event.receive_timestamp - last_received[key]).total_seconds()
+                gap = (received_ns - last_received[key]) / 1_000_000_000
                 interarrival.append(gap * 1_000)
                 item["interarrival_ms"].append(gap * 1_000)
                 stalls += gap >= stall_seconds
                 item["stalls"] += gap >= stall_seconds
-            last_received[key] = event.receive_timestamp
-            if event.exchange_timestamp is not None:
-                delay = (
-                    event.receive_timestamp - event.exchange_timestamp
-                ).total_seconds() * 1_000
-                delays.append(delay)
-                item["delay_ms"].append(delay)
+            last_received[key] = received_ns
     finally:
         await feed.aclose()
         await iterator.aclose()
+    end_ns = time.perf_counter_ns()
+    for key, last_ns in last_received.items():
+        gap = (end_ns - last_ns) / 1_000_000_000
+        per_instrument[key]["tail_gap_ms"] = gap * 1_000
+        if gap >= stall_seconds:
+            stalls += 1
+            per_instrument[key]["stalls"] += 1
     counters = feed.counters
     configured = {
         f"{item.exchange_segment}:{item.instrument_id}" for item in settings.instruments
@@ -205,8 +388,8 @@ async def run_feed(
         key: {
             "events": item["events"],
             "interarrival_ms": distribution(item["interarrival_ms"]),
-            "exchange_to_receive_ms": distribution(item["delay_ms"]),
             "stalls_over_threshold": item["stalls"],
+            "tail_gap_ms": item.get("tail_gap_ms"),
         }
         for key, item in per_instrument.items()
     }
@@ -215,18 +398,20 @@ async def run_feed(
         "events": counters.depth_events,
         "messages": counters.messages,
         "websocket_first_connect_ms": probe.first_connect_ms,
+        "websocket_connect_ms": distribution(probe.connect_ms),
+        "connection_events": probe.connection_events,
         "disconnects": counters.disconnects,
         "reconnects": counters.reconnects,
         "malformed": counters.malformed_messages,
         "interarrival_ms": distribution(interarrival),
-        "exchange_to_receive_ms": distribution(delays),
-        "exchange_timestamp_coverage": len(delays) / counters.depth_events
-        if counters.depth_events
-        else None,
         "stalls_over_threshold": stalls,
         "per_instrument": instruments,
         "missing_instruments": sorted(configured - instruments.keys()),
         "stall_threshold_seconds": stall_seconds,
         "packet_loss": None,
-        "note": "Packet loss requires a verified contiguous upstream sequence.",
+        "observations": observations,
+        "note": (
+            "Interarrival uses a monotonic clock. Packet loss requires a verified "
+            "contiguous upstream sequence. Exchange time is not network latency."
+        ),
     }

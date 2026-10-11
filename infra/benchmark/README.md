@@ -1,126 +1,91 @@
-# Indian execution VPS research (11 October 2026)
+# Mumbai infrastructure verification and benchmark (11 October 2026)
 
-This is a read-only comparison plan. No server has been provisioned or measured for
-this project. A cloud region in Mumbai does **not** establish low latency to Dhan's
-actual broker and feed front ends. Broker routing, CPU contention, clock quality,
-and fsync tails need measurements on the candidate machines during NSE sessions.
-Prices below are public list prices, before tax and promotions, where verifiable.
-`?` means the current Mumbai-specific value or entitlement needs an account quote.
+**Status: no provider VM has been provisioned, billed or measured. No production deployment or order API is involved.** Published prices are inputs to an experiment, not a winner. `UNVERIFIED` means no current official source or live account evidence establishes the claim. The same Git commit and command parameters must run on every VM.
 
-## Documented facts
+## Utho Basic 1: eight decision questions
 
-| Provider / physical region | Candidate plan | CPU / allocation / x86_64 | RAM / disk / network | Stable IPv4 | Public cost and billing | Limits and reliability |
-| --- | --- | --- | --- | --- | --- | --- |
-| [OCI India West, Mumbai](https://www.oracle.com/apac/cloud/public-cloud-regions/) | `VM.Standard.E4.Flex`, 1 OCPU (2 vCPU), 8 GB, 50 GB balanced boot volume | 3rd Gen AMD EPYC, x86_64; 1 physical core with two SMT threads on a multitenant VM | 8 GB; network block volume; [up to 1 Gbps/OCPU](https://blogs.oracle.com/cloud-infrastructure/announcing-oracle-cloud-compute-e4-platform-on-third-gen-amd-epyc-processors) | [Reserved public IPv4](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/managingpublicIPs.htm); verify current IP SKU before purchase | [India list](https://www.oracle.com/in/cloud/price-list/): ₹3.535165/hour compute; ₹2,580.67 at 730 h. 50 GB balanced volume: ₹203.03/month (50 × [₹2.4363975 storage + 10 × ₹0.1624265 VPU](https://www.oracle.com/in/cloud/price-list/)); **₹2,783.70/month excluding possible IP charge**. First [10 TB outbound/month free](https://www.oracle.com/cloud/networking/virtual-cloud-network/pricing/). | [Boot volume minimum 50 GB](https://docs.oracle.com/en-us/iaas/Content/FreeTier/freetier_topic-Always_Free_Resources.htm); [stopped standard VM compute billing pauses](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/resource-billing-stopped-instances.htm), storage continues. Confirm exact [compute SLA](https://www.oracle.com/in/cloud/sla/) for the shape. No local NVMe in this plan. |
-| [Akamai/Linode Mumbai core](https://techdocs.akamai.com/cloud-computing/docs/how-to-choose-a-data-center) | `G6 Dedicated 4 GB`, 2 vCPU, 80 GB SSD; also test `Linode 4 GB` shared as collector cost floor | Dedicated G6 vCPU on legacy hardware, exact host CPU generation not guaranteed; x86_64. Shared plan has 2 shared vCPUs. | 4 GB; 80 GB SSD; [40/4 Gbps advertised network and 4 TB transfer](https://www.akamai.com/cloud/pricing/cpu) | [Reserved IPv4](https://techdocs.akamai.com/cloud-computing/docs/reserved-ips); region-specific charge ? | [Global list](https://www.akamai.com/cloud/pricing/cpu): G6 $0.054/hour, $36/month; shared $0.036/hour, $24/month. **Mumbai all-in ?** because reserved IP and regional price require confirmation; published overage $0.005/GB in standard regions. | [Dedicated cores can sustain load](https://techdocs.akamai.com/cloud-computing/docs/dedicated-cpu-compute-instances); stopped VM billed while allocated ([billing docs](https://techdocs.akamai.com/cloud-computing/docs/understanding-how-billing-works)). Verify Mumbai plan availability and SLA. |
-| [Vultr Mumbai](https://blogs.vultr.com/Namaste-India-Vultr-has-landed-in-Mumbai) | `vhp-2c-4gb` Optimized Cloud Compute candidate; confirm exact plan, disk and capacity in Mumbai console | Dedicated vCPU [Optimized](https://docs.vultr.com/product-overviews/optimized-cloud-compute); Mumbai launch cited 3rd Gen AMD EPYC; current host generation ?, x86_64 | 4 GB; NVMe category, exact included GB/network ? | [Reserved IPv4](https://docs.vultr.com/products/network/reserved-ips/provisioning) | Exact matching VM price ?; [reserved IP $0.004/hour (~$3/month)](https://docs.vultr.com/support/products/network/are-reserved-ips-free). A published **1 vCPU/4 GB/30 GB** dedicated floor is [$0.045/hour](https://docs.vultr.com/product-overviews/optimized-cloud-compute), but it does not meet the 2-vCPU requirement. Outbound allowance/overage for selected Mumbai plan ?. | [Stopped instances still billed](https://docs.vultr.com/support/platform/billing/how-am-i-billed-for-my-servers); non-GPU compute capped at 672 billed hours/month per current docs. Regional price can differ; verify SLA and IP availability. |
-| [Utho Mumbai](https://utho.com/cloud-hosting-provider) | `Basic 1` shared CPU; also quote a 2-vCPU dedicated plan | 2 shared vCPU; host CPU generation and x86_64 image compatibility must be checked on the actual VM. [Dedicated tier advertises AMD EPYC/Intel Xeon](https://utho.com/dedicated-cpu), but that does not specify Basic 1 hardware. | [4 GB, 80 GB NVMe, 1 TB transfer](https://utho.com/pricing); exact port speed and overage ? | [Reserved IPv4 in Mumbai](https://utho.com/reserved-ip); verify it is the *outbound* source address | [₹1,794/month Basic 1 list](https://utho.com/pricing), storage included; hourly rate, reserved IP cost and bandwidth overage ?; **all-in > or = ₹1,794** before tax | [Single-instance SLA is 99.5%](https://utho.com/sla), although marketing pages say 99.99% for multi-zone/region. Stopped-VM billing and CPU contention policy ?. Strong low-cost collector candidate; execution tier must be measured. |
-| [Dhan Cloud](https://dhan.co/support/platforms/dhanhq-api/what-are-the-charges-for-deploying-my-algo-on-dhan-cloud/) | Exact 2 vCPU/4–8 GB plan ? | CPU, isolation, architecture ? | Region, disk and network ? | Stable *egress* IPv4 and portability ? | No public rate card; [portal estimator](https://dhan.co/support/platforms/dhanhq-api/what-are-the-charges-for-deploying-my-algo-on-dhan-cloud/) requires login. Hourly/monthly/storage/IP/egress ? | Exclude from comparable ranking until documented specifications, static egress IP, export access and benchmark execution are confirmed. |
-| [AWS Mumbai `ap-south-1`](https://docs.aws.amazon.com/ec2/latest/instancetypes/ec2-instance-regions.html) | `m8a.large`, 2 vCPU/8 GiB + 50 GiB gp3 | [5th Gen AMD EPYC, x86_64](https://aws.amazon.com/ec2/instance-types/m8a/); virtualized cores, not tenancy-dedicated | EBS-only; [up to 12.5 Gbps network](https://aws.amazon.com/ec2/instance-types/m8a/) | Elastic IPv4 | Mumbai VM and gp3 GB/hour prices ? from public dynamic calculator. [Public IPv4 $0.005/hour ($3.65/730 h)](https://aws.amazon.com/vpc/pricing/); outbound billed by regional tier. **All-in ?** | Compute stops billing after stop; EBS and EIP persist/bill. [Single-instance EC2 SLA 99.5%](https://aws.amazon.com/compute/sla/). Benchmark reference, not assumed winner. |
-| [Google Cloud Mumbai `asia-south1`](https://cloud.google.com/about/locations) | `n2-standard-2`, 2 vCPU/8 GiB + 50 GiB `pd-balanced` | N2 Intel x86_64; generation can vary by zone/host, shared physical host | Network-attached balanced SSD; [up to 10 Gbps egress for 2 vCPU N2](https://cloud.google.com/compute/docs/general-purpose-machines#n2_machines) subject to network limits | [Static external IPv4](https://docs.cloud.google.com/compute/docs/ip-addresses) | [Google's machine price page](https://cloud.google.com/products/compute/pricing/general-purpose) lists prices by selected region; capture **Mumbai** VM, disk, IP and egress line items in calculator before scoring. **All-in ?** | Stopped CPU/RAM billing stops; disk/static IP persist/bill. [Single instance Premium Tier SLA 99.9%](https://docs.cloud.google.com/compute/docs/ip-addresses). Benchmark reference. |
+| Question | Evidence and current answer |
+| --- | --- |
+| ₹1,794 plan in Mumbai today? | [Pricing](https://utho.com/pricing) lists Basic 1, 2 shared vCPU, 4 GB RAM, 80 GB NVMe, 1 TB transfer at ₹1,794/month. [Reserved IP page](https://utho.com/reserved-ip) illustrates Mumbai zone 2, but neither proves **Basic 1 capacity in Mumbai now: UNVERIFIED**. Confirm in authenticated console before renting. |
+| Complete monthly bill? | Included 80 GB disk and 1 TB transfer are documented. [Terms §16.13](https://utho.com/term-condition) say fees exclude GST. Reserved IP fee, backup/snapshot billing basis, overage price, extra disk, exact GST on invoice and hourly/minimum charges are **UNVERIFIED**. Formula: `(₹1,794 + reserved IP + backup + extra disk + overage + optional NAT) × (1 + applicable GST rate)`. [NAT Gateway](https://utho.com/nat-gateway) advertises ₹3.74/hour plus transfer, or ₹2,730.20/730 hours before transfer and tax; Basic 1 plus NAT is already ₹4,524.20 before IP, backup, transfer and tax. [Simple pricing](https://utho.com/simple-pricing) says no egress overage/minimum spend, which conflicts with the 1 TB plan allowance and NAT transfer charge: obtain an itemized quote. |
+| Direct reserved IP also outbound source? | [Reserved IP docs](https://utho.com/reserved-ip) describe assignment and stable connectivity, not outbound SNAT. **UNVERIFIED.** Two HTTPS reflectors must agree with the reserved address; verify again against the Dhan destination or with Utho support. |
+| Stable egress without NAT Gateway? | **UNVERIFIED.** A dedicated NAT product is documented but does not prove it is required for a public VM. Do not include the NAT charge or omit it from a final quote until the VM path is tested. |
+| IP across restart, stop/start, replacement? | [Reserved IP docs](https://utho.com/reserved-ip) explicitly describe unassign/reassign and retention across deletion/recreation. Restart and stop/start behavior are **UNVERIFIED**; test all three lifecycle events and ensure the *outbound* address stays the same. |
+| CPU model and allocation? | Basic 1 is **shared CPU** per [pricing](https://utho.com/pricing). Exact host model and clock are **UNVERIFIED**. The [dedicated tier](https://utho.com/dedicated-cpu) markets AMD EPYC/Intel Xeon; it does not establish Basic 1 hardware. Collect `/proc/cpuinfo` on every host. |
+| Throttling/fair-use/sustained load? | [Shared CPU page](https://utho.com/shared-cpu) calls cores burstable and the host multi-tenant; numeric sustained entitlement, throttling and fair-use limits are **UNVERIFIED**. Measure cgroup throttling, CPU steal, continuous single-thread throughput and scheduler tails; request written policy if shortlisted. |
+| Single-instance SLA and exclusions? | [June 2026 SLA](https://utho.com/sla): **99.5% monthly** for one compute instance, 99.99% only for multi-AZ regional deployments. Credits require incident email within 24 hours of discovery and rebate request within two days after month-end; downtime starts at the email timestamp. Excludes customer software/configuration, third-party/internet/DNS failures outside Utho, scheduled/customer-requested offline backups, misuse, force majeure and other listed causes. Remedy is future invoice credit, not cash. This does not promise feed completeness or order execution. |
 
-The OCI estimate is arithmetic on Oracle's India list and assumes 730 hours, a paid
-balanced boot volume, no free-tier credits and no tax. It is **not** an invoice quote.
-Akamai's $36/$24 are published plan rates, not validated Mumbai all-in totals.
-CPU model, effective clock and storage latency are measured by the harness because
-plan branding does not promise a specific physical host. Network specifications
-are capacity ceilings, not evidence of Dhan path latency.
+A 99.5% month permits roughly 3.65 hours of unavailability in a 730-hour month. For a collector, durable journal and gap alerts reduce data-loss risk but cannot reconstruct broker packets absent during outage. For an eventual sole executor, the weaker SLA and shared CPU make Utho unsuitable **until** measured contention, fallback and failover design are reviewed.
 
-### Other India-based providers checked
+## Final shortlist and cost evidence
 
-| Provider | Finding | Decision |
-| --- | --- | --- |
-| [Cyfuture Cloud](https://cyfuture.cloud/virtual-machine) | Published 2-vCore/4 GB/40 GB NVMe VM starts at $14.56/month; [Navi Mumbai facility](https://cyfuture.cloud/data-center-mumbai) and [dedicated VPS IP](https://cyfuture.cloud/linux-vps-hosting) are advertised. The plan page does not establish that this exact price is available in Mumbai, that the IP is reserved and portable, or that the outbound source address stays fixed. CPU model/allocation and hourly billing also need a quote. | Request a Mumbai VM + stable-egress-IP quote; benchmark if confirmed. Do not rank on the teaser price. |
-| [E2E Cloud](https://docs.e2enetworks.com/api/myaccount/network/reserve-ip/post-reserve-ips/) | Current reserved-IP API docs say **Mumbai has been discontinued for this API**; Delhi and Chennai are supported. The response shows ₹199 excluding GST only as an **example**, not a live quote. [CPU pricing changed in August 2026](https://docs.e2enetworks.com/docs/myaccount/billing/pricing-update-july-2026/). | No verified Mumbai reserved-IP candidate. Consider Delhi/Chennai only if actual Dhan path tests justify it; retrieve a current calculator quote. |
-| [Yotta Yntraa](https://www.yotta.com/wp-content/uploads/2023/12/Yntraa.pdf) | Provider brochure lists Mumbai cloud VMs and IP service, but a current 2-vCPU plan, reserved-egress-IP behavior, public price and small-VM SLA were not verifiable. | Quote-only watchlist. |
+All figures are public list floors, before tax; they are **not** full monthly operating costs. Cost requires VM + persistent IP + disk + backups + expected egress/overage + tax, in a common currency on the same quote date. Include any Dhan data subscription separately if applicable.
 
-Utho is the strongest additional India-based candidate: it documents Mumbai,
-a 2-vCPU/4-GB/80-GB plan, and a reserved-IP product. Confirm that Basic 1 is
-available in the selected Mumbai zone. Its ₹1,794 figure is a **compute-plan floor**, not a
-verified all-in monthly bill. A reserved **inbound** IP is insufficient for broker
-whitelisting unless the provider confirms it is also the outbound source IP.
+| Candidate | Documented base | Required missing bill items | Current standing |
+| --- | --- | --- | --- |
+| [Utho Mumbai Basic 1](https://utho.com/pricing) | ₹1,794/month including 80 GB/1 TB; shared CPU | Mumbai stock, reserved IPv4, backups, extra network, GST, possible NAT | Budget candidate; **all-in UNVERIFIED**. |
+| [OCI Mumbai E4 Flex 1 OCPU/8 GB](https://www.oracle.com/in/cloud/price-list/) | Prior India-list calculation: ₹3.535165/hour compute × 730 = ₹2,580.67; 50 GB balanced boot volume ≈₹203.03/month; subtotal ≈₹2,783.70 | Reserved IP SKU/charge, backup, egress beyond allowance, GST, current shape capacity | Value alternative; recalculate from current quote before scoring. [Public IP docs](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/managingpublicIPs.htm) allow direct instance internet access with reserved IPv4, public subnet and internet gateway. |
+| [Akamai/Linode Mumbai G6 Dedicated 4 GB](https://www.akamai.com/cloud/pricing/cpu) | $0.054/hour, $36/month globally; 2 dedicated CPU, 80 GB disk, 4 TB transfer | Mumbai-specific plan/price/capacity, [reserved IP](https://techdocs.akamai.com/cloud-computing/docs/reserved-ips) fee, backup, tax/FX/overage | Independent dedicated CPU comparison. |
+| [Dhan Cloud](https://dhan.co/support/platforms/dhanhq-api/what-are-the-charges-for-deploying-my-algo-on-dhan-cloud/) | Pay-per-use; estimator requires developer-portal login | Exact VM/region, deployment of this Python collector, persistent journal/export, egress IPv4, price | **Unranked** until deployment capability and a bill quote are established. |
+| [AWS Mumbai](https://aws.amazon.com/vpc/pricing/) | Optional reference; public IPv4 $0.005/hour before VM/disk/network/tax | Current Mumbai instance, EBS, backup and transfer quote | Benchmark only if budget permits. |
 
-## Measurements still required
+Vultr Mumbai can replace Akamai if G6 is unavailable. Its [reserved IP](https://docs.vultr.com/support/products/network/are-reserved-ips-free) is $0.004/hour; exact Mumbai VM price/capacity still needs a quote. No further provider discovery is needed.
 
-| Provider | Region | Plan | CPU type | Dedicated/shared | RAM | Static IP | Monthly all-in cost | TCP p50/p99 | TLS p50/p99 | API p50/p99 | Feed delay p50/p99 | CPU jitter p99 | fsync p99 | Reliability notes | Collector score | Executor score |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| OCI | Mumbai | E4 Flex 1 OCPU/8 GB | AMD EPYC E4 | multitenant VM | 8 GB | yes | ≥₹2,783.70 + unverified IP/tax | — | — | — | — | — | — | — | — | — |
-| Akamai | Mumbai | G6 Dedicated 4 GB | host TBD | dedicated vCPU | 4 GB | yes | ≥$36 + reserved IP/tax | — | — | — | — | — | — | — | — | — |
-| Vultr | Mumbai | `vhp-2c-4gb` | host TBD | dedicated vCPU | 4 GB | yes | ? + $3 IP | — | — | — | — | — | — | — | — | — |
-| Utho | Mumbai | Basic 1 | host TBD | shared vCPU | 4 GB | reserved; egress unverified | ≥₹1,794 + IP/tax | — | — | — | — | — | — | — | — | — |
-| Dhan Cloud | ? | ? | ? | ? | ? | ? | ? | — | — | — | — | — | — | — | — | — |
-| AWS | Mumbai | m8a.large | AMD EPYC Gen 5 | shared host | 8 GiB | yes | ? + $3.65 IP | — | — | — | — | — | — | — | — | — |
-| GCP | Mumbai | n2-standard-2 | Intel, host varies | shared host | 8 GiB | yes | ? | — | — | — | — | — | — | — | — | — |
+### Outbound/static IPv4 compatibility
 
-The Dhan 20-level wire feed normally lacks an exchange timestamp; the feed-delay
-cell must remain empty when it does. TCP failures are **not** packet-loss estimates.
-Its documented header sequence should not be assumed contiguous; packet-loss
-measurement remains unavailable until upstream semantics are confirmed. Wall-clock
-feed delay should be compared only when chrony/NTP reports synchronization and an
-offset within 5 ms. A direct feed jitter distribution is reported per instrument.
+| Provider | Persistent reservation | Direct VM outbound source | Survives replacement | NAT requirement |
+| --- | --- | --- | --- | --- |
+| Utho | [Reserved/reassignable](https://utho.com/reserved-ip) | **UNVERIFIED** | Documented reassignability; live proof pending | **UNVERIFIED** |
+| OCI | [Reserved/reassignable](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/managingpublicIPs.htm) | Supported by direct public-subnet + internet-gateway design; live proof pending | Documented reassignability | No NAT for public instance per docs |
+| Akamai | [Reserved in region](https://techdocs.akamai.com/cloud-computing/docs/reserved-ips) | **UNVERIFIED** | Documented within region | **UNVERIFIED** |
+| Vultr | [Reserved](https://docs.vultr.com/product-overviews/reserved-ips) | **UNVERIFIED** | Documented failover | **UNVERIFIED** |
+| Dhan Cloud | **UNVERIFIED** | **UNVERIFIED** | **UNVERIFIED** | **UNVERIFIED** |
+| AWS | [Elastic IP](https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/elastic-ip-addresses-eip.html) | Needs live proof for chosen routing | Reassociate within region | No NAT for public instance |
 
-## Benchmark procedure
+Dhan [requires static IP whitelisting for **order placement**](https://dhanhq.co/docs/v2/authentication/), with a seven-day change restriction; read-only market-data tests do not set or use this whitelist. The two reflector check verifies ordinary HTTPS egress, not necessarily Dhan-specific routing. Verify after VM restart, stop/start and IP reassignment before any execution design decision.
 
-On each **temporary** Ubuntu 24.04 candidate, run identical code and parameters on
-the same intended journal filesystem. The network probe independently times DNS,
-TCP, TLS, and a read-only GET of `/v2/` over a persistent HTTPS connection. HTTP
-status may be 401/404; it is recorded, not interpreted as request success. Optional
-public WSS URLs contain no credentials. The optional Dhan sample uses the project's
-read-only depth adapter, measures first WebSocket connection, disconnects, stalls,
-per-instrument interarrival and exchange-to-receive delay where supplied.
+## Identical temporary-instance experiment
 
-The host probe records kernel, CPU model/clock, CPU steal, cgroup throttling,
-scheduler jitter, SHA-256 single-thread throughput, context switches, memory,
-uptime, hypervisor visibility and clock status/offset where `chronyc` is installed.
-The storage probe writes 4 KiB sequential records and fsyncs each record, reporting
-p50/p90/p95/p99/p99.9/max in milliseconds. It deletes only its own temporary file.
-Results contain no token, URL query or response body. JSON and Zstd Parquet output
-are supported; compare consumes JSON. The benchmark does not place orders.
+Rent only after obtaining all-in quotes. Use the same Ubuntu 24.04 image class, Python package commit, journal filesystem, Dhan instruments, measurement counts and IST windows. Run on **at least three distinct NSE trading sessions**, each covering opening 09:15–09:45, midday 10:00–14:45 and closing 14:45–15:30 IST; check holiday calendar. Keep the VM available over the sessions only as billing requires. A full benchmark can take 10–15 minutes; begin early enough to finish inside the window. Run Utho, OCI and Akamai/Vultr concurrently in each window to control market activity. Record exact VM size, zone, CPU model, image, cost quote, reserved IP, route and benchmark commit. Compare only like Dhan entitlements and instruments.
 
-Run one 2–5 minute sample in each IST window on **at least two trading days**:
-08:30–09:15 pre-open, 09:15–09:45 open, 10:00–14:45 normal, 14:45–15:30 close.
-Use an external scheduler and exclude NSE holidays. Repeat more days for confidence.
-Sampling p99.9 with 30 network probes is weak; for final evidence use thousands of
-observations per window. Do not compare a subscribed live feed to an inactive one.
+Use 300+ network and authenticated API probes per window for p99 and failure counts. p99.9 from 300 samples is only an interpolated tail and **not statistically persuasive**; use thousands of observations across repeated windows if it influences a decision. Report p50/p95/p99/p99.9/max with sample count and failures. Read-only profile GET is spaced at least one second, well below Dhan's [non-trading API limit](https://dhanhq.co/docs/v2/). Store raw per-sample UTC time and monotonic elapsed values. Clock status is recorded, but [Dhan 20-level feed](https://dhanhq.co/docs/v2/full-market-depth/) does not establish an exchange timestamp or a contiguous sequence usable for one-way network latency/loss. Feed interarrival gaps and reconnects are diagnostics, affected by market activity; compare per instrument. TCP failures are not packet loss.
 
-### Fresh Ubuntu commands
+### Commands on each candidate
 
 ```bash
-sudo apt update
-sudo apt install -y git python3 python3-venv chrony
+sudo apt update && sudo apt install -y git python3 python3-venv chrony
 git clone https://github.com/DhaneshRamesh/alpha-grid.git
 cd alpha-grid
 python3 -m venv .venv
 .venv/bin/python -m pip install -e '.[dev,dhan]'
 mkdir -p benchmark-data/results
+# Set DHAN_CLIENT_ID, DHAN_ACCESS_TOKEN and QUANT_DEPTH_INSTRUMENTS
+# in a protected local environment, never in shell history, arguments or output.
 .venv/bin/python -m infra.benchmark.run_benchmark run \
-  --provider OCI --region Mumbai --plan E4-Flex-1OCPU-8GB \
-  --journal-dir benchmark-data --network-samples 300 \
-  --storage-samples 2000 --cpu-seconds 120 \
-  --output "benchmark-data/results/oci-$(date -u +%Y%m%dT%H%M%SZ).json"
-```
-
-Change only `--provider`, `--region`, `--plan` and the filename on the other
-servers. Supply `--monthly-cost` only from a complete current bill estimate in a
-common currency, and `--static-ip-supported` only once reserved **egress** IPv4
-is verified. To measure the read-only Dhan depth feed, set `DHAN_CLIENT_ID`,
-`DHAN_ACCESS_TOKEN` and `QUANT_DEPTH_INSTRUMENTS` in the process environment, then
-add `--feed-seconds 180 --stall-seconds 5`. Do not put secrets in command arguments
-or results. Parquet output uses a `.parquet` filename; compare JSON files with:
-
-```bash
+  --provider Utho --region Mumbai --plan Basic-1 \
+  --journal-dir benchmark-data --network-samples 300 --api-samples 300 \
+  --api-interval 1 --storage-samples 2000 --cpu-seconds 120 \
+  --feed-seconds 180 --stall-seconds 5 \
+  --expected-egress-ip RESERVED_IPV4_FROM_PROVIDER \
+  --output "benchmark-data/results/utho-$(date -u +%Y%m%dT%H%M%SZ).json"
 .venv/bin/python -m infra.benchmark.run_benchmark compare benchmark-data/results/*.json
 ```
 
-The two weighted scores have independent weights for network latency, network
-jitter, CPU consistency, fsync persistence, reliability, reserved IP and monthly
-cost. Collector weights are `18/16/10/20/18/8/10`; executor weights are
-`28/20/18/7/17/7/3`. Bandwidth and surplus cores/RAM get no score. Scoring
-withholds a candidate until two days, all four windows, 30+ network and feed
-observations per window, a measured exchange timestamp, verified clock, reserved
-IPv4 and all-in cost exist. Scores use the **worst window's p99**, not averages;
-review raw tails and failure counts alongside scores. These thresholds/weights are
-research policy, not a claim that any provider is fit for live orders.
+Change only provider, region, plan, reserved IP and output prefix on the other VMs. Add `--monthly-cost`, `--currency INR` and `--static-ip-supported` **only** after a complete cost quote and outbound IP lifecycle verification; otherwise comparison remains ineligible. Keep credentials out of command arguments. The benchmark performs GET `/v2/profile`, discards its account response, uses the existing read-only Dhan depth adapter, and has no order path. `benchmark-data/` is ignored by Git. Encrypt and restrict raw outputs because feed observations and host IPs may be sensitive.
 
-**Best value, best latency, cheapest acceptable, best data collector and best
-future live executor: undetermined.** No candidate has real path measurements yet.
+### Raw results and gates
+
+Each JSON record has `schema_version=2`, `benchmark_version`, UTC `started_at`/`finished_at`, NSE `market_date`/`market_window`, and candidate provider/region/plan/currency/all-in monthly cost. `network.observations` records DNS/TCP/TLS/persistent HTTPS phase, UTC sample time, monotonic elapsed milliseconds, HTTP status/error; `authenticated_api.observations` records profile latency/status without body or token. `egress_ipv4` records two-reflector agreement and reserved-IP match. `feed.observations` and `connection_events` show per-instrument arrival and connection transitions; `system.observations` has scheduler jitter and SHA-256 rate; `storage.observations` has append/fsync times plus throughput and interrupted-record recovery. Aggregates include p50/p90/p95/p99/p99.9/max, counts and failures. Zstd Parquet output is also available for individual runs; `compare` reads JSON.
+
+Ranking is withheld until three complete trading sessions, 30+ feed and network/API observations per window, verified reserved outbound IPv4, successful journal recovery, unchanged candidate metadata and a full all-in monthly cost in one currency. Cost scoring is relative to the compared candidates; equal costs score neutrally. Review **worst window** tails, failures, CPU steal/throttle, reconnects and instrument gaps before treating any numeric rank as meaningful. Distinct market update rates make feed interarrival an integrity signal, not pure network latency. Any non-200 authenticated response counts as failure.
+
+### Short experiment cost
+
+Three providers × three sessions × three windows, with ~10–15 minutes per run, means ~4.5–6.75 **active benchmark hours per VM**. If VMs and reserved IPs remain allocated across three consecutive days, budget roughly **72 billable hours per provider**, plus storage/IP/backup/egress and tax. At published rates this is only a lower bound: OCI compute ≈₹254.53/72 h plus volume; Akamai G6 ≈$3.89/72 h plus reserved IP; Utho hourly/minimum charge **UNVERIFIED**. A Utho NAT Gateway held 72 h would add ₹269.28 plus transfer before tax. Actual experiment cost remains **UNVERIFIED** until quotes and deletion/stop billing rules are captured. Set spending caps, remove temporary resources promptly, and keep the journal output before deletion.
+
+## Decision today
+
+- **Best budget market-data collector: UNDETERMINED.** Utho has the lowest documented base price among the primary shortlist, but Mumbai capacity, all-in bill, reserved outbound IP and data-gap tails remain unverified. Its shared CPU and 99.5% single-instance SLA must be judged against measured stalls and recovery.
+- **Best eventual live-trading executor: UNDETERMINED.** Compare dedicated CPU or better-isolated plans and total cost only after equivalent Dhan-path measurements. A more expensive VM wins only if sustained p99/p99.9 jitter, disconnects and failure reduction justify the difference; no order latency or production suitability has been measured.
+
+**Blockers:** Utho written price/IP/CPU policy and live Mumbai stock; complete cross-provider quotes; valid Dhan read-only entitlement; verified reserved-IP lifecycle and egress; three NSE sessions of raw measurements. No production deployment or live orders are authorized by this benchmark.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import http.client
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from infra.benchmark.run_benchmark import (
     score_records,
 )
 from infra.benchmark.storage_bench import run_storage
+from infra.benchmark.system_bench import _sustained_single_thread
 
 
 def test_distribution_keeps_tail_and_empty() -> None:
@@ -33,7 +35,15 @@ def test_storage_uses_temporary_file_and_reports_fsync(tmp_path: Path) -> None:
     result = run_storage(tmp_path, samples=8, record_bytes=128)
     assert result["write_ms"]["count"] == 8
     assert result["fsync_ms"]["count"] == 8
+    assert result["append_bytes_per_second"] > 0
+    assert result["interrupted_write_recovery"]["passed"] is True
     assert list(tmp_path.iterdir()) == []
+
+
+def test_sustained_cpu_probe_reports_continuous_work() -> None:
+    result = _sustained_single_thread(0.005, b"test")
+    assert result["sha256_per_second"]["count"] >= 1
+    assert result["duration_seconds"] >= 0.005
 
 
 def test_market_windows_are_nse_local() -> None:
@@ -71,6 +81,69 @@ def test_network_probe_reuses_https_connection(monkeypatch: pytest.MonkeyPatch) 
     assert result["packet_loss"] is None
 
 
+def test_authenticated_profile_discards_body_and_never_serializes_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    requests: list[tuple[str, str, dict[str, str]]] = []
+
+    class FakeResponse:
+        status = 200
+
+        def read(self) -> bytes:
+            return b'{"private":"account"}'
+
+    class FakeConnection:
+        def __init__(self, host: str, port: int, timeout: float) -> None:
+            pass
+
+        def request(self, method: str, path: str, headers: dict[str, str]) -> None:
+            requests.append((method, path, headers))
+
+        def getresponse(self) -> FakeResponse:
+            return FakeResponse()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", FakeConnection)
+    monkeypatch.setattr(network_bench.time, "sleep", lambda seconds: None)
+    result = network_bench.run_authenticated_api("top-secret", samples=2)
+    assert result["latency_ms"]["count"] == 2
+    assert all(
+        method == "GET" and path == "/v2/profile" for method, path, _ in requests
+    )
+    assert "top-secret" not in json.dumps(result)
+    assert "private" not in json.dumps(result)
+    with pytest.raises(ValueError, match="at least 1s"):
+        network_bench.run_authenticated_api("top-secret", interval=0.1)
+
+
+def test_egress_ip_must_match_reserved_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        status = 200
+
+        def read(self, size: int) -> bytes:
+            return b"203.0.113.10\n"
+
+    class FakeConnection:
+        def __init__(self, host: str, port: int, timeout: float) -> None:
+            pass
+
+        def request(self, method: str, path: str) -> None:
+            pass
+
+        def getresponse(self) -> FakeResponse:
+            return FakeResponse()
+
+        def close(self) -> None:
+            pass
+
+    monkeypatch.setattr(http.client, "HTTPSConnection", FakeConnection)
+    result = network_bench.run_egress_ipv4("203.0.113.10")
+    assert result["matches_reserved_ip"] is True
+    assert network_bench.run_egress_ipv4("203.0.113.11")["matches_reserved_ip"] is False
+
+
 def _record(day: str, window: str) -> dict[str, object]:
     return {
         "market_date": day,
@@ -89,11 +162,13 @@ def _record(day: str, window: str) -> dict[str, object]:
             "latency_ms": {
                 "tcp": {"p99": 15.0},
                 "tls": {"p99": 20.0},
-                "https": {"p99": 40.0},
+                "https": {"p50": 20.0, "p99": 40.0},
             },
         },
+        "authenticated_api": {"attempts": 30, "latency_ms": {"p99": 40.0}},
+        "egress_ipv4": {"matches_reserved_ip": True},
         "feed": {
-            "exchange_to_receive_ms": {"p99": 20.0, "p99_9": 30.0},
+            "interarrival_ms": {"p99": 20.0, "p99_9": 30.0},
             "websocket_first_connect_ms": 100.0,
             "events": 300,
             "disconnects": 0,
@@ -101,19 +176,25 @@ def _record(day: str, window: str) -> dict[str, object]:
         },
         "system": {
             "scheduler_jitter_ms": {"p99": 1.0},
+            "cpu_steal_fraction": 0.0,
+            "cgroup_throttle_events": 0,
+            "sustained_single_thread": {"sha256_per_second": {"p50": 1000.0}},
             "clock": {"ntp_synchronized": True, "ntp_offset_seconds": 0.001},
         },
-        "storage": {"fsync_ms": {"p99": 2.0}},
+        "storage": {
+            "fsync_ms": {"p99": 2.0},
+            "interrupted_write_recovery": {"passed": True},
+        },
     }
 
 
-def test_ranking_requires_two_days_all_windows_and_measured_feed() -> None:
+def test_ranking_requires_three_sessions_and_measured_feed() -> None:
     rows = [_record("2026-10-12", "open")]
     assert score_records(rows)["eligible"] is False
     rows = [
         _record(day, window)
-        for day in ("2026-10-12", "2026-10-13")
-        for window in ("preopen", "open", "midday", "close")
+        for day in ("2026-10-12", "2026-10-13", "2026-10-14")
+        for window in ("open", "midday", "close")
     ]
     scored = score_records(rows)
     assert scored["eligible"] is True

@@ -9,6 +9,7 @@ import re
 import resource
 import subprocess
 import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -81,10 +82,47 @@ def _clock_status() -> dict[str, Any]:
     return status
 
 
+def _sustained_single_thread(seconds: float, payload: bytes) -> dict[str, Any]:
+    """Continuously hash on one Python thread; retain one-second rates."""
+    if seconds <= 0:
+        raise ValueError("sustained CPU duration must be positive")
+    observations: list[dict[str, Any]] = []
+    rates: list[float] = []
+    start = time.perf_counter()
+    end = start + seconds
+    bucket_start = start
+    count = 0
+    while (now := time.perf_counter()) < end:
+        hashlib.sha256(payload).digest()
+        count += 1
+        if now - bucket_start >= 1.0:
+            rate = count / (now - bucket_start)
+            rates.append(rate)
+            observations.append(
+                {"at": datetime.now(UTC).isoformat(), "sha256_per_second": rate}
+            )
+            bucket_start = now
+            count = 0
+    if count:
+        rate = count / max(time.perf_counter() - bucket_start, 1e-9)
+        rates.append(rate)
+        observations.append(
+            {"at": datetime.now(UTC).isoformat(), "sha256_per_second": rate}
+        )
+    return {
+        "duration_seconds": time.perf_counter() - start,
+        "sha256_per_second": distribution(rates),
+        "observations": observations,
+    }
+
+
 def run_system(
-    *, duration_seconds: float = 10.0, scheduler_period_ms: float = 10.0
+    *,
+    duration_seconds: float = 10.0,
+    scheduler_period_ms: float = 10.0,
+    sustained_seconds: float = 30.0,
 ) -> dict[str, Any]:
-    if duration_seconds <= 0 or scheduler_period_ms <= 0:
+    if duration_seconds <= 0 or scheduler_period_ms <= 0 or sustained_seconds <= 0:
         raise ValueError("system probe durations must be positive")
     cpu_info = _fields(_read("/proc/cpuinfo"))
     memory = _fields(_read("/proc/meminfo"))
@@ -96,24 +134,35 @@ def run_system(
     next_tick = start
     jitter_ms: list[float] = []
     throughput: list[float] = []
+    observations: list[dict[str, Any]] = []
     clock_mhz: list[float] = []
     payload = b"quant-benchmark" * 256
     while time.perf_counter() < deadline:
         next_tick += scheduler_period_ms / 1000
         time.sleep(max(0.0, next_tick - time.perf_counter()))
         tick = time.perf_counter()
-        jitter_ms.append(max(0.0, tick - next_tick) * 1000)
+        jitter = max(0.0, tick - next_tick) * 1000
+        jitter_ms.append(jitter)
         work_start = time.perf_counter()
         for _ in range(1000):
             hashlib.sha256(payload).digest()
         elapsed = time.perf_counter() - work_start
-        throughput.append(1000 / elapsed)
+        rate = 1000 / elapsed
+        throughput.append(rate)
+        observations.append(
+            {
+                "at": datetime.now(UTC).isoformat(),
+                "scheduler_jitter_ms": jitter,
+                "sha256_per_second": rate,
+            }
+        )
         if len(throughput) % 100 == 0:
             observed = _fields(_read("/proc/cpuinfo")).get("cpu MHz")
             if observed is not None:
                 clock_mhz.append(float(observed))
         if next_tick < time.perf_counter():
             next_tick = time.perf_counter()
+    sustained = _sustained_single_thread(sustained_seconds, payload)
     after_usage = resource.getrusage(resource.RUSAGE_SELF)
     after_cpu = _cpu_times()
     after_throttle = _cgroup_throttle()
@@ -146,6 +195,8 @@ def run_system(
         "involuntary_context_switches": after_usage.ru_nivcsw - before_usage.ru_nivcsw,
         "scheduler_jitter_ms": distribution(jitter_ms),
         "sha256_per_second": distribution(throughput),
+        "sustained_single_thread": sustained,
+        "observations": observations,
         "clock": _clock_status(),
         "duration_seconds": time.perf_counter() - start,
     }
