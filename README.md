@@ -1,8 +1,8 @@
 # Alpha Grid
 
 Python 3.12+ foundation for a cloud-native NSE research and trading platform. It
-now includes a Dhan 20-level depth source that emits broker-independent
-`DepthEvent` records. It has no strategy or order API.
+now includes a Dhan 20-level depth source and a durable local event journal.
+It has no strategy or order API.
 
 ## Set up
 
@@ -30,7 +30,9 @@ set -a; . ./.env; set +a
 python -m quant.apps.collect_depth
 ```
 
-The collector emits one normalized JSON `DepthEvent` per line on stdout. Its
+The collector appends each normalized event to the local journal before emitting
+it as JSON on stdout. If journaling fails, collection stops; stdout is never
+used as a fallback. Its
 connection, reconnect, packet, event, malformed-packet, and disconnect counters
 are available through `MarketDepthFeed.counters`; operational JSON logs go to
 stderr. It reconnects with a capped exponential delay. Explicit Dhan server
@@ -57,6 +59,26 @@ levels long.
 These packet assumptions were checked against DhanHQ-py 2.3.0 and its published
 protocol; they have not been checked against a live account session.
 
+## Local event journal
+
+`quant.storage.journal.EventJournal` writes checksummed, length-prefixed JSON
+records under `data/journal/session=<session ID>/date=<Asia/Kolkata date>/events.qj`.
+The session defaults to `NSE-YYYY-MM-DD` in India time, so a restart resumes the
+same session. A session lock prevents two writers from interleaving records.
+Records contain the collector version, session ID, security ID, optional symbol,
+receive timestamp, event type, and the complete normalized event. Decimal prices
+remain strings and timestamp text retains extra fractional digits when supplied
+by a nanosecond-capable `datetime` subclass. `EventJournal.records()` reads the
+JSON envelopes in date order.
+
+On startup, the journal validates existing records and truncates only an
+incomplete or bad-checksum final record. Recovery reports discarded tail bytes
+and logs a warning; corruption before the final record stops startup. The
+default `QUANT_JOURNAL_FSYNC=always` calls `fsync` after each record. `on_close`
+and `never` trade crash durability for throughput. The journal exposes appended
+record, byte, and fsync counts. Keep the journal volume persistent and monitor
+free disk space; local `fsync` does not protect against loss of the entire host.
+
 ## Layout and contracts
 
 - `quant.domain`: immutable instrument, depth, trade, and feed-health records.
@@ -65,7 +87,7 @@ protocol; they have not been checked against a live account session.
 - `quant.feeds`: asynchronous normalized market-event source protocol and Dhan
   depth adapter. The adapter uses the official DhanHQ decoder and a direct
   WebSocket receive path to timestamp packets before decoding.
-- `quant.storage`: asynchronous normalized market-event sink protocol.
+- `quant.storage`: asynchronous sink contract and single-writer local journal.
 - `quant.health`: feed freshness assessment.
 - `quant.apps`: operational entry points only.
 

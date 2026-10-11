@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alpha-grid"
-version = "0.2.0"
-description = "NSE quantitative market-data foundation with Dhan 20-level depth"
+version = "0.3.0"
+description = "NSE market-data foundation with Dhan 20-level depth and local journal"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = []

@@ -1,5 +1,6 @@
-"""Storage contracts for normalized events."""
+"""Storage contracts and local journal for normalized events."""
 
 from quant.storage.base import EventSink
+from quant.storage.journal import EventJournal, FsyncPolicy, JournalSettings
 
-__all__ = ["EventSink"]
+__all__ = ["EventJournal", "EventSink", "FsyncPolicy", "JournalSettings"]

@@ -17,6 +17,7 @@ from quant.feeds.dhan_depth import (
     DhanDepthSettings,
 )
 from quant.logging import configure_logging
+from quant.storage.journal import EventJournal, JournalSettings
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,15 +31,35 @@ def _json_value(value: object) -> str:
 
 
 async def collect() -> None:
-    feed = DhanDepthFeed(DhanDepthSettings.from_env(os.environ))
-    try:
-        async for event in feed:
-            print(json.dumps(asdict(event), default=_json_value), flush=True)
-    finally:
-        await feed.aclose()
-        _LOGGER.info(
-            "depth_collector_stopped", extra={"context": asdict(feed.counters)}
-        )
+    settings = DhanDepthSettings.from_env(os.environ)
+    symbols = {
+        (item.exchange_segment, item.instrument_id): item.symbol
+        for item in settings.instruments
+    }
+    with EventJournal(JournalSettings.from_env(os.environ), symbols) as journal:
+        if journal.recovery.truncated_bytes:
+            _LOGGER.warning(
+                "journal_tail_recovered",
+                extra={"context": asdict(journal.recovery)},
+            )
+        feed = DhanDepthFeed(settings)
+        try:
+            async for event in feed:
+                journal.append(event)
+                print(json.dumps(asdict(event), default=_json_value), flush=True)
+        finally:
+            await feed.aclose()
+    _LOGGER.info(
+        "journal_closed",
+        extra={
+            "context": {
+                "records": journal.appended_records,
+                "bytes": journal.appended_bytes,
+                "fsyncs": journal.fsync_count,
+            }
+        },
+    )
+    _LOGGER.info("depth_collector_stopped", extra={"context": asdict(feed.counters)})
 
 
 def main() -> None:
@@ -58,6 +79,9 @@ def main() -> None:
             "depth_configuration_invalid", extra={"context": {"reason": str(exc)}}
         )
         raise SystemExit(2) from None
+    except OSError as exc:
+        _LOGGER.error("depth_journal_failed", extra={"context": {"reason": str(exc)}})
+        raise SystemExit(3) from None
 
 
 if __name__ == "__main__":
