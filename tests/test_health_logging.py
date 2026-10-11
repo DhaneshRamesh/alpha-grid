@@ -25,6 +25,10 @@ def test_feed_health_uses_receive_time() -> None:
         assess_feed_health("nse-depth", now, now - timedelta(seconds=6), 5).status
         is FeedStatus.STALE
     )
+    assert (
+        assess_feed_health("nse-depth", now, now - timedelta(seconds=3), 5, 2).status
+        is FeedStatus.DEGRADED
+    )
     with pytest.raises(ValueError, match="after observed_at"):
         assess_feed_health("nse-depth", now, now + timedelta(seconds=1), 5)
 

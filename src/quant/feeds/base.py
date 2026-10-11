@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from quant.domain import DepthEvent, MarketEvent
@@ -33,3 +34,17 @@ class MarketDepthFeed(MarketDataFeed, Protocol):
     def counters(self) -> FeedCounters: ...
 
     async def aclose(self) -> None: ...
+
+
+class FeedObserver(Protocol):
+    """Optional broker-independent packet and connection quality callbacks."""
+
+    def connection_changed(
+        self, connected: bool, at: datetime, reason: str = "transport"
+    ) -> None: ...
+
+    def packet_received(self, key: tuple[str, str], at: datetime) -> None: ...
+
+    def malformed(
+        self, key: tuple[str, str] | None, reason: str, at: datetime
+    ) -> None: ...

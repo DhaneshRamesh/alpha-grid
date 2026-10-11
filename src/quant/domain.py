@@ -102,6 +102,7 @@ class TradeEvent:
 
 class FeedStatus(StrEnum):
     HEALTHY = "healthy"
+    DEGRADED = "degraded"
     STALE = "stale"
     DISCONNECTED = "disconnected"
 

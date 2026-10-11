@@ -192,7 +192,7 @@ def test_collector_journals_before_downstream_output(
     class FakeFeed:
         counters = FeedCounters(False, 0, 0, 0, 0, 0, 0)
 
-        def __init__(self, _settings: object) -> None:
+        def __init__(self, _settings: object, *, observer: object) -> None:
             pass
 
         def __aiter__(self) -> FakeFeed:
@@ -213,6 +213,7 @@ def test_collector_journals_before_downstream_output(
     monkeypatch.setenv("QUANT_DEPTH_INSTRUMENTS", "NSE_EQ:1333:HDFCBANK")
     monkeypatch.setenv("QUANT_JOURNAL_DIR", str(tmp_path))
     monkeypatch.setenv("QUANT_JOURNAL_SESSION_ID", "NSE-2026-10-11")
+    monkeypatch.setenv("QUANT_HEALTH_STATUS_PATH", str(tmp_path / "health.json"))
     asyncio.run(collect_depth.collect())
     assert len(capsys.readouterr().out.splitlines()) == 1
     with EventJournal(_settings(tmp_path)) as journal:

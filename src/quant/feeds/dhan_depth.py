@@ -14,7 +14,7 @@ from typing import Protocol, cast
 from urllib.parse import urlencode
 
 from quant.domain import DepthEvent, DepthLevel, Instrument
-from quant.feeds.base import FeedCounters
+from quant.feeds.base import FeedCounters, FeedObserver
 
 _LOGGER = logging.getLogger(__name__)
 _SOCKET_LOGGER = logging.getLogger(f"{__name__}.websocket")
@@ -233,11 +233,13 @@ class DhanDepthFeed:
         transport_factory: Callable[[], _DepthTransport] | None = None,
         clock: Callable[[], datetime] | None = None,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+        observer: FeedObserver | None = None,
     ) -> None:
         self._settings = settings
         self._factory = transport_factory or (lambda: _SdkDepthTransport(settings))
         self._clock = clock or (lambda: datetime.now(UTC))
         self._sleep = sleep
+        self._observer = observer
         self._subscribed = {
             (item.exchange_segment, item.instrument_id) for item in settings.instruments
         }
@@ -286,6 +288,10 @@ class DhanDepthFeed:
                     await transport.connect()
                     self._connected = True
                     self._connections += 1
+                    if self._observer is not None:
+                        self._observer.connection_changed(
+                            True, self._clock(), "connected"
+                        )
                     _LOGGER.info(
                         "depth_connected",
                         extra={"context": {"connections": self._connections}},
@@ -318,6 +324,10 @@ class DhanDepthFeed:
                             extra={"context": {"error_type": type(exc).__name__}},
                         )
                 finally:
+                    if self._connected and self._observer is not None:
+                        self._observer.connection_changed(
+                            False, self._clock(), "transport_closed"
+                        )
                     self._connected = False
                     self._pending.clear()
                     try:
@@ -344,18 +354,23 @@ class DhanDepthFeed:
         self, packet: bytes | str, received_at: datetime, transport: _DepthTransport
     ) -> Iterator[DepthEvent]:
         if not isinstance(packet, bytes):
-            self._malformed("non_binary_packet")
+            self._malformed("non_binary_packet", received_at)
             return
         offset = 0
         while offset < len(packet):
             if len(packet) - offset < _HEADER.size:
-                self._malformed("short_header")
+                self._malformed("short_header", received_at)
                 break
             length, code, segment_code, security_id, sequence = _HEADER.unpack_from(
                 packet, offset
             )
+            segment = _SEGMENTS.get(segment_code)
+            key = (segment, str(security_id)) if segment is not None else None
+            tracked_key = key if key in self._subscribed else None
+            if code != 50 and tracked_key is not None and self._observer is not None:
+                self._observer.packet_received(tracked_key, received_at)
             if length < _HEADER.size or length > len(packet) - offset:
-                self._malformed("invalid_length")
+                self._malformed("invalid_length", received_at, tracked_key)
                 break
             frame = packet[offset : offset + length]
             offset += length
@@ -365,12 +380,12 @@ class DhanDepthFeed:
             if code not in (41, 51):
                 continue
             if length != _DEPTH_PACKET_LENGTH or segment_code not in _SEGMENTS:
-                self._malformed("invalid_depth_frame")
+                self._malformed("invalid_depth_frame", received_at, tracked_key)
                 continue
-            segment = _SEGMENTS[segment_code]
+            assert segment is not None
             key = (segment, str(security_id))
             if key not in self._subscribed:
-                self._malformed("unknown_instrument")
+                self._malformed("unknown_instrument", received_at)
                 continue
             try:
                 decoded = transport.decode(frame)
@@ -384,10 +399,10 @@ class DhanDepthFeed:
                 OverflowError,
                 struct.error,
             ) as exc:
-                self._malformed(type(exc).__name__)
+                self._malformed(type(exc).__name__, received_at, key)
                 continue
             except Exception as exc:
-                self._malformed(type(exc).__name__)
+                self._malformed(type(exc).__name__, received_at, key)
                 continue
             event = self._pair(key, "Bid" if code == 41 else "Ask", side)
             if event is not None:
@@ -476,10 +491,26 @@ class DhanDepthFeed:
             ),
         )
 
-    def _malformed(self, reason: str) -> None:
+    def _malformed(
+        self,
+        reason: str,
+        received_at: datetime,
+        key: tuple[str, str] | None = None,
+    ) -> None:
         self._malformed_messages += 1
         self._pending.clear()
-        _LOGGER.warning("depth_packet_dropped", extra={"context": {"reason": reason}})
+        if self._observer is not None:
+            self._observer.malformed(key, reason, received_at)
+        _LOGGER.warning(
+            "depth_packet_dropped",
+            extra={
+                "context": {
+                    "reason": reason,
+                    "exchange_segment": key[0] if key is not None else None,
+                    "instrument_id": key[1] if key is not None else None,
+                }
+            },
+        )
 
 
 def _exchange_timestamp(raw: object) -> datetime | None:

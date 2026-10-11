@@ -480,3 +480,31 @@ def test_official_transport_subscribes_fifty_in_one_request(
     subscription = json.loads(sent[0])
     assert subscription["InstrumentCount"] == 50
     assert len(subscription["InstrumentList"]) == 50
+
+
+def test_feed_observer_receives_packet_and_malformed_instrument_metrics() -> None:
+    from quant.health.monitor import FeedHealthMonitor, HealthThresholds
+
+    received_at = datetime(2026, 10, 11, 9, 15, tzinfo=UTC)
+    settings = _settings()
+    monitor = FeedHealthMonitor(
+        settings.instruments,
+        HealthThresholds(),
+        session_id="test-session",
+        clock=lambda: received_at,
+    )
+    transport = FakeTransport([_packet(41, levels=19), _packet(41), _packet(51)])
+    feed = DhanDepthFeed(
+        settings,
+        transport_factory=lambda: transport,
+        clock=lambda: received_at,
+        observer=monitor,
+    )
+    event = asyncio.run(_first(feed))
+    monitor.observe_event(event, received_at)
+    instrument = monitor.snapshot(received_at).instruments[0]
+    assert instrument.packets_received == 3
+    assert instrument.events_received == 1
+    assert instrument.malformed_messages == 1
+    assert instrument.last_packet_receive_at == received_at
+    assert instrument.status.value == "disconnected"

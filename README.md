@@ -1,7 +1,7 @@
 # Alpha Grid
 
 Python 3.12+ foundation for a cloud-native NSE research and trading platform. It
-now includes a Dhan 20-level depth source and a durable local event journal.
+now includes a Dhan 20-level depth source, durable storage, and feed health.
 It has no strategy or order API.
 
 ## Set up
@@ -107,6 +107,38 @@ conversion events/sec and compressed bytes/event on synthetic 20-level books.
 The benchmark disables journal fsync only for input generation; production
 collection retains its configured journal policy.
 
+## Feed data quality
+
+The collector monitors each configured instrument while it runs. Read the latest
+status with `python -m quant.apps.feed_health` or select one with
+`--instrument RELIANCE` (a symbol or security ID). The status file is written
+atomically at `QUANT_HEALTH_STATUS_PATH`. The CLI marks an old status file as
+disconnected, so a dead collector cannot leave a misleading healthy result.
+Exit codes are 0 healthy, 1 degraded, and 2 stale/disconnected.
+
+Per-instrument status includes last packet and event receive times, exchange
+timestamp age/lag when available, packet and event counts, rolling events/sec,
+suspected sequence gaps, malformed packets, reconnects, duplicates, missing
+instruments, stale duration, and timestamp regressions. A duplicate requires a
+repeated sequence number or exchange timestamp and matching payload; without
+either identifier, identical book contents may be legitimate and are not called
+duplicates. Freshness uses the last **unique** event, so repeated copies do not
+hide a frozen book. Thresholds are set through the `QUANT_HEALTH_*` variables in
+`.env.example`.
+
+Structured logs include `session_id`, symbol, security ID, time, and anomaly
+details. `feed_gap_opened` and `feed_gap_closed` include the interval endpoints
+and a shared gap ID;
+`feed_sequence_gap` includes the previous/current sequence and missing count.
+This supports queries such as whether RELIANCE had a gap from 11:02 to 11:05.
+Dhan documents its header sequence as ignorable, so sequence discontinuities
+are counted and logged but do not degrade state by default. Set
+`QUANT_HEALTH_SEQUENCE_GAPS_DEGRADE=true` only after verifying continuity on
+your subscribed feed. The documented Dhan depth packet lacks an exchange
+timestamp, so exchange lag remains unavailable unless the decoder supplies one.
+Run the collector only during the intended market session; this monitor does not
+currently apply an NSE holiday or auction calendar.
+
 ## Layout and contracts
 
 - `quant.domain`: immutable instrument, depth, trade, and feed-health records.
@@ -117,7 +149,7 @@ collection retains its configured journal policy.
   WebSocket receive path to timestamp packets before decoding.
 - `quant.storage`: asynchronous sink contract, raw journal, and replayable
   research Parquet exporter.
-- `quant.health`: feed freshness assessment.
+- `quant.health`: feed freshness and per-instrument data-quality monitoring.
 - `quant.apps`: operational entry points only.
 
 `DepthEvent` retains venue, exchange segment, instrument ID, optional exchange
