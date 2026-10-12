@@ -12,3 +12,4 @@ work/
 outputs/
 data/
 benchmark-data/
+rust/target/

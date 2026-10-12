@@ -1,0 +1,16 @@
+[package]
+name = "quant-journal"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+quant-core.workspace = true
+serde.workspace = true
+postcard.workspace = true
+crc32fast.workspace = true
+
+[dev-dependencies]
+quant-market-data.workspace = true
+tempfile = "3.23"
+

@@ -1,0 +1,397 @@
+//! Append-only framed journal. Only `sync` (or `EveryEvent`) acknowledges durability.
+use quant_core::MarketEvent;
+use serde::{Deserialize, Serialize};
+use std::fs::{File, OpenOptions};
+use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::path::Path;
+use std::time::Instant;
+
+const MAGIC: [u8; 4] = *b"QJ01";
+const HEADER: usize = 12;
+const MAX_RECORD: usize = 1024 * 1024;
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct JournalRecord {
+    pub session_id: String,
+    pub event: MarketEvent,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum DurabilityPolicy {
+    EveryEvent,
+    Group {
+        max_events: usize,
+        max_bytes: usize,
+        max_delay_ms: u64,
+    },
+}
+
+impl DurabilityPolicy {
+    pub fn validate(self) -> io::Result<()> {
+        if let Self::Group {
+            max_events,
+            max_bytes,
+            max_delay_ms,
+        } = self
+            && (max_events == 0 || max_bytes == 0 || max_delay_ms == 0)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "zero group limit",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Commit {
+    pub events: usize,
+    pub bytes: usize,
+    pub write_ns: u64,
+    pub fsync_ns: u64,
+}
+
+pub struct JournalWriter {
+    file: File,
+    policy: DurabilityPolicy,
+    buffer: Vec<u8>,
+    pending: usize,
+    poisoned: bool,
+}
+
+impl JournalWriter {
+    pub fn open(path: &Path, policy: DurabilityPolicy) -> io::Result<Self> {
+        policy.validate()?;
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(path)?;
+        recover(&mut file)?;
+        file.seek(SeekFrom::End(0))?;
+        Ok(Self {
+            file,
+            policy,
+            buffer: Vec::new(),
+            pending: 0,
+            poisoned: false,
+        })
+    }
+
+    pub fn append(&mut self, record: &JournalRecord) -> io::Result<Option<Commit>> {
+        if self.poisoned {
+            return Err(io::Error::other("journal poisoned after storage error"));
+        }
+        let payload = postcard::to_stdvec(record).map_err(io::Error::other)?;
+        if payload.len() > MAX_RECORD {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "record too large",
+            ));
+        }
+        self.buffer.extend_from_slice(&MAGIC);
+        self.buffer
+            .extend_from_slice(&(payload.len() as u32).to_le_bytes());
+        self.buffer
+            .extend_from_slice(&crc32fast::hash(&payload).to_le_bytes());
+        self.buffer.extend_from_slice(&payload);
+        self.pending += 1;
+        let commit = match self.policy {
+            DurabilityPolicy::EveryEvent => true,
+            DurabilityPolicy::Group {
+                max_events,
+                max_bytes,
+                ..
+            } => self.pending >= max_events || self.buffer.len() >= max_bytes,
+        };
+        if commit {
+            self.sync().map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn sync(&mut self) -> io::Result<Commit> {
+        if self.poisoned {
+            return Err(io::Error::other("journal poisoned after storage error"));
+        }
+        if self.pending == 0 {
+            return Ok(Commit::default());
+        }
+        let started = Instant::now();
+        if let Err(error) = self.file.write_all(&self.buffer) {
+            self.poisoned = true;
+            return Err(error);
+        }
+        let write_ns = started.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
+        let sync_started = Instant::now();
+        if let Err(error) = self.file.sync_data() {
+            self.poisoned = true;
+            return Err(error);
+        }
+        let commit = Commit {
+            events: self.pending,
+            bytes: self.buffer.len(),
+            write_ns,
+            fsync_ns: sync_started
+                .elapsed()
+                .as_nanos()
+                .try_into()
+                .unwrap_or(u64::MAX),
+        };
+        self.buffer.clear();
+        self.pending = 0;
+        Ok(commit)
+    }
+
+    pub fn pending(&self) -> usize {
+        self.pending
+    }
+
+    pub fn close(mut self) -> io::Result<Commit> {
+        self.sync()
+    }
+    pub fn max_delay_ms(&self) -> Option<u64> {
+        match self.policy {
+            DurabilityPolicy::EveryEvent => None,
+            DurabilityPolicy::Group { max_delay_ms, .. } => Some(max_delay_ms),
+        }
+    }
+}
+
+impl Drop for JournalWriter {
+    fn drop(&mut self) {
+        // Do not silently claim unsynced bytes as durable. Callers must sync explicitly.
+        if self.pending > 0 && !std::thread::panicking() {
+            eprintln!("journal closed with {} uncommitted events", self.pending);
+        }
+    }
+}
+
+pub struct JournalReader {
+    file: File,
+}
+
+impl JournalReader {
+    pub fn open(path: &Path) -> io::Result<Self> {
+        let mut file = OpenOptions::new().read(true).write(true).open(path)?;
+        recover(&mut file)?;
+        file.seek(SeekFrom::Start(0))?;
+        Ok(Self { file })
+    }
+
+    pub fn next_record(&mut self) -> io::Result<Option<JournalRecord>> {
+        let Some(payload) = read_frame(&mut self.file)? else {
+            return Ok(None);
+        };
+        postcard::from_bytes(&payload)
+            .map(Some)
+            .map_err(io::Error::other)
+    }
+}
+
+fn read_frame(file: &mut File) -> io::Result<Option<Vec<u8>>> {
+    let mut header = [0_u8; HEADER];
+    let n = file.read(&mut header)?;
+    if n == 0 {
+        return Ok(None);
+    }
+    if n < HEADER {
+        file.read_exact(&mut header[n..])?;
+    }
+    if header[..4] != MAGIC {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "invalid journal magic",
+        ));
+    }
+    let len = u32::from_le_bytes(header[4..8].try_into().unwrap()) as usize;
+    if len > MAX_RECORD {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "oversized journal frame",
+        ));
+    }
+    let expected = u32::from_le_bytes(header[8..12].try_into().unwrap());
+    let mut payload = vec![0_u8; len];
+    file.read_exact(&mut payload)?;
+    if crc32fast::hash(&payload) != expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "journal checksum mismatch",
+        ));
+    }
+    Ok(Some(payload))
+}
+
+/// Truncate only an incomplete/corrupt *final* frame; fail on interior corruption.
+pub fn recover(file: &mut File) -> io::Result<u64> {
+    let size = file.metadata()?.len();
+    file.seek(SeekFrom::Start(0))?;
+    let mut good = 0;
+    while good < size {
+        file.seek(SeekFrom::Start(good))?;
+        let mut header = [0_u8; HEADER];
+        if size - good < HEADER as u64 {
+            file.set_len(good)?;
+            file.sync_data()?;
+            break;
+        }
+        file.read_exact(&mut header)?;
+        if header[..4] != MAGIC {
+            return bad_tail_or_interior(file, good, size, "invalid journal magic");
+        }
+        let len = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64;
+        if len > MAX_RECORD as u64 {
+            return bad_tail_or_interior(file, good, size, "oversized journal frame");
+        }
+        let next = good + HEADER as u64 + len;
+        if next > size {
+            file.set_len(good)?;
+            file.sync_data()?;
+            break;
+        }
+        let mut payload = vec![0_u8; len as usize];
+        file.read_exact(&mut payload)?;
+        let expected = u32::from_le_bytes(header[8..12].try_into().unwrap());
+        if crc32fast::hash(&payload) != expected {
+            if next != size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "interior checksum mismatch",
+                ));
+            }
+            file.set_len(good)?;
+            file.sync_data()?;
+            break;
+        }
+        if postcard::from_bytes::<JournalRecord>(&payload).is_err() {
+            if next != size {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "interior invalid record",
+                ));
+            }
+            file.set_len(good)?;
+            file.sync_data()?;
+            break;
+        }
+        good = next;
+    }
+    Ok(good)
+}
+
+fn bad_tail_or_interior(file: &mut File, good: u64, size: u64, message: &str) -> io::Result<u64> {
+    file.seek(SeekFrom::Start(good + 1))?;
+    let mut suffix = Vec::new();
+    file.read_to_end(&mut suffix)?;
+    if suffix.windows(MAGIC.len()).any(|window| window == MAGIC) {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, message));
+    }
+    file.set_len(good)?;
+    file.sync_data()?;
+    debug_assert!(good <= size);
+    Ok(good)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use quant_core::MarketEvent;
+    use quant_market_data::{normalize, synthetic_packet};
+
+    fn record(index: u64) -> JournalRecord {
+        JournalRecord {
+            session_id: "2026-10-12-am".into(),
+            event: MarketEvent::Depth(Box::new(normalize(synthetic_packet(index, 20)).unwrap())),
+        }
+    }
+
+    #[test]
+    fn restart_roundtrip_and_truncated_final() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.qj");
+        let records: Vec<_> = (0..4).map(record).collect();
+        {
+            let mut journal = JournalWriter::open(
+                &path,
+                DurabilityPolicy::Group {
+                    max_events: 10,
+                    max_bytes: 100_000,
+                    max_delay_ms: 50,
+                },
+            )
+            .unwrap();
+            for item in records.iter().take(3) {
+                assert!(journal.append(item).unwrap().is_none());
+            }
+            assert_eq!(journal.sync().unwrap().events, 3);
+        }
+        let valid_size = path.metadata().unwrap().len();
+        std::fs::OpenOptions::new()
+            .append(true)
+            .open(&path)
+            .unwrap()
+            .write_all(b"QJ01\x20")
+            .unwrap();
+        let mut journal = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        assert_eq!(path.metadata().unwrap().len(), valid_size);
+        assert_eq!(journal.append(&records[3]).unwrap().unwrap().events, 1);
+        drop(journal);
+        let mut reader = JournalReader::open(&path).unwrap();
+        for item in records {
+            assert_eq!(reader.next_record().unwrap(), Some(item));
+        }
+        assert!(reader.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn corrupt_final_is_removed_but_interior_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.qj");
+        let mut journal = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        let first = record(0);
+        journal.append(&first).unwrap();
+        let first_end = path.metadata().unwrap().len();
+        journal.append(&record(1)).unwrap();
+        drop(journal);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.seek(SeekFrom::Start(first_end + HEADER as u64))
+            .unwrap();
+        file.write_all(b"X").unwrap();
+        drop(file);
+        let mut reader = JournalReader::open(&path).unwrap();
+        assert_eq!(reader.next_record().unwrap(), Some(first));
+        assert!(reader.next_record().unwrap().is_none());
+        let mut journal = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        journal.append(&record(2)).unwrap();
+        drop(journal);
+        let mut file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        file.seek(SeekFrom::Start(HEADER as u64)).unwrap();
+        file.write_all(b"X").unwrap();
+        drop(file);
+        assert!(JournalReader::open(&path).is_err());
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn disk_full_is_reported() {
+        let mut journal =
+            JournalWriter::open(Path::new("/dev/full"), DurabilityPolicy::EveryEvent).unwrap();
+        assert!(journal.append(&record(0)).is_err());
+        assert!(journal.append(&record(1)).is_err());
+    }
+}

@@ -1,0 +1,15 @@
+[package]
+name = "quant-replay"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+quant-journal.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+quant-core.workspace = true
+quant-market-data.workspace = true
+tempfile = "3.23"
+

@@ -1,0 +1,27 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/quant-core",
+  "crates/quant-market-data",
+  "crates/quant-orderbook",
+  "crates/quant-journal",
+  "crates/quant-replay",
+  "crates/quant-bench",
+]
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.85"
+
+[workspace.dependencies]
+quant-core = { path = "crates/quant-core" }
+quant-market-data = { path = "crates/quant-market-data" }
+quant-orderbook = { path = "crates/quant-orderbook" }
+quant-journal = { path = "crates/quant-journal" }
+quant-replay = { path = "crates/quant-replay" }
+tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+postcard = { version = "1.1", features = ["use-std"] }
+crc32fast = "1.5"
+
