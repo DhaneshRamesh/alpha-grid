@@ -8,6 +8,20 @@ at 2026-10-11 23:15 IST with a 72-hour deletion hold; Current Usage labels it
 "Active" but shows zero minutes running and ₹0 new charges. Treat this
 inconsistent status as a console issue, not evidence of a running VM.
 
+On 2026-10-12, the dashboard displayed **Complete your KYC verification**.
+Its verification dialog reported `Status: pending` and directed the account
+holder through PAN and video KYC with Digio. This is a plausible deployment
+blocker, but the console did not explicitly connect KYC to the failed request.
+The support center has zero tickets. No sanitized HTTP error code or request ID
+was exposed by the console, so both remain **UNVERIFIED**. Stop deployment
+retries until the account holder completes KYC or Utho support confirms the
+reason. Do not handle identity documents or create account-wide API tokens.
+
+The dashboard resource inventory shows zero cloud servers, block storage,
+elastic IPs and snapshots. It does show six VPCs and two firewalls, including
+the trial firewall; these are not evidence of a running trial VM. Trial spend
+remains ₹0. No teardown timer is needed while no VM exists.
+
 Configured trial: Mumbai, Ubuntu 24.04, Premium AMD Basic 1 (2 vCPU / 4 GB),
 80 GB NVMe root EBS, hourly, default public IPv4, one instance, SSH key
 `alpha-grid-utho-trial-20261012`, and security group
@@ -35,8 +49,10 @@ smoke artifacts (not Utho measurements) are under `work/rust-smoke.json` and
 their concurrent runs and different journal encodings do not support a speed
 comparison. Utho Rust and Python performance remain **UNMEASURED**.
 
-To resume, inspect the exact error from Utho's Deploy Now action or ask Utho
-support why this account's Mumbai hourly deployment does not place an order.
+To resume, the account holder must complete the console's pending KYC and
+confirm that it is approved, or ask Utho support why this account's Mumbai
+hourly deployment does not place an order and request a sanitized status code
+or request ID. Do not submit another deployment while the blocker is unknown.
 Before any retry, verify the Cloud Instances and EBS inventories are still
 empty, refresh the SSH `/32` source address, and confirm the ₹2.40/hour quote.
 Once a VM exists, record its resource IDs, deployment time, safety deadline and
