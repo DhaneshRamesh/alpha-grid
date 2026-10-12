@@ -1,5 +1,35 @@
 # Utho Rust trial checkpoint — 2026-10-12
 
+## Post-KYC deployment attempt — 2026-10-12, about 23:06 IST
+
+The account holder reported KYC status **Verified**. The signed-in dashboard
+no longer showed the earlier KYC prompt, but neither dashboard nor Account
+Settings displayed an explicit approval badge, so independent KYC approval
+remains unverified. The authorized deployment was attempted once after a fresh
+preflight: Mumbai, hourly Premium AMD Basic 1 (2 vCPU/4 GB), Ubuntu 24.04,
+80 GB NVMe root, default public IPv4, quantity one, trial security group, and
+the matching trial SSH key. The console quoted ₹1.96/hour compute plus
+₹0.44/hour storage, ₹2.40/hour before applicable tax. No paid extras were
+selected. SSH ingress was limited to the operator's then-current
+`106.222.203.84/32` address.
+
+The Deploy button showed **Deploying...** and returned to **Deploy Now** after
+about 20 seconds without a visible error, status code, or request ID. No
+second submission was made. Cloud Instances and EBS still show zero resources;
+Activity Logs show no new server order. Current Usage remains ₹1.06 from the
+prior pilot, so observed new trial usage is ₹0. There are no VM measurements
+or Rust/Python comparisons from this attempt. The 72-hour trial clock has not
+started. Do not retry until Utho identifies the rejection or supplies a
+sanitized error/request ID. Do not create an account-wide API token.
+
+Suggested support request: “Our account holder reports KYC Verified. A single
+Mumbai hourly deployment on 12 October around 23:06 IST (Ubuntu 24.04,
+2 vCPU/4 GB, 80 GB root disk, standard IPv4, SSH key) returned from
+‘Deploying...’ to the form without an error. No Cloud Instance, EBS volume, or
+activity-log order appeared. Please confirm the account's deployment
+eligibility and provide the sanitized failure reason, HTTP status and request
+ID. Please do not create a VM on our behalf.”
+
 **Status:** no new VM was created. The signed-in deployment form returned to
 "Deploy Now" after repeated submissions without an error message. Utho activity
 logs contain no new cloud-server order. The Cloud Instances and EBS inventories
