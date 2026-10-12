@@ -42,6 +42,9 @@ mod tests {
         let first = normalize(synthetic_packet(0, 2)).unwrap();
         let mut book = OrderBook::from(first.clone());
         book.replace_snapshot(first).unwrap();
-        assert!(book.replace_snapshot(normalize(synthetic_packet(1, 2)).unwrap()).is_err());
+        assert!(
+            book.replace_snapshot(normalize(synthetic_packet(1, 2)).unwrap())
+                .is_err()
+        );
     }
 }

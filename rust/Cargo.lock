@@ -228,6 +228,7 @@ name = "quant-orderbook"
 version = "0.1.0"
 dependencies = [
  "quant-core",
+ "quant-market-data",
 ]
 
 [[package]]
