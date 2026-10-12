@@ -267,6 +267,8 @@ class EventJournal:
         self._dirty = False
         self.appended_records = 0
         self.appended_bytes = 0
+        self.written_records = 0
+        self.written_bytes = 0
         self.fsync_count = 0
         self.last_fsync_ns: int | None = None
         try:
@@ -304,6 +306,9 @@ class EventJournal:
                 if written <= 0:
                     raise OSError("journal write made no progress")
                 view = view[written:]
+            # Complete frame in the kernel's file cache; fsync has not yet succeeded.
+            self.written_records += 1
+            self.written_bytes += len(record)
             self._dirty = True
             self.last_fsync_ns = None
             if self.settings.fsync_policy is FsyncPolicy.ALWAYS:

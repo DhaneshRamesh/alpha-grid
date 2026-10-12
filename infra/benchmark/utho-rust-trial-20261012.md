@@ -17,6 +17,9 @@ was exposed by the console, so both remain **UNVERIFIED**. Stop deployment
 retries until the account holder completes KYC or Utho support confirms the
 reason. Do not handle identity documents or create account-wide API tokens.
 
+The account holder later reported KYC completed. Approval status has not been
+independently checked in this validation task. No deployment retry was made.
+
 The dashboard resource inventory shows zero cloud servers, block storage,
 elastic IPs and snapshots. It does show six VPCs and two firewalls, including
 the trial firewall; these are not evidence of a running trial VM. Trial spend
@@ -49,10 +52,11 @@ smoke artifacts (not Utho measurements) are under `work/rust-smoke.json` and
 their concurrent runs and different journal encodings do not support a speed
 comparison. Utho Rust and Python performance remain **UNMEASURED**.
 
-To resume, the account holder must complete the console's pending KYC and
-confirm that it is approved, or ask Utho support why this account's Mumbai
-hourly deployment does not place an order and request a sanitized status code
-or request ID. Do not submit another deployment while the blocker is unknown.
+To resume in a separate authorized deployment task, verify that the reported
+KYC completion has been approved. If a later deploy still fails, ask Utho
+support why this account's Mumbai hourly deployment does not place an order
+and request a sanitized status code or request ID. Do not submit another
+deployment while the blocker is unknown.
 Before any retry, verify the Cloud Instances and EBS inventories are still
 empty, refresh the SSH `/32` source address, and confirm the ₹2.40/hour quote.
 Once a VM exists, record its resource IDs, deployment time, safety deadline and

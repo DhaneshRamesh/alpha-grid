@@ -57,7 +57,13 @@ pub struct JournalWriter {
     policy: DurabilityPolicy,
     buffer: Vec<u8>,
     pending: usize,
+    written_events: usize,
     poisoned: bool,
+    recovered_tail_bytes: u64,
+    #[cfg(test)]
+    fail_next_write: bool,
+    #[cfg(test)]
+    fail_next_sync: bool,
 }
 
 impl JournalWriter {
@@ -72,14 +78,24 @@ impl JournalWriter {
             .create(true)
             .truncate(false)
             .open(path)?;
-        recover(&mut file)?;
+        let original_size = file.metadata()?.len();
+        let recovered_tail_bytes = original_size - recover(&mut file)?;
+        if recovered_tail_bytes > 0 {
+            eprintln!("journal recovery truncated {recovered_tail_bytes} tail bytes");
+        }
         file.seek(SeekFrom::End(0))?;
         Ok(Self {
             file,
             policy,
             buffer: Vec::new(),
             pending: 0,
+            written_events: 0,
             poisoned: false,
+            recovered_tail_bytes,
+            #[cfg(test)]
+            fail_next_write: false,
+            #[cfg(test)]
+            fail_next_sync: false,
         })
     }
 
@@ -124,13 +140,33 @@ impl JournalWriter {
             return Ok(Commit::default());
         }
         let started = Instant::now();
-        if let Err(error) = self.file.write_all(&self.buffer) {
+        #[cfg(test)]
+        let write_result = if self.fail_next_write {
+            self.fail_next_write = false;
+            Err(io::Error::from_raw_os_error(28))
+        } else {
+            self.file.write_all(&self.buffer)
+        };
+        #[cfg(not(test))]
+        let write_result = self.file.write_all(&self.buffer);
+        if let Err(error) = write_result {
             self.poisoned = true;
             return Err(error);
         }
+        // A complete write reached the kernel, but is not durable until sync_data.
+        self.written_events += self.pending;
         let write_ns = started.elapsed().as_nanos().try_into().unwrap_or(u64::MAX);
         let sync_started = Instant::now();
-        if let Err(error) = self.file.sync_data() {
+        #[cfg(test)]
+        let sync_result = if self.fail_next_sync {
+            self.fail_next_sync = false;
+            Err(io::Error::from_raw_os_error(5))
+        } else {
+            self.file.sync_data()
+        };
+        #[cfg(not(test))]
+        let sync_result = self.file.sync_data();
+        if let Err(error) = sync_result {
             self.poisoned = true;
             return Err(error);
         }
@@ -151,6 +187,14 @@ impl JournalWriter {
 
     pub fn pending(&self) -> usize {
         self.pending
+    }
+
+    pub fn written_events(&self) -> usize {
+        self.written_events
+    }
+
+    pub fn recovered_tail_bytes(&self) -> u64 {
+        self.recovered_tail_bytes
     }
 
     pub fn close(mut self) -> io::Result<Commit> {
@@ -175,14 +219,26 @@ impl Drop for JournalWriter {
 
 pub struct JournalReader {
     file: File,
+    recovered_tail_bytes: u64,
 }
 
 impl JournalReader {
     pub fn open(path: &Path) -> io::Result<Self> {
         let mut file = OpenOptions::new().read(true).write(true).open(path)?;
-        recover(&mut file)?;
+        let original_size = file.metadata()?.len();
+        let recovered_tail_bytes = original_size - recover(&mut file)?;
+        if recovered_tail_bytes > 0 {
+            eprintln!("journal recovery truncated {recovered_tail_bytes} tail bytes");
+        }
         file.seek(SeekFrom::Start(0))?;
-        Ok(Self { file })
+        Ok(Self {
+            file,
+            recovered_tail_bytes,
+        })
+    }
+
+    pub fn recovered_tail_bytes(&self) -> u64 {
+        self.recovered_tail_bytes
     }
 
     pub fn next_record(&mut self) -> io::Result<Option<JournalRecord>> {
@@ -304,11 +360,14 @@ mod tests {
     use super::*;
     use quant_core::MarketEvent;
     use quant_market_data::{normalize, synthetic_packet};
+    use std::process::{Command, exit};
 
     fn record(index: u64) -> JournalRecord {
+        let mut event = normalize(synthetic_packet(index, 20)).unwrap();
+        event.receive_timestamp_ns = 1_000 + index as i64;
         JournalRecord {
             session_id: "2026-10-12-am".into(),
-            event: MarketEvent::Depth(Box::new(normalize(synthetic_packet(index, 20)).unwrap())),
+            event: MarketEvent::Depth(Box::new(event)),
         }
     }
 
@@ -341,6 +400,7 @@ mod tests {
             .unwrap();
         let mut journal = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
         assert_eq!(path.metadata().unwrap().len(), valid_size);
+        assert!(journal.recovered_tail_bytes() > 0);
         assert_eq!(journal.append(&records[3]).unwrap().unwrap().events, 1);
         drop(journal);
         let mut reader = JournalReader::open(&path).unwrap();
@@ -384,6 +444,91 @@ mod tests {
         file.write_all(b"X").unwrap();
         drop(file);
         assert!(JournalReader::open(&path).is_err());
+    }
+
+    #[test]
+    fn graceful_close_commits_buffered_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.qj");
+        let mut journal = JournalWriter::open(
+            &path,
+            DurabilityPolicy::Group {
+                max_events: 10,
+                max_bytes: 100_000,
+                max_delay_ms: 50,
+            },
+        )
+        .unwrap();
+        assert!(journal.append(&record(0)).unwrap().is_none());
+        assert_eq!(journal.written_events(), 0);
+        assert_eq!(journal.close().unwrap().events, 1);
+        let mut reader = JournalReader::open(&path).unwrap();
+        assert_eq!(reader.next_record().unwrap(), Some(record(0)));
+    }
+
+    #[test]
+    fn write_failure_poisoned_without_acknowledgement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.qj");
+        let mut journal = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        journal.fail_next_write = true;
+        assert!(journal.append(&record(0)).is_err());
+        assert_eq!(journal.written_events(), 0);
+        assert!(journal.append(&record(1)).is_err());
+        assert_eq!(path.metadata().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn sync_failure_poisoned_without_durable_acknowledgement() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.qj");
+        let mut journal = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        journal.fail_next_sync = true;
+        assert!(journal.append(&record(0)).is_err());
+        assert_eq!(journal.written_events(), 1);
+        assert!(journal.append(&record(1)).is_err());
+        // The written frame may be recoverable, but no fsync acknowledged it.
+        assert!(path.metadata().unwrap().len() > 0);
+    }
+
+    #[test]
+    fn abrupt_exit_loses_only_uncommitted_memory_buffer() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("events.qj");
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("--ignored")
+            .arg("--exact")
+            .arg("tests::crash_child")
+            .env("QUANT_CRASH_TEST_PATH", &path)
+            .output()
+            .unwrap();
+        assert_eq!(child.status.code(), Some(37));
+        let mut reader = JournalReader::open(&path).unwrap();
+        assert_eq!(reader.next_record().unwrap(), Some(record(0)));
+        assert_eq!(reader.next_record().unwrap(), Some(record(1)));
+        assert_eq!(reader.next_record().unwrap(), None);
+    }
+
+    #[test]
+    #[ignore = "run only by abrupt_exit_loses_only_uncommitted_memory_buffer"]
+    fn crash_child() {
+        let path = std::env::var_os("QUANT_CRASH_TEST_PATH").unwrap();
+        let mut journal =
+            JournalWriter::open(Path::new(&path), DurabilityPolicy::EveryEvent).unwrap();
+        journal.append(&record(0)).unwrap();
+        journal.append(&record(1)).unwrap();
+        drop(journal);
+        let mut journal = JournalWriter::open(
+            Path::new(&path),
+            DurabilityPolicy::Group {
+                max_events: 10,
+                max_bytes: 100_000,
+                max_delay_ms: 50,
+            },
+        )
+        .unwrap();
+        journal.append(&record(2)).unwrap();
+        exit(37);
     }
 
     #[cfg(target_os = "linux")]

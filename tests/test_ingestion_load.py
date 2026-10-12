@@ -23,6 +23,7 @@ def test_full_depth_order_and_durability_strategies(tmp_path: Path) -> None:
         )
         assert result["status"] == "complete"
         assert result["accepted_in_memory"] == result["durable_events"]
+        assert result["persisted_to_kernel"] == result["durable_events"]
         assert result["recovery_records"] == result["durable_events"]
         assert result["recovery_truncated_bytes"] == 0
         assert result["dropped_events"] == 0
@@ -130,6 +131,7 @@ def test_journal_sync_fails_closed(
     with pytest.raises(ValueError, match="closed"):
         journal.append(_event(1, 1))
     # The kernel may have persisted the record, but it was never acknowledged.
+    assert journal.written_records == 1
     assert journal.fsync_count == 0
 
 

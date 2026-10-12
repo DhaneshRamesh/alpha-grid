@@ -32,7 +32,7 @@ from quant.storage.journal import EventJournal, FsyncPolicy, JournalSettings
 
 RATES = (100, 500, 1_000, 5_000, 10_000)
 POLICIES = ("every_event", "periodic", "group_bytes")
-BENCHMARK_VERSION = "ingestion-0.5.0"
+BENCHMARK_VERSION = "ingestion-0.5.1"
 
 
 @dataclass(frozen=True, slots=True)
@@ -123,6 +123,7 @@ def run_case(root: Path, settings: LoadSettings) -> dict[str, Any]:
     queue_depths: list[float] = []
     metrics: dict[str, int] = {
         "journal_appended": 0,
+        "persisted_to_kernel": 0,
         "durable": 0,
         "max_uncommitted_events": 0,
         "fsync_count": 0,
@@ -137,6 +138,7 @@ def run_case(root: Path, settings: LoadSettings) -> dict[str, Any]:
         pending_bytes = 0
         first_pending_ns = 0
         downstream = None
+        journal: EventJournal | None = None
         try:
             with EventJournal(journal_settings) as journal:
                 monitor = None
@@ -232,6 +234,8 @@ def run_case(root: Path, settings: LoadSettings) -> dict[str, Any]:
                 else type(exc).__name__
             )
         finally:
+            if journal is not None:
+                metrics["persisted_to_kernel"] = journal.written_records
             if downstream is not None:
                 downstream.close()
 
@@ -326,6 +330,7 @@ def run_case(root: Path, settings: LoadSettings) -> dict[str, Any]:
         ),
         "accepted_in_memory": accepted,
         "journal_appended": metrics["journal_appended"],
+        "persisted_to_kernel": metrics["persisted_to_kernel"],
         "downstream_published": metrics["downstream_published"],
         "published_before_durable": metrics["published_before_durable"],
         "durable_events": metrics["durable"],
