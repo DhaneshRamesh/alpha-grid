@@ -1,6 +1,45 @@
 # Utho Rust trial checkpoint — 2026-10-12
 
+## Final outcome — 2026-10-13
+
+After the earlier silent deployment response, the account holder reported a
+newly created VM. The console did not establish whether this was a delayed
+result of that submission or a separate manual submission. Activity Logs
+record Cloud Server `#990003048` (`cloudserver-llenz7e9.mhc`) placed at
+2026-10-12 23:52:34 IST in Mumbai. Its page showed Ubuntu 24.04, 2 vCPU,
+4 GB RAM, an 80 GB general boot disk `#92145`, and public IPv4
+`157.20.215.223`. The restricted trial security group was attached at 23:54:32
+and SSH ingress corrected to the operator's current `/32` address. Both
+`root` and `ubuntu` SSH logins rejected the selected trial key. The serial
+console showed a login prompt; no guest shell access or host benchmark was
+obtained. Automatic approval review rejected a root-password reset because
+that exact privileged change and VM reboot lacked explicit user approval. The
+account holder was asked to approve it; no approval arrived during this trial.
+
+The activity log records a VM power-off at 23:57:32 IST. The VM still accrued
+usage while listed as an hourly resource; power-off was not treated as a
+teardown. To avoid leaving the temporary resource billable, the VM was deleted
+at 2026-10-13 06:44:56 IST. Utho records a 72-hour hold before permanent
+removal. The dashboard now shows zero cloud servers, block storage volumes,
+elastic IPs, and snapshots. Current Usage reports **0 minutes running and ₹0
+new cost** for this deleted server, but still labels its row “Active”; this is
+a console inconsistency. The general boot disk was attached to the deleted VM;
+the dashboard shows no separate block-storage resource. No independent guest
+filesystem or disk-removal verification was possible.
+
+Current Usage attributes **₹14.68 before GST** to this trial VM, or **₹17.32
+including the displayed 18% GST** after rounding. This is below the approved
+₹250 cap. The older pilot's ₹1.06 before GST is separate. No Python/Rust tests,
+ingestion benchmarks, network probes from the VM, market-data captures, raw
+benchmark files, or checksum exports were produced. Rust/Python relative
+performance and Utho data-collector suitability remain **UNKNOWN**. A future
+trial needs verified guest access before any billable VM is launched and a
+reliable teardown method that does not depend on an interactive session.
+
 ## Post-KYC deployment attempt — 2026-10-12, about 23:06 IST
+
+This and the following checkpoint describe what the console showed before
+server `#990003048` appeared. The final outcome above supersedes them.
 
 The account holder reported KYC status **Verified**. The signed-in dashboard
 no longer showed the earlier KYC prompt, but neither dashboard nor Account
