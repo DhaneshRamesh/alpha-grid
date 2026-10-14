@@ -691,6 +691,7 @@ dependencies = [
  "crc32fast",
  "quant-core",
  "quant-engine",
+ "quant-journal",
  "serde",
  "serde_json",
  "tempfile",

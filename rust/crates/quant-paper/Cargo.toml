@@ -7,6 +7,7 @@ rust-version.workspace = true
 [dependencies]
 quant-core.workspace = true
 quant-engine = { path = "../quant-engine" }
+quant-journal.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 crc32fast.workspace = true
