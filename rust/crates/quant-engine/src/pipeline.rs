@@ -11,6 +11,7 @@ use std::io;
 pub struct EngineOutput {
     pub volume: Option<VolumeObservation>,
     pub finalized_candles: Vec<CandleSnapshot>,
+    pub provisional_candles: Vec<CandleSnapshot>,
     pub features: Option<FeatureOutput>,
 }
 
@@ -88,6 +89,7 @@ impl MarketEngine {
         let mut output = EngineOutput {
             volume: None,
             finalized_candles: Vec::new(),
+            provisional_candles: Vec::new(),
             features: None,
         };
         match &record.event {
@@ -96,6 +98,7 @@ impl MarketEngine {
                     .bars
                     .observe(price, None, &*self.calendar)
                     .map_err(EngineError::Bar)?;
+                output.provisional_candles = self.bars.open_for(&price.instrument);
                 output.features = Some(
                     self.features
                         .observe_price(price, None, price.metadata.receive_timestamp_ns)
@@ -119,6 +122,7 @@ impl MarketEngine {
                     .bars
                     .observe(&quote.price, Some(&volume), &*self.calendar)
                     .map_err(EngineError::Bar)?;
+                output.provisional_candles = self.bars.open_for(&quote.price.instrument);
                 output.features = Some(
                     self.features
                         .observe_price(

@@ -14,6 +14,8 @@ pub const WIRE_VERSION: u16 = 1;
 pub enum MessageType {
     #[serde(rename = "engine.snapshot")]
     EngineSnapshot,
+    #[serde(rename = "engine.update")]
+    EngineUpdate,
     #[serde(rename = "engine.health")]
     EngineHealth,
     #[serde(rename = "market.snapshot")]
@@ -320,6 +322,7 @@ pub struct WireInstrumentSnapshot {
     pub depth: Option<WireDepth>,
     pub candles: Vec<WireCandle>,
     pub last_update_timestamp_ns: Option<String>,
+    pub previous_close_nanos: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -346,6 +349,7 @@ pub struct WireCounters {
     pub journal_records_accepted: u64,
     pub durably_committed_records: u64,
     pub recovered_records: Option<u64>,
+    pub replayed_records: u64,
     pub queue_current: usize,
     pub queue_high_water: usize,
     pub queue_rejections: u64,
@@ -378,6 +382,41 @@ pub struct WireEngineSnapshot {
     pub counters: WireCounters,
     pub instruments: Vec<WireInstrumentSnapshot>,
     pub audit: Vec<AuditEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WireEngineUpdate {
+    pub generation: String,
+    pub status: WireEngineSnapshotStatus,
+    pub instruments: Vec<WireInstrumentSnapshot>,
+    pub audit: Vec<AuditEvent>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WireEngineSnapshotStatus {
+    pub engine_running: bool,
+    pub feed_connected: bool,
+    pub journal_blocked: bool,
+    pub replay_paused: bool,
+    pub latest_data_timestamp_ns: Option<String>,
+    pub storage_status: String,
+    pub backpressure_state: String,
+    pub counters: WireCounters,
+}
+
+impl From<&WireEngineSnapshot> for WireEngineSnapshotStatus {
+    fn from(value: &WireEngineSnapshot) -> Self {
+        Self {
+            engine_running: value.engine_running,
+            feed_connected: value.feed_connected,
+            journal_blocked: value.journal_blocked,
+            replay_paused: value.replay_paused,
+            latest_data_timestamp_ns: value.latest_data_timestamp_ns.clone(),
+            storage_status: value.storage_status.clone(),
+            backpressure_state: value.backpressure_state.clone(),
+            counters: value.counters.clone(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

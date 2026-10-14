@@ -288,6 +288,24 @@ impl BarEngine {
             .collect()
     }
 
+    pub fn open_for(&self, instrument: &Instrument) -> Vec<CandleSnapshot> {
+        let key = (
+            instrument.venue.clone(),
+            instrument.exchange_segment.clone(),
+            instrument.security_id.clone(),
+        );
+        self.instruments
+            .get(&key)
+            .map(|state| {
+                state
+                    .bars
+                    .values()
+                    .map(|bar| bar.snapshot.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
     /// Explicit end-of-session flush. Bars are finalized without inventing
     /// observations in the unobserved remainder of an interval.
     pub fn close_session(&mut self) -> Vec<CandleSnapshot> {
