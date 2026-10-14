@@ -132,6 +132,8 @@ pub struct VolumeObservation {
     pub metadata: SourceTimestampMetadata,
     pub cumulative_traded_volume: u64,
     pub incremental_volume: Option<u64>,
+    pub previous_receive_timestamp_ns: Option<i64>,
+    pub previous_source_last_trade_timestamp_ns: Option<i64>,
     pub status: VolumeStatus,
     pub quality: MarketDataQuality,
 }

@@ -11,6 +11,12 @@ intervals, and `quant-bench` drives a bounded Tokio channel into the journal.
 packets, journals side updates and derived books, and runs a mock WebSocket feed.
 See [the Dhan protocol document](../docs/dhan20-protocol.md) for evidence and limitations.
 
+`quant-engine` adds the separate 8-byte Dhan standard-feed decoder path,
+session-aware cumulative volume, quote-sampled candles, incremental features,
+durable capture and deterministic replay. See [Phase 2B engine contracts](docs/phase2b-engine.md)
+and the [standard-feed layout](docs/standard-feed.md). The feature benchmark
+is offline and never authenticates to Dhan.
+
 Prices are INR × 10^9 integers; timestamps are Unix nanoseconds. Exchange
 timestamps remain absent in synthetic events. This avoids treating source clocks
 as measured network latency. Full snapshots never imply individual order events.

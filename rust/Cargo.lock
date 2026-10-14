@@ -401,6 +401,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "quant-engine"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "quant-core",
+ "quant-journal",
+ "quant-market-data",
+ "quant-replay",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "quant-journal"
 version = "0.1.0"
 dependencies = [

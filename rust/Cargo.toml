@@ -8,6 +8,7 @@ members = [
   "crates/quant-replay",
   "crates/quant-bench",
   "crates/quant-depth",
+  "crates/quant-engine",
 ]
 
 [workspace.package]

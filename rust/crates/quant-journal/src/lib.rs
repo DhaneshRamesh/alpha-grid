@@ -385,6 +385,7 @@ mod tests {
         enum LegacyEvent {
             Depth(Box<quant_core::DepthEvent>),
             Trade(quant_core::TradeEvent),
+            DepthSide(Box<quant_core::DepthSideUpdate>),
         }
         #[derive(Serialize)]
         struct LegacyRecord {
@@ -405,6 +406,15 @@ mod tests {
             price_nanos: 1_000_000_000,
             quantity: 1,
         };
+        let side = quant_core::DepthSideUpdate {
+            instrument: book.instrument.clone(),
+            side: quant_core::DepthSide::Bid,
+            levels: book.bids,
+            receive_timestamp_ns: 2,
+            feed_session_id: "old-depth".into(),
+            frame_id: 7,
+            packet_offset: 0,
+        };
         let old = [
             LegacyRecord {
                 session_id: "old".into(),
@@ -413,6 +423,10 @@ mod tests {
             LegacyRecord {
                 session_id: "old".into(),
                 event: LegacyEvent::Trade(trade.clone()),
+            },
+            LegacyRecord {
+                session_id: "old".into(),
+                event: LegacyEvent::DepthSide(Box::new(side.clone())),
             },
         ];
         let mut file = File::create(&path).unwrap();
@@ -434,6 +448,10 @@ mod tests {
         assert_eq!(
             reader.next_record().unwrap().unwrap().event,
             MarketEvent::Trade(trade)
+        );
+        assert_eq!(
+            reader.next_record().unwrap().unwrap().event,
+            MarketEvent::DepthSide(Box::new(side))
         );
         assert!(reader.next_record().unwrap().is_none());
     }
