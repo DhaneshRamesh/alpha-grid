@@ -6,6 +6,8 @@ use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::Instant;
 
+pub mod segmented;
+
 const MAGIC: [u8; 4] = *b"QJ01";
 const HEADER: usize = 12;
 const MAX_RECORD: usize = 1024 * 1024;
@@ -189,6 +191,10 @@ impl JournalWriter {
         self.pending
     }
 
+    pub fn estimated_bytes(&self) -> io::Result<u64> {
+        Ok(self.file.metadata()?.len() + self.buffer.len() as u64)
+    }
+
     pub fn written_events(&self) -> usize {
         self.written_events
     }
@@ -206,6 +212,17 @@ impl JournalWriter {
             DurabilityPolicy::Group { max_delay_ms, .. } => Some(max_delay_ms),
         }
     }
+}
+
+pub fn encoded_record_bytes(record: &JournalRecord) -> io::Result<u64> {
+    let len = postcard::to_stdvec(record).map_err(io::Error::other)?.len();
+    if len > MAX_RECORD {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "record too large",
+        ));
+    }
+    Ok((HEADER + len) as u64)
 }
 
 impl Drop for JournalWriter {
@@ -361,6 +378,65 @@ mod tests {
     use quant_core::MarketEvent;
     use quant_market_data::{normalize, synthetic_packet};
     use std::process::{Command, exit};
+
+    #[test]
+    fn qj01_legacy_depth_and_trade_variants_remain_readable() {
+        #[derive(Serialize)]
+        enum LegacyEvent {
+            Depth(Box<quant_core::DepthEvent>),
+            Trade(quant_core::TradeEvent),
+        }
+        #[derive(Serialize)]
+        struct LegacyRecord {
+            session_id: String,
+            event: LegacyEvent,
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.qj");
+        let depth = record(1);
+        let MarketEvent::Depth(book) = depth.event.clone() else {
+            unreachable!()
+        };
+        let trade = quant_core::TradeEvent {
+            instrument: book.instrument.clone(),
+            exchange_timestamp_ns: None,
+            receive_timestamp_ns: 1,
+            sequence: None,
+            price_nanos: 1_000_000_000,
+            quantity: 1,
+        };
+        let old = [
+            LegacyRecord {
+                session_id: "old".into(),
+                event: LegacyEvent::Depth(book.clone()),
+            },
+            LegacyRecord {
+                session_id: "old".into(),
+                event: LegacyEvent::Trade(trade.clone()),
+            },
+        ];
+        let mut file = File::create(&path).unwrap();
+        for item in old {
+            let payload = postcard::to_stdvec(&item).unwrap();
+            file.write_all(&MAGIC).unwrap();
+            file.write_all(&(payload.len() as u32).to_le_bytes())
+                .unwrap();
+            file.write_all(&crc32fast::hash(&payload).to_le_bytes())
+                .unwrap();
+            file.write_all(&payload).unwrap();
+        }
+        file.sync_all().unwrap();
+        let mut reader = JournalReader::open(&path).unwrap();
+        assert_eq!(
+            reader.next_record().unwrap().unwrap().event,
+            MarketEvent::Depth(book)
+        );
+        assert_eq!(
+            reader.next_record().unwrap().unwrap().event,
+            MarketEvent::Trade(trade)
+        );
+        assert!(reader.next_record().unwrap().is_none());
+    }
 
     fn record(index: u64) -> JournalRecord {
         let mut event = normalize(synthetic_packet(index, 20)).unwrap();

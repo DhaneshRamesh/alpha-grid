@@ -1,11 +1,15 @@
 # Rust DATA_ONLY foundation
 
-The Python collector remains the reference implementation. This workspace has no
-Dhan decoder, credentials, order endpoints, or trading path. `quant-core` defines
+The Python collector remains the reference implementation. This workspace now has
+an offline-first read-only Dhan 20-depth decoder, with no order endpoints or trading path. `quant-core` defines
 fixed-point market events, `quant-market-data` validates synthetic 20-level
 packets, `quant-orderbook` holds full snapshots, `quant-journal` writes framed
 checksummed records, `quant-replay` preserves journal order and receive-time
 intervals, and `quant-bench` drives a bounded Tokio channel into the journal.
+
+`quant-depth` validates side packets, pairs only adjacent same-frame bid/ask
+packets, journals side updates and derived books, and runs a mock WebSocket feed.
+See [the Dhan protocol document](../docs/dhan20-protocol.md) for evidence and limitations.
 
 Prices are INR × 10^9 integers; timestamps are Unix nanoseconds. Exchange
 timestamps remain absent in synthetic events. This avoids treating source clocks
@@ -22,7 +26,30 @@ cargo test --locked --workspace --manifest-path rust/Cargo.toml
 cargo fmt --all --manifest-path rust/Cargo.toml -- --check
 cargo clippy --locked --workspace --all-targets --manifest-path rust/Cargo.toml -- -D warnings
 cargo build --locked --workspace --release --manifest-path rust/Cargo.toml
+cargo check --locked -p quant-depth --features live-readonly --manifest-path rust/Cargo.toml
 ```
+
+Offline commands from the repository root:
+
+```sh
+cargo run --locked -p quant-depth --manifest-path rust/Cargo.toml -- offline-fixture
+cargo run --locked -p quant-depth --manifest-path rust/Cargo.toml -- mock-feed /tmp/alpha-grid-depth
+cargo run --locked -p quant-depth --manifest-path rust/Cargo.toml -- replay /tmp/alpha-grid-depth
+cargo run --locked -p quant-depth --manifest-path rust/Cargo.toml -- recover /tmp/alpha-grid-depth
+```
+
+`mock-feed` uses only loopback networking. Live transport is disabled by default.
+A future authorized `live-readonly` run would require its Cargo feature,
+`QUANT_ENABLE_LIVE_READONLY=1`, and locally set `DHAN_ACCESS_TOKEN` and
+`DHAN_CLIENT_ID`. Never put credentials in commands or logs. No authenticated
+Dhan session is part of this milestone.
+
+The future live mode takes a JSON file of 1–50 unique instruments in the shape
+of [the sample subscriptions file](depth-subscriptions.example.json). Edit it
+locally after checking the current Dhan security master. Its CLI form is
+`live-readonly <journal-dir> <subscriptions.json>`; the runtime opt-in is still
+required. The example contains one known documentation ID, not a claimed
+production instrument basket.
 
 Run all target rates under three durability policies. Keep journals and raw
 measurements in a scratch directory with enough free disk space:

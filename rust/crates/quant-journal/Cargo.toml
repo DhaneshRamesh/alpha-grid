@@ -9,8 +9,9 @@ quant-core.workspace = true
 serde.workspace = true
 postcard.workspace = true
 crc32fast.workspace = true
+serde_json.workspace = true
+libc.workspace = true
 
 [dev-dependencies]
 quant-market-data.workspace = true
 tempfile = "3.23"
-

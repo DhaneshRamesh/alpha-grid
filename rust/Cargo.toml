@@ -7,6 +7,7 @@ members = [
   "crates/quant-journal",
   "crates/quant-replay",
   "crates/quant-bench",
+  "crates/quant-depth",
 ]
 
 [workspace.package]
@@ -24,4 +25,6 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 postcard = { version = "1.1", features = ["use-std"] }
 crc32fast = "1.5"
-
+libc = "0.2"
+futures-util = "0.3.34"
+tokio-tungstenite = { version = "0.30.0", default-features = false, features = ["handshake", "rustls-tls-webpki-roots"] }

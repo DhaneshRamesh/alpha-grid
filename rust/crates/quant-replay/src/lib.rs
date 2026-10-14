@@ -14,6 +14,26 @@ pub fn replay_now(path: &Path) -> io::Result<Vec<JournalRecord>> {
     Ok(events)
 }
 
+/// Replay sealed and active QJ01 segments in manifest order, including side
+/// updates and derived books. Original single-file journals use `replay_now`.
+pub fn replay_segmented_now(root: &Path) -> io::Result<Vec<JournalRecord>> {
+    quant_journal::segmented::replay_segments(root)
+}
+
+/// Stream large journals one record at a time without retaining them all.
+pub fn replay_segmented_each(
+    root: &Path,
+    mut emit: impl FnMut(JournalRecord) -> io::Result<()>,
+) -> io::Result<u64> {
+    let mut reader = quant_journal::segmented::SegmentedReader::open(root)?;
+    let mut count = 0;
+    while let Some(record) = reader.next_record()? {
+        emit(record)?;
+        count += 1;
+    }
+    Ok(count)
+}
+
 pub async fn replay_timed(path: &Path, sender: mpsc::Sender<JournalRecord>) -> io::Result<usize> {
     let mut reader = JournalReader::open(path)?;
     let mut previous_ns = None;
@@ -65,5 +85,43 @@ mod tests {
         for event in events {
             assert_eq!(rx.recv().await, Some(event));
         }
+    }
+
+    #[test]
+    fn segmented_replay_preserves_order() {
+        use quant_journal::segmented::{SegmentConfig, SegmentedJournal};
+        let dir = tempfile::tempdir().unwrap();
+        let mut writer = SegmentedJournal::open(
+            dir.path(),
+            SegmentConfig {
+                max_bytes: 600,
+                max_age: Duration::from_secs(3600),
+                max_disk_bytes: 1_000_000,
+                min_free_bytes: 0,
+                durability: DurabilityPolicy::EveryEvent,
+            },
+        )
+        .unwrap();
+        let expected: Vec<_> = (0..4)
+            .map(|index| JournalRecord {
+                session_id: "s".into(),
+                event: MarketEvent::Depth(Box::new(normalize(synthetic_packet(index, 2)).unwrap())),
+            })
+            .collect();
+        for item in &expected {
+            writer.append(item).unwrap();
+        }
+        writer.close().unwrap();
+        assert_eq!(replay_segmented_now(dir.path()).unwrap(), expected);
+        let mut streamed = Vec::new();
+        assert_eq!(
+            replay_segmented_each(dir.path(), |row| {
+                streamed.push(row);
+                Ok(())
+            })
+            .unwrap(),
+            4
+        );
+        assert_eq!(streamed, expected);
     }
 }

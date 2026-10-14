@@ -44,3 +44,4 @@ jobs:
           cargo fmt --all --manifest-path rust/Cargo.toml -- --check
           cargo clippy --locked --workspace --all-targets --manifest-path rust/Cargo.toml -- -D warnings
           cargo build --locked --workspace --release --manifest-path rust/Cargo.toml
+          cargo check --locked -p quant-depth --features live-readonly --manifest-path rust/Cargo.toml

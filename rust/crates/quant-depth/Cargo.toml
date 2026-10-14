@@ -1,0 +1,23 @@
+[package]
+name = "quant-depth"
+version = "0.1.0"
+edition.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+live-readonly = ["tokio-tungstenite/connect"]
+
+[dependencies]
+quant-core.workspace = true
+quant-market-data.workspace = true
+quant-journal.workspace = true
+quant-replay.workspace = true
+tokio = { workspace = true, features = ["net", "signal", "io-util"] }
+serde.workspace = true
+serde_json.workspace = true
+futures-util.workspace = true
+tokio-tungstenite.workspace = true
+
+[dev-dependencies]
+tempfile = "3.23"
