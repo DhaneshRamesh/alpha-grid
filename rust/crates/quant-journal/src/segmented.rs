@@ -106,7 +106,8 @@ fn disk_free(root: &Path) -> io::Result<u64> {
         return Err(io::Error::last_os_error());
     }
     let stats = unsafe { stats.assume_init() };
-    Ok(u64::from(stats.f_bavail).saturating_mul(stats.f_frsize))
+    let bytes = u128::from(stats.f_bavail).saturating_mul(u128::from(stats.f_frsize));
+    Ok(u64::try_from(bytes).unwrap_or(u64::MAX))
 }
 
 pub struct SegmentedJournal {
