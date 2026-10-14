@@ -1,0 +1,157 @@
+{
+  "$defs": {
+    "WireProvenance": {
+      "properties": {
+        "arrival_ordinal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "feed_session_id": {
+          "type": "string"
+        },
+        "source_exchange_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_last_trade_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_protocol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "feed_session_id",
+        "source_protocol"
+      ],
+      "type": "object"
+    },
+    "WireQuality": {
+      "properties": {
+        "book_pairing_unverified": {
+          "type": "boolean"
+        },
+        "cross_feed_uncertain": {
+          "type": "boolean"
+        },
+        "inconsistent_last_trade_quantity": {
+          "type": "boolean"
+        },
+        "source_time_unverified": {
+          "type": "boolean"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "volume_interval_incomplete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source_time_unverified",
+        "volume_interval_incomplete",
+        "cross_feed_uncertain",
+        "stale",
+        "inconsistent_last_trade_quantity",
+        "book_pairing_unverified"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "close_nanos": {
+      "type": "string"
+    },
+    "end_ns": {
+      "type": "string"
+    },
+    "finalized": {
+      "type": "boolean"
+    },
+    "freshness": {
+      "type": "string"
+    },
+    "high_nanos": {
+      "type": "string"
+    },
+    "low_nanos": {
+      "type": "string"
+    },
+    "market_session_id": {
+      "type": "string"
+    },
+    "observation_count": {
+      "format": "uint64",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "observed_volume_delta": {
+      "type": "string"
+    },
+    "open_nanos": {
+      "type": "string"
+    },
+    "processing_timestamp_ns": {
+      "type": "string"
+    },
+    "provenance": {
+      "$ref": "#/$defs/WireProvenance"
+    },
+    "quality": {
+      "$ref": "#/$defs/WireQuality"
+    },
+    "source": {
+      "type": "string"
+    },
+    "source_last_trade_timestamp_ns": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_ns": {
+      "type": "string"
+    },
+    "timeframe_ns": {
+      "type": "string"
+    },
+    "timestamp_policy": {
+      "type": "string"
+    },
+    "volume": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "timeframe_ns",
+    "start_ns",
+    "end_ns",
+    "open_nanos",
+    "high_nanos",
+    "low_nanos",
+    "close_nanos",
+    "observed_volume_delta",
+    "observation_count",
+    "finalized",
+    "source",
+    "timestamp_policy",
+    "market_session_id",
+    "processing_timestamp_ns",
+    "freshness",
+    "quality",
+    "provenance"
+  ],
+  "title": "WireCandle",
+  "type": "object"
+}

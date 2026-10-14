@@ -1,0 +1,752 @@
+{
+  "$defs": {
+    "AuditEvent": {
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "instrument_key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "kind": {
+          "type": "string"
+        },
+        "timestamp_ns": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "timestamp_ns",
+        "kind",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "LatencySummary": {
+      "properties": {
+        "max_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "p50_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "p95_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "p99_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sample_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sample_count"
+      ],
+      "type": "object"
+    },
+    "WireCandle": {
+      "properties": {
+        "close_nanos": {
+          "type": "string"
+        },
+        "end_ns": {
+          "type": "string"
+        },
+        "finalized": {
+          "type": "boolean"
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "high_nanos": {
+          "type": "string"
+        },
+        "low_nanos": {
+          "type": "string"
+        },
+        "market_session_id": {
+          "type": "string"
+        },
+        "observation_count": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "observed_volume_delta": {
+          "type": "string"
+        },
+        "open_nanos": {
+          "type": "string"
+        },
+        "processing_timestamp_ns": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/WireProvenance"
+        },
+        "quality": {
+          "$ref": "#/$defs/WireQuality"
+        },
+        "source": {
+          "type": "string"
+        },
+        "source_last_trade_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "start_ns": {
+          "type": "string"
+        },
+        "timeframe_ns": {
+          "type": "string"
+        },
+        "timestamp_policy": {
+          "type": "string"
+        },
+        "volume": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "timeframe_ns",
+        "start_ns",
+        "end_ns",
+        "open_nanos",
+        "high_nanos",
+        "low_nanos",
+        "close_nanos",
+        "observed_volume_delta",
+        "observation_count",
+        "finalized",
+        "source",
+        "timestamp_policy",
+        "market_session_id",
+        "processing_timestamp_ns",
+        "freshness",
+        "quality",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "WireCounters": {
+      "properties": {
+        "connected_clients": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "decode_latency": {
+          "$ref": "#/$defs/LatencySummary"
+        },
+        "durable_events_per_second": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "durably_committed_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "feature_latency": {
+          "$ref": "#/$defs/LatencySummary"
+        },
+        "frames_received": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "fsync_latency": {
+          "$ref": "#/$defs/LatencySummary"
+        },
+        "journal_records_accepted": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "malformed_frames": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "offered_frames_per_second": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "packets_decoded": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "processed_events_per_second": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "processing_latency": {
+          "$ref": "#/$defs/LatencySummary"
+        },
+        "queue_current": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queue_high_water": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queue_rejections": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "reconnects": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "recovered_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "replayed_records": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "telemetry_coalesced_updates": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "telemetry_skipped_updates": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "frames_received",
+        "packets_decoded",
+        "journal_records_accepted",
+        "durably_committed_records",
+        "replayed_records",
+        "queue_current",
+        "queue_high_water",
+        "queue_rejections",
+        "malformed_frames",
+        "reconnects",
+        "telemetry_coalesced_updates",
+        "telemetry_skipped_updates",
+        "connected_clients",
+        "processing_latency",
+        "decode_latency",
+        "feature_latency",
+        "fsync_latency"
+      ],
+      "type": "object"
+    },
+    "WireDepth": {
+      "properties": {
+        "asks": {
+          "items": {
+            "$ref": "#/$defs/WireDepthLevel"
+          },
+          "type": "array"
+        },
+        "atomic_exchange_snapshot_verified": {
+          "type": "boolean"
+        },
+        "bids": {
+          "items": {
+            "$ref": "#/$defs/WireDepthLevel"
+          },
+          "type": "array"
+        },
+        "derived_pairing": {
+          "type": "boolean"
+        },
+        "exchange_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "receive_timestamp_ns": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "receive_timestamp_ns",
+        "derived_pairing",
+        "atomic_exchange_snapshot_verified",
+        "bids",
+        "asks"
+      ],
+      "type": "object"
+    },
+    "WireDepthLevel": {
+      "properties": {
+        "cumulative_visible_quantity": {
+          "type": "string"
+        },
+        "displayed_quantity": {
+          "type": "string"
+        },
+        "order_count": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "price_nanos": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "price_nanos",
+        "displayed_quantity",
+        "cumulative_visible_quantity"
+      ],
+      "type": "object"
+    },
+    "WireFeatures": {
+      "properties": {
+        "absolute_spread_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ask_level_weighted_depth": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bid_ask_imbalance": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "bid_level_weighted_depth": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "latest_price_return": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "microprice_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "midprice_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "price_volume_correlation": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "processing_timestamp_ns": {
+          "type": "string"
+        },
+        "provenance": {
+          "$ref": "#/$defs/WireProvenance"
+        },
+        "quality": {
+          "$ref": "#/$defs/WireQuality"
+        },
+        "relative_spread": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rolling_return_volatility": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "rolling_sample_count": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "rolling_volume_activity": {
+          "format": "double",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "snapshot_ofi_quantity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "rolling_sample_count",
+        "processing_timestamp_ns",
+        "freshness",
+        "quality",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "WireInstrument": {
+      "properties": {
+        "exchange_segment": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "security_id": {
+          "type": "string"
+        },
+        "symbol": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "venue": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "venue",
+        "exchange_segment",
+        "security_id"
+      ],
+      "type": "object"
+    },
+    "WireInstrumentSnapshot": {
+      "properties": {
+        "candles": {
+          "items": {
+            "$ref": "#/$defs/WireCandle"
+          },
+          "type": "array"
+        },
+        "depth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireDepth"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "features": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireFeatures"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "instrument": {
+          "$ref": "#/$defs/WireInstrument"
+        },
+        "last_update_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "market": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireMarket"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "previous_close_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "instrument",
+        "candles"
+      ],
+      "type": "object"
+    },
+    "WireMarket": {
+      "properties": {
+        "best_ask_price_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "best_bid_price_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "depth_receive_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "freshness": {
+          "type": "string"
+        },
+        "incremental_volume": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "price_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provenance": {
+          "$ref": "#/$defs/WireProvenance"
+        },
+        "quality": {
+          "$ref": "#/$defs/WireQuality"
+        },
+        "source_last_trade_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_receive_timestamp_ns": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_receive_timestamp_ns",
+        "freshness",
+        "quality",
+        "provenance"
+      ],
+      "type": "object"
+    },
+    "WireProvenance": {
+      "properties": {
+        "arrival_ordinal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "feed_session_id": {
+          "type": "string"
+        },
+        "source_exchange_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_last_trade_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_protocol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "feed_session_id",
+        "source_protocol"
+      ],
+      "type": "object"
+    },
+    "WireQuality": {
+      "properties": {
+        "book_pairing_unverified": {
+          "type": "boolean"
+        },
+        "cross_feed_uncertain": {
+          "type": "boolean"
+        },
+        "inconsistent_last_trade_quantity": {
+          "type": "boolean"
+        },
+        "source_time_unverified": {
+          "type": "boolean"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "volume_interval_incomplete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source_time_unverified",
+        "volume_interval_incomplete",
+        "cross_feed_uncertain",
+        "stale",
+        "inconsistent_last_trade_quantity",
+        "book_pairing_unverified"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "audit": {
+      "items": {
+        "$ref": "#/$defs/AuditEvent"
+      },
+      "type": "array"
+    },
+    "backpressure_state": {
+      "type": "string"
+    },
+    "counters": {
+      "$ref": "#/$defs/WireCounters"
+    },
+    "engine_running": {
+      "type": "boolean"
+    },
+    "feed_connected": {
+      "type": "boolean"
+    },
+    "generation": {
+      "type": "string"
+    },
+    "instruments": {
+      "items": {
+        "$ref": "#/$defs/WireInstrumentSnapshot"
+      },
+      "type": "array"
+    },
+    "journal_blocked": {
+      "type": "boolean"
+    },
+    "latest_data_timestamp_ns": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mode": {
+      "type": "string"
+    },
+    "replay_epoch": {
+      "type": "string"
+    },
+    "replay_paused": {
+      "type": "boolean"
+    },
+    "replay_speed": {
+      "format": "uint8",
+      "maximum": 255,
+      "minimum": 0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "storage_status": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "generation",
+    "replay_epoch",
+    "mode",
+    "engine_running",
+    "feed_connected",
+    "journal_blocked",
+    "replay_paused",
+    "session_id",
+    "storage_status",
+    "backpressure_state",
+    "counters",
+    "instruments",
+    "audit"
+  ],
+  "title": "WireEngineSnapshot",
+  "type": "object"
+}

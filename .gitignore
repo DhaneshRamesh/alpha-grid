@@ -14,3 +14,5 @@ data/
 benchmark-data/
 rust/target/
 .local/
+web/node_modules/
+web/dist/

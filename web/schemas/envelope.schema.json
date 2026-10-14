@@ -1,0 +1,158 @@
+{
+  "$defs": {
+    "MessageType": {
+      "enum": [
+        "engine.snapshot",
+        "engine.update",
+        "engine.health",
+        "market.snapshot",
+        "market.update",
+        "depth.snapshot",
+        "candle.snapshot",
+        "candle.update",
+        "feature.snapshot",
+        "feature.update",
+        "journal.status",
+        "telemetry.status",
+        "session.status",
+        "error",
+        "heartbeat"
+      ],
+      "type": "string"
+    },
+    "WireProvenance": {
+      "properties": {
+        "arrival_ordinal": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "feed_session_id": {
+          "type": "string"
+        },
+        "source_exchange_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_last_trade_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_protocol": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "feed_session_id",
+        "source_protocol"
+      ],
+      "type": "object"
+    },
+    "WireQuality": {
+      "properties": {
+        "book_pairing_unverified": {
+          "type": "boolean"
+        },
+        "cross_feed_uncertain": {
+          "type": "boolean"
+        },
+        "inconsistent_last_trade_quantity": {
+          "type": "boolean"
+        },
+        "source_time_unverified": {
+          "type": "boolean"
+        },
+        "stale": {
+          "type": "boolean"
+        },
+        "volume_interval_incomplete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "source_time_unverified",
+        "volume_interval_incomplete",
+        "cross_feed_uncertain",
+        "stale",
+        "inconsistent_last_trade_quantity",
+        "book_pairing_unverified"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "properties": {
+    "engine_boot_id": {
+      "type": "string"
+    },
+    "freshness": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "instrument_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "message_type": {
+      "$ref": "#/$defs/MessageType"
+    },
+    "payload": true,
+    "provenance": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WireProvenance"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "publication_sequence": {
+      "type": "string"
+    },
+    "publication_timestamp_ns": {
+      "type": "string"
+    },
+    "quality": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/WireQuality"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "schema_version": {
+      "format": "uint16",
+      "maximum": 65535,
+      "minimum": 0,
+      "type": "integer"
+    },
+    "source_receive_timestamp_ns": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "message_type",
+    "engine_boot_id",
+    "publication_sequence",
+    "publication_timestamp_ns",
+    "payload"
+  ],
+  "title": "Envelope",
+  "type": "object"
+}
