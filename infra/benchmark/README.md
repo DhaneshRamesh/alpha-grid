@@ -1,12 +1,19 @@
 # Mumbai infrastructure verification and benchmark (11 October 2026)
 
-**Completed:** [one-VM Utho Mumbai pilot](utho-pilot-20261011.md). The VM and EBS were deleted. [Pilot diagnosis and synthetic ingestion-capacity benchmark](ingestion.md) is the next offline step.
+**Completed:** [Utho Mumbai pilot](utho-pilot-20261011.md), whose VM and EBS
+were deleted; [Utho Bangalore Rust/Python trial](utho-bangalore-trial-20261014.md),
+whose VM remains active at the user's request; and [pilot diagnosis and
+synthetic ingestion-capacity benchmark](ingestion.md).
 
 The [Rust/Python ingestion comparison contract](rust-python-parity.md) and
-`setup_ubuntu.sh` prepare a later DATA_ONLY VM trial; they contain no new Utho
-measurements or provisioning steps.
+`setup_ubuntu.sh` define the clean Ubuntu workload used in the Bangalore trial.
 
-**Status: one temporary Utho VM was measured and deleted; OCI and Akamai remain unmeasured. No production deployment or order API is involved.** Published prices are inputs to an experiment, not a winner. `UNVERIFIED` means no current official source or live account evidence establishes the claim. The same Git commit and command parameters must run on every VM.
+**Status: Bangalore's temporary DATA_ONLY VM was measured and remains billable
+by user request; OCI and Akamai remain unmeasured. No production deployment or
+order API is involved.** Published prices are inputs to an experiment, not a
+winner. `UNVERIFIED` means no current official source or live account evidence
+establishes the claim. The same Git commit and command parameters must run on
+every VM.
 
 The provider tables below are the earlier research snapshot. Use the linked pilot and ingestion reports for observed results and current blockers.
 
