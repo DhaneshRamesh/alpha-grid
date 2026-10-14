@@ -1,5 +1,6 @@
 //! Synthetic source plus strict Dhan 20-depth side-packet decoding.
 pub mod dhan20;
+pub mod dhan_standard;
 use quant_core::{BOOK_LEVELS, DepthEvent, DepthLevel, Instrument};
 use std::time::{SystemTime, UNIX_EPOCH};
 
