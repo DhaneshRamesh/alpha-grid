@@ -10,6 +10,7 @@ members = [
   "crates/quant-depth",
   "crates/quant-engine",
   "crates/quant-telemetry",
+  "crates/quant-paper",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ quant-market-data = { path = "crates/quant-market-data" }
 quant-orderbook = { path = "crates/quant-orderbook" }
 quant-journal = { path = "crates/quant-journal" }
 quant-replay = { path = "crates/quant-replay" }
+quant-paper = { path = "crates/quant-paper" }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread", "sync", "time"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

@@ -685,6 +685,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "quant-paper"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "quant-core",
+ "quant-engine",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "quant-replay"
 version = "0.1.0"
 dependencies = [
