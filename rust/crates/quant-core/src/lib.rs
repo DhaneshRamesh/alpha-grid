@@ -29,6 +29,25 @@ pub struct DepthEvent {
     pub asks: [DepthLevel; BOOK_LEVELS],
 }
 
+/// A single Dhan depth side. A side packet is durable even when no matching
+/// opposite side arrived; the wire sequence is deliberately not interpreted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DepthSide {
+    Bid,
+    Ask,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DepthSideUpdate {
+    pub instrument: Instrument,
+    pub side: DepthSide,
+    pub levels: [DepthLevel; BOOK_LEVELS],
+    pub receive_timestamp_ns: i64,
+    pub feed_session_id: String,
+    pub frame_id: u64,
+    pub packet_offset: u32,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TradeEvent {
     pub instrument: Instrument,
@@ -43,6 +62,8 @@ pub struct TradeEvent {
 pub enum MarketEvent {
     Depth(Box<DepthEvent>),
     Trade(TradeEvent),
+    // Appended: QJ01/Postcard discriminants for historical Depth/Trade stay 0/1.
+    DepthSide(Box<DepthSideUpdate>),
 }
 
 impl MarketEvent {
@@ -50,6 +71,7 @@ impl MarketEvent {
         match self {
             Self::Depth(event) => event.receive_timestamp_ns,
             Self::Trade(event) => event.receive_timestamp_ns,
+            Self::DepthSide(event) => event.receive_timestamp_ns,
         }
     }
 }

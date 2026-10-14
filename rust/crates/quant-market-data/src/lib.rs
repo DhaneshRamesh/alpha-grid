@@ -1,4 +1,5 @@
-//! Synthetic source and validation boundary. No Dhan wire decoding is assumed.
+//! Synthetic source plus strict Dhan 20-depth side-packet decoding.
+pub mod dhan20;
 use quant_core::{BOOK_LEVELS, DepthEvent, DepthLevel, Instrument};
 use std::time::{SystemTime, UNIX_EPOCH};
 
