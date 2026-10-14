@@ -1,5 +1,5 @@
 use quant_telemetry::protocol::{
-    self, Envelope, WireCandle, WireEngineSnapshot, WireInstrumentSnapshot,
+    self, Envelope, WireCandle, WireEngineSnapshot, WireEngineUpdate, WireInstrumentSnapshot,
 };
 use std::fs;
 use std::path::PathBuf;
@@ -16,6 +16,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         (
             "engine-snapshot.schema.json",
             protocol::schema_json::<WireEngineSnapshot>(),
+        ),
+        (
+            "engine-update.schema.json",
+            protocol::schema_json::<WireEngineUpdate>(),
         ),
         (
             "instrument-snapshot.schema.json",

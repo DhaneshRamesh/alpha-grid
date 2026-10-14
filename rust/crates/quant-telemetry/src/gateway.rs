@@ -8,11 +8,11 @@ use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
-use axum::routing::get;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::StreamExt;
 use std::sync::Arc;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 use tokio::net::TcpListener;
 use tokio::sync::watch;
@@ -49,6 +49,20 @@ struct AppState {
     current: arc_swap::ArcSwap<WireEngineSnapshot>,
     updates: watch::Sender<Arc<WireEngineSnapshot>>,
     config: GatewayConfig,
+    demo: Option<Arc<DemoControls>>,
+}
+
+pub struct DemoControls {
+    pub shared: Arc<TelemetryShared>,
+    pub restart_requested: AtomicU64,
+}
+impl DemoControls {
+    pub fn new(shared: Arc<TelemetryShared>) -> Arc<Self> {
+        Arc::new(Self {
+            shared,
+            restart_requested: AtomicU64::new(0),
+        })
+    }
 }
 
 pub struct Gateway {
@@ -65,8 +79,16 @@ impl Gateway {
                 current: arc_swap::ArcSwap::from(first),
                 updates,
                 config,
+                demo: None,
             }),
         })
+    }
+
+    pub fn with_demo_controls(mut self, controls: Arc<DemoControls>) -> Self {
+        Arc::get_mut(&mut self.state)
+            .expect("unshared gateway")
+            .demo = Some(controls);
+        self
     }
 
     pub fn router(&self) -> Router {
@@ -75,6 +97,7 @@ impl Gateway {
             .route("/api/health", get(health))
             .route("/api/instruments/{key}", get(instrument))
             .route("/ws", get(websocket))
+            .route("/api/demo/control", post(demo_control))
             .with_state(Arc::clone(&self.state))
     }
 
@@ -125,6 +148,49 @@ impl Gateway {
             })
             .await
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ControlRequest {
+    action: String,
+    speed: Option<u8>,
+}
+
+async fn demo_control(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    Json(request): Json<ControlRequest>,
+) -> impl IntoResponse {
+    let Some(demo) = &state.demo else {
+        return StatusCode::NOT_FOUND;
+    };
+    if let Some(origin) = headers.get("origin") {
+        let allowed = matches!(
+            origin.to_str(),
+            Ok("http://127.0.0.1:5173"
+                | "http://localhost:5173"
+                | "http://127.0.0.1:8765"
+                | "http://localhost:8765")
+        );
+        if !allowed {
+            return StatusCode::FORBIDDEN;
+        }
+    }
+    match request.action.as_str() {
+        "pause" => demo.shared.set_replay_paused(true),
+        "resume" => demo.shared.set_replay_paused(false),
+        "restart" => {
+            demo.restart_requested.fetch_add(1, Ordering::AcqRel);
+            demo.shared.set_replay_paused(false);
+        }
+        "speed" if matches!(request.speed, Some(1 | 2 | 5)) => demo
+            .shared
+            .replay_speed
+            .store(request.speed.unwrap_or(1), Ordering::Release),
+        _ => return StatusCode::BAD_REQUEST,
+    }
+    StatusCode::NO_CONTENT
 }
 
 fn envelope(
@@ -259,7 +325,7 @@ async fn client(mut socket: WebSocket, state: Arc<AppState>) {
                 let next = receiver.borrow_and_update().clone();
                 let old_generation = previous.generation.parse::<u64>().unwrap_or(0);
                 let new_generation = next.generation.parse::<u64>().unwrap_or(0);
-                let (kind, payload) = if new_generation != old_generation + 1 {
+                let (kind, payload) = if new_generation != old_generation + 1 || next.replay_epoch != previous.replay_epoch {
                     state.shared.skipped_updates.fetch_add(new_generation.saturating_sub(old_generation + 1), Ordering::Relaxed);
                     (MessageType::EngineSnapshot, serde_json::to_value(&*next))
                 } else {

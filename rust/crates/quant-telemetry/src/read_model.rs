@@ -10,7 +10,7 @@ use quant_engine::pipeline::EngineOutput;
 use quant_journal::JournalRecord;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 
 const MAX_CANDLES: usize = 240 * 6;
 const MAX_AUDIT: usize = 200;
@@ -24,6 +24,9 @@ pub struct TelemetryShared {
     pub(crate) skipped_updates: AtomicU64,
     pub(crate) journal_blocked: AtomicBool,
     pub(crate) replay_paused: AtomicBool,
+    pub(crate) replay_speed: AtomicU8,
+    pub(crate) replay_epoch: AtomicU64,
+    last_observed_wall_ns: AtomicI64,
     pub(crate) engine_running: AtomicBool,
     pub(crate) mode: String,
     pub(crate) session_id: String,
@@ -55,6 +58,9 @@ impl TelemetryShared {
             skipped_updates: AtomicU64::new(0),
             journal_blocked: AtomicBool::new(false),
             replay_paused: AtomicBool::new(false),
+            replay_speed: AtomicU8::new(1),
+            replay_epoch: AtomicU64::new(0),
+            last_observed_wall_ns: AtomicI64::new(0),
             engine_running: AtomicBool::new(true),
             mode: mode.into(),
             session_id: session_id.into(),
@@ -68,8 +74,25 @@ impl TelemetryShared {
     pub fn set_replay_paused(&self, paused: bool) {
         self.replay_paused.store(paused, Ordering::Release);
     }
+    pub fn replay_paused(&self) -> bool {
+        self.replay_paused.load(Ordering::Acquire)
+    }
+    pub fn replay_speed(&self) -> u8 {
+        self.replay_speed.load(Ordering::Acquire)
+    }
     pub fn stop(&self) {
         self.engine_running.store(false, Ordering::Release);
+    }
+
+    pub fn reset_replay(&self) {
+        for slot in self.slots.values() {
+            slot.store(None);
+        }
+        self.counters.store(Arc::new(WireCounters::default()));
+        self.audit.store(Arc::new(Vec::new()));
+        self.replay_epoch.fetch_add(1, Ordering::AcqRel);
+        self.last_observed_wall_ns.store(0, Ordering::Release);
+        self.engine_running.store(true, Ordering::Release);
     }
 
     pub fn snapshot(&self, generation: u64, stale_after_ns: i64) -> WireEngineSnapshot {
@@ -101,7 +124,11 @@ impl TelemetryShared {
                 .and_then(|s| s.parse::<i64>().ok())
             {
                 latest = Some(latest.map_or(ns, |old| old.max(ns)));
-                if now.saturating_sub(ns) > stale_after_ns {
+                let observed_wall = self.last_observed_wall_ns.load(Ordering::Acquire);
+                if observed_wall > 0
+                    && now.saturating_sub(observed_wall) > stale_after_ns
+                    && !self.replay_paused.load(Ordering::Acquire)
+                {
                     if let Some(market) = &mut value.market {
                         market.freshness = "STALE".into();
                         market.quality.stale = true;
@@ -120,11 +147,14 @@ impl TelemetryShared {
         counters.telemetry_skipped_updates = self.skipped_updates.load(Ordering::Acquire);
         WireEngineSnapshot {
             generation: generation.to_string(),
+            replay_epoch: self.replay_epoch.load(Ordering::Acquire).to_string(),
             mode: self.mode.clone(),
             engine_running: self.engine_running.load(Ordering::Acquire),
             feed_connected: false, // Replay/demo is not an authenticated live feed.
             journal_blocked: self.journal_blocked.load(Ordering::Acquire),
             replay_paused: self.replay_paused.load(Ordering::Acquire),
+            replay_speed: (self.mode == "REPLAY")
+                .then(|| self.replay_speed.load(Ordering::Acquire)),
             session_id: self.session_id.clone(),
             latest_data_timestamp_ns: latest.map(|n| n.to_string()),
             storage_status: if self.journal_blocked.load(Ordering::Acquire) {
@@ -185,6 +215,9 @@ impl TelemetryPublisher {
 
     /// Call only after append_and_process succeeds, or from an explicitly marked replay.
     pub fn observe(&mut self, record: &JournalRecord, output: &EngineOutput, replay: bool) {
+        self.shared
+            .last_observed_wall_ns
+            .store(now_ns(), Ordering::Release);
         if replay {
             self.counters.replayed_records += 1;
         } else {
