@@ -365,6 +365,7 @@ pub struct WireCounters {
     pub decode_latency: LatencySummary,
     pub feature_latency: LatencySummary,
     pub fsync_latency: LatencySummary,
+    pub telemetry_publication_latency: LatencySummary,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]

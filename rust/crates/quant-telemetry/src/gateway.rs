@@ -1,7 +1,7 @@
 //! Local read-only HTTP and bounded latest-value WebSocket telemetry.
 use crate::protocol::{
-    Envelope, MessageType, WIRE_VERSION, WireEngineSnapshot, WireEngineSnapshotStatus,
-    WireEngineUpdate,
+    Envelope, LatencySummary, MessageType, WIRE_VERSION, WireEngineSnapshot,
+    WireEngineSnapshotStatus, WireEngineUpdate,
 };
 use crate::read_model::{TelemetryShared, now_ns};
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
@@ -71,7 +71,11 @@ pub struct Gateway {
 impl Gateway {
     pub fn new(shared: Arc<TelemetryShared>, config: GatewayConfig) -> Result<Self, &'static str> {
         let config = config.validate()?;
-        let first = Arc::new(shared.snapshot(0, config.stale_after_ns));
+        let first = Arc::new(
+            shared
+                .snapshot(0, config.stale_after_ns)
+                .ok_or("read model busy")?,
+        );
         let (updates, _) = watch::channel(Arc::clone(&first));
         Ok(Self {
             state: Arc::new(AppState {
@@ -115,17 +119,37 @@ impl Gateway {
         let publisher = tokio::spawn(async move {
             let mut generation = 0_u64;
             let mut observed_events = 0_u64;
+            let mut observed_epoch = 0_u64;
+            let mut publication_samples = std::collections::VecDeque::<u64>::new();
             loop {
                 tokio::select! {
                     _ = tick.tick() => {
+                        let epoch = state.shared.replay_epoch.load(Ordering::Acquire);
+                        if epoch != observed_epoch { observed_epoch = epoch; observed_events = 0; publication_samples.clear(); }
                         let counts = state.shared.counters.load();
                         let total = counts.journal_records_accepted + counts.replayed_records;
+                        if total > observed_events {
+                            let last = state.shared.last_observed_mono_ns.load(Ordering::Acquire);
+                            if last > 0 {
+                                let now = state.shared.clock_started.elapsed().as_nanos().min(u64::MAX as u128) as u64;
+                                publication_samples.push_back(now.saturating_sub(last));
+                                while publication_samples.len() > 10_000 { publication_samples.pop_front(); }
+                                let mut sorted: Vec<_> = publication_samples.iter().copied().collect();
+                                sorted.sort_unstable();
+                                let at = |fraction: f64| sorted[((sorted.len() as f64 * fraction).ceil() as usize).saturating_sub(1)];
+                                state.shared.publication_latency.store(Arc::new(LatencySummary {
+                                    sample_count: sorted.len() as u64, p50_ns: Some(at(0.5).to_string()),
+                                    p95_ns: Some(at(0.95).to_string()), p99_ns: Some(at(0.99).to_string()),
+                                    max_ns: sorted.last().map(ToString::to_string),
+                                }));
+                            }
+                        }
                         if total > observed_events + 1 {
                             state.shared.coalesced_updates.fetch_add(total - observed_events - 1, Ordering::Relaxed);
                         }
                         observed_events = total;
                         let previous = state.current.load_full();
-                        let candidate = state.shared.snapshot(generation + 1, state.config.stale_after_ns);
+                        let Some(candidate) = state.shared.snapshot(generation + 1, state.config.stale_after_ns) else { continue; };
                         let mut old_without_generation = (*previous).clone();
                         old_without_generation.generation = candidate.generation.clone();
                         if candidate != old_without_generation {
@@ -198,14 +222,14 @@ fn envelope(
     kind: MessageType,
     payload: serde_json::Value,
     source: Option<String>,
+    publication_sequence: &str,
 ) -> Envelope {
-    let current = state.current.load();
     Envelope {
         schema_version: WIRE_VERSION,
         message_type: kind,
         instrument_key: None,
         engine_boot_id: state.shared.boot_id.clone(),
-        publication_sequence: current.generation.clone(),
+        publication_sequence: publication_sequence.into(),
         source_receive_timestamp_ns: source,
         publication_timestamp_ns: now_ns().to_string(),
         provenance: None,
@@ -222,6 +246,7 @@ async fn snapshot(State(state): State<Arc<AppState>>) -> Json<Envelope> {
         MessageType::EngineSnapshot,
         serde_json::to_value(&*current).expect("snapshot JSON"),
         current.latest_data_timestamp_ns.clone(),
+        &current.generation,
     ))
 }
 
@@ -289,6 +314,9 @@ async fn send(socket: &mut WebSocket, envelope: Envelope) -> bool {
     let Ok(text) = serde_json::to_string(&envelope) else {
         return false;
     };
+    if text.len() > 4 * 1024 * 1024 {
+        return false;
+    }
     matches!(
         tokio::time::timeout(
             Duration::from_secs(2),
@@ -311,6 +339,7 @@ async fn client(mut socket: WebSocket, state: Arc<AppState>) {
             MessageType::EngineSnapshot,
             serde_json::to_value(&*initial).expect("snapshot JSON"),
             initial.latest_data_timestamp_ns.clone(),
+            &initial.generation,
         ),
     )
     .await
@@ -334,11 +363,12 @@ async fn client(mut socket: WebSocket, state: Arc<AppState>) {
                     (MessageType::EngineUpdate, serde_json::to_value(update))
                 };
                 let Ok(payload) = payload else { break; };
-                if !send(&mut socket, envelope(&state, kind, payload, next.latest_data_timestamp_ns.clone())).await { break; }
+                if !send(&mut socket, envelope(&state, kind, payload, next.latest_data_timestamp_ns.clone(), &next.generation)).await { break; }
                 previous = next;
             }
             _ = heartbeat.tick() => {
-                if !send(&mut socket, envelope(&state, MessageType::Heartbeat, serde_json::json!({}), None)).await { break; }
+                let current = state.current.load();
+                if !send(&mut socket, envelope(&state, MessageType::Heartbeat, serde_json::json!({}), None, &current.generation)).await { break; }
             }
             received = socket.next() => {
                 match received { Some(Ok(Message::Close(_))) | None | Some(Err(_)) => break, _ => {} }
@@ -377,6 +407,7 @@ mod tests {
         let first = socket.next().await.unwrap().unwrap().into_text().unwrap();
         let initial: Envelope = serde_json::from_str(&first).unwrap();
         assert_eq!(initial.message_type, MessageType::EngineSnapshot);
+        assert_eq!(initial.publication_sequence, initial.payload["generation"]);
         let output = EngineOutput {
             volume: None,
             finalized_candles: Vec::new(),
@@ -416,10 +447,27 @@ mod tests {
         })
         .await
         .unwrap();
+        assert_eq!(update.publication_sequence, update.payload["generation"]);
         assert_eq!(
             update.payload["instruments"][0]["depth"]["bids"][0]["price_nanos"],
             "3"
         );
+        shared.reset_replay();
+        let reset = tokio::time::timeout(Duration::from_secs(3), async {
+            loop {
+                let text = socket.next().await.unwrap().unwrap().into_text().unwrap();
+                let envelope: Envelope = serde_json::from_str(&text).unwrap();
+                if envelope.message_type == MessageType::EngineSnapshot
+                    && envelope.payload["replay_epoch"] == "1"
+                {
+                    break envelope;
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert_eq!(reset.publication_sequence, reset.payload["generation"]);
+        assert!(reset.payload["instruments"][0]["depth"].is_null());
         drop(socket);
         let (mut reconnected, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
         let full: Envelope = serde_json::from_str(
@@ -433,10 +481,45 @@ mod tests {
         )
         .unwrap();
         assert_eq!(full.message_type, MessageType::EngineSnapshot);
-        assert_eq!(
-            full.payload["instruments"][0]["depth"]["bids"][0]["price_nanos"],
-            "3"
-        );
+        assert_eq!(full.publication_sequence, full.payload["generation"]);
+        assert!(full.payload["instruments"][0]["depth"].is_null());
+        stop.send(true).unwrap();
+        server.await.unwrap().unwrap();
+    }
+
+    #[tokio::test]
+    async fn client_limit_rejects_excess_connection_and_cleans_up() {
+        let instrument = Instrument {
+            venue: "NSE".into(),
+            exchange_segment: "NSE_EQ".into(),
+            security_id: "1333".into(),
+            symbol: String::new(),
+        };
+        let shared = TelemetryShared::new(&[instrument], "REPLAY", "test").unwrap();
+        let gateway = Gateway::new(
+            Arc::clone(&shared),
+            GatewayConfig {
+                max_clients: 1,
+                ..GatewayConfig::default()
+            },
+        )
+        .unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let (stop, stop_rx) = watch::channel(false);
+        let server = tokio::spawn(gateway.serve(listener, stop_rx));
+        let url = format!("ws://{address}/ws");
+        let (first, _) = tokio_tungstenite::connect_async(&url).await.unwrap();
+        assert!(tokio_tungstenite::connect_async(&url).await.is_err());
+        assert_eq!(shared.connected_clients.load(Ordering::Acquire), 1);
+        drop(first);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while shared.connected_clients.load(Ordering::Acquire) != 0 {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
         stop.send(true).unwrap();
         server.await.unwrap().unwrap();
     }

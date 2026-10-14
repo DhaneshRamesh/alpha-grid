@@ -4,6 +4,13 @@ Python 3.12+ foundation for a cloud-native NSE research and trading platform. It
 now includes a Dhan 20-level depth source, durable storage, and feed health.
 It has no strategy or order API.
 
+## Local DATA_ONLY cockpit
+
+The Phase 2C [Rust telemetry gateway and React cockpit](rust/docs/phase2c-cockpit.md)
+display a local synthetic QJ01 replay with real Phase 2B candles, depth and
+features. The demo has no Dhan login or broker orders. It does not touch the
+Utho VM.
+
 ## Set up
 
 ```sh

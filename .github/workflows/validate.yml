@@ -45,3 +45,19 @@ jobs:
           cargo clippy --locked --workspace --all-targets --manifest-path rust/Cargo.toml -- -D warnings
           cargo build --locked --workspace --release --manifest-path rust/Cargo.toml
           cargo check --locked -p quant-depth --features live-readonly --manifest-path rust/Cargo.toml
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Frontend tests and schema compatibility
+        run: |
+          npm ci --prefix web
+          cargo run --locked -q -p quant-telemetry --bin schema_export --manifest-path rust/Cargo.toml -- web/schemas
+          npm run schema:generate --prefix web
+          git diff --exit-code -- web/schemas web/src/generated
+          npm run typecheck --prefix web
+          npm run lint --prefix web
+          npm run format:check --prefix web
+          npm test --prefix web
+          npm run build --prefix web

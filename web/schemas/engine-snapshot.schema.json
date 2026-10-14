@@ -254,6 +254,9 @@
           "minimum": 0,
           "type": "integer"
         },
+        "telemetry_publication_latency": {
+          "$ref": "#/$defs/LatencySummary"
+        },
         "telemetry_skipped_updates": {
           "format": "uint64",
           "minimum": 0,
@@ -277,7 +280,8 @@
         "processing_latency",
         "decode_latency",
         "feature_latency",
-        "fsync_latency"
+        "fsync_latency",
+        "telemetry_publication_latency"
       ],
       "type": "object"
     },

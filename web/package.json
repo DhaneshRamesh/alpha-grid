@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src",
+    "format:check": "prettier --check src vite.config.ts eslint.config.js",
     "test": "vitest run",
     "schema:generate": "json2ts -i schemas/engine-snapshot.schema.json -o src/generated/engine-snapshot.d.ts && json2ts -i schemas/engine-update.schema.json -o src/generated/engine-update.d.ts && json2ts -i schemas/envelope.schema.json -o src/generated/envelope.d.ts"
   },
@@ -28,6 +29,7 @@
     "globals": "16.5.0",
     "jsdom": "30.1.2",
     "json-schema-to-typescript": "16.0.0",
+    "prettier": "3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "8.56.0",
     "vite": "8.3.4",

@@ -1,8 +1,8 @@
 //! Single-writer read model. Each instrument slot is replaced atomically after
 //! durable append and engine processing; gateway reads never lock ingestion.
 use crate::protocol::{
-    AuditEvent, WireCandle, WireCounters, WireDepth, WireEngineSnapshot, WireFeatures,
-    WireInstrument, WireInstrumentSnapshot, WireMarket, instrument_key,
+    AuditEvent, LatencySummary, WireCandle, WireCounters, WireDepth, WireEngineSnapshot,
+    WireFeatures, WireInstrument, WireInstrumentSnapshot, WireMarket, instrument_key,
 };
 use arc_swap::{ArcSwap, ArcSwapOption};
 use quant_core::{Instrument, MarketEvent, MarketSessionKind};
@@ -11,12 +11,16 @@ use quant_journal::JournalRecord;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::time::Instant;
 
-const MAX_CANDLES: usize = 240 * 6;
+const MAX_PER_TIMEFRAME: usize = 240;
+const MAX_CANDLES: usize = MAX_PER_TIMEFRAME * 6;
 const MAX_AUDIT: usize = 200;
 
 pub struct TelemetryShared {
     pub(crate) slots: BTreeMap<String, ArcSwapOption<WireInstrumentSnapshot>>,
+    freshness_clocks: BTreeMap<String, AtomicI64>,
+    revision: AtomicU64,
     pub(crate) counters: ArcSwap<WireCounters>,
     pub(crate) audit: ArcSwap<Vec<AuditEvent>>,
     pub(crate) connected_clients: AtomicUsize,
@@ -27,6 +31,9 @@ pub struct TelemetryShared {
     pub(crate) replay_speed: AtomicU8,
     pub(crate) replay_epoch: AtomicU64,
     last_observed_wall_ns: AtomicI64,
+    pub(crate) clock_started: Instant,
+    pub(crate) last_observed_mono_ns: AtomicU64,
+    pub(crate) publication_latency: ArcSwap<LatencySummary>,
     pub(crate) engine_running: AtomicBool,
     pub(crate) mode: String,
     pub(crate) session_id: String,
@@ -43,14 +50,18 @@ impl TelemetryShared {
             return Err("instrument count must be 1..=50");
         }
         let mut slots = BTreeMap::new();
+        let mut freshness_clocks = BTreeMap::new();
         for instrument in instruments {
             let key = instrument_key(instrument);
-            if slots.insert(key, ArcSwapOption::empty()).is_some() {
+            if slots.insert(key.clone(), ArcSwapOption::empty()).is_some() {
                 return Err("duplicate instrument");
             }
+            freshness_clocks.insert(key, AtomicI64::new(0));
         }
         Ok(Arc::new(Self {
             slots,
+            freshness_clocks,
+            revision: AtomicU64::new(0),
             counters: ArcSwap::from_pointee(WireCounters::default()),
             audit: ArcSwap::from_pointee(Vec::new()),
             connected_clients: AtomicUsize::new(0),
@@ -61,6 +72,9 @@ impl TelemetryShared {
             replay_speed: AtomicU8::new(1),
             replay_epoch: AtomicU64::new(0),
             last_observed_wall_ns: AtomicI64::new(0),
+            clock_started: Instant::now(),
+            last_observed_mono_ns: AtomicU64::new(0),
+            publication_latency: ArcSwap::from_pointee(LatencySummary::default()),
             engine_running: AtomicBool::new(true),
             mode: mode.into(),
             session_id: session_id.into(),
@@ -85,17 +99,36 @@ impl TelemetryShared {
     }
 
     pub fn reset_replay(&self) {
+        let _write = WriteGuard::new(self);
         for slot in self.slots.values() {
             slot.store(None);
+        }
+        for clock in self.freshness_clocks.values() {
+            clock.store(0, Ordering::Release);
         }
         self.counters.store(Arc::new(WireCounters::default()));
         self.audit.store(Arc::new(Vec::new()));
         self.replay_epoch.fetch_add(1, Ordering::AcqRel);
         self.last_observed_wall_ns.store(0, Ordering::Release);
+        self.last_observed_mono_ns.store(0, Ordering::Release);
         self.engine_running.store(true, Ordering::Release);
     }
 
-    pub fn snapshot(&self, generation: u64, stale_after_ns: i64) -> WireEngineSnapshot {
+    pub fn snapshot(&self, generation: u64, stale_after_ns: i64) -> Option<WireEngineSnapshot> {
+        for _ in 0..3 {
+            let before = self.revision.load(Ordering::Acquire);
+            if before & 1 != 0 {
+                continue;
+            }
+            let value = self.snapshot_once(generation, stale_after_ns);
+            if self.revision.load(Ordering::Acquire) == before {
+                return Some(value);
+            }
+        }
+        None
+    }
+
+    fn snapshot_once(&self, generation: u64, stale_after_ns: i64) -> WireEngineSnapshot {
         let now = now_ns();
         let mut latest = None::<i64>;
         let mut instruments = Vec::with_capacity(self.slots.len());
@@ -124,7 +157,11 @@ impl TelemetryShared {
                 .and_then(|s| s.parse::<i64>().ok())
             {
                 latest = Some(latest.map_or(ns, |old| old.max(ns)));
-                let observed_wall = self.last_observed_wall_ns.load(Ordering::Acquire);
+                let observed_wall = self
+                    .freshness_clocks
+                    .get(key)
+                    .map(|clock| clock.load(Ordering::Acquire))
+                    .unwrap_or(0);
                 if observed_wall > 0
                     && now.saturating_sub(observed_wall) > stale_after_ns
                     && !self.replay_paused.load(Ordering::Acquire)
@@ -145,6 +182,7 @@ impl TelemetryShared {
         counters.connected_clients = self.connected_clients.load(Ordering::Acquire);
         counters.telemetry_coalesced_updates = self.coalesced_updates.load(Ordering::Acquire);
         counters.telemetry_skipped_updates = self.skipped_updates.load(Ordering::Acquire);
+        counters.telemetry_publication_latency = (**self.publication_latency.load()).clone();
         WireEngineSnapshot {
             generation: generation.to_string(),
             replay_epoch: self.replay_epoch.load(Ordering::Acquire).to_string(),
@@ -173,6 +211,19 @@ impl TelemetryShared {
             instruments,
             audit: (**self.audit.load()).clone(),
         }
+    }
+}
+
+struct WriteGuard<'a>(&'a TelemetryShared);
+impl<'a> WriteGuard<'a> {
+    fn new(shared: &'a TelemetryShared) -> Self {
+        shared.revision.fetch_add(1, Ordering::AcqRel);
+        Self(shared)
+    }
+}
+impl Drop for WriteGuard<'_> {
+    fn drop(&mut self) {
+        self.0.revision.fetch_add(1, Ordering::Release);
     }
 }
 
@@ -215,9 +266,18 @@ impl TelemetryPublisher {
 
     /// Call only after append_and_process succeeds, or from an explicitly marked replay.
     pub fn observe(&mut self, record: &JournalRecord, output: &EngineOutput, replay: bool) {
+        let _write = WriteGuard::new(&self.shared);
         self.shared
             .last_observed_wall_ns
             .store(now_ns(), Ordering::Release);
+        self.shared.last_observed_mono_ns.store(
+            self.shared
+                .clock_started
+                .elapsed()
+                .as_nanos()
+                .min(u64::MAX as u128) as u64,
+            Ordering::Release,
+        );
         if replay {
             self.counters.replayed_records += 1;
         } else {
@@ -249,13 +309,26 @@ impl TelemetryPublisher {
         let key = instrument_key(instrument);
         if let Some(snapshot) = self.snapshots.get_mut(&key) {
             let timestamp = record.event.receive_timestamp_ns();
-            snapshot.last_update_timestamp_ns = Some(timestamp.to_string());
+            if output.features.is_some() || matches!(record.event, MarketEvent::Depth(_)) {
+                snapshot.last_update_timestamp_ns = Some(timestamp.to_string());
+                if let Some(clock) = self.shared.freshness_clocks.get(&key) {
+                    clock.store(now_ns(), Ordering::Release);
+                }
+            }
             if let MarketEvent::Depth(depth) = &record.event {
                 snapshot.depth = Some(WireDepth::from(depth.as_ref()));
             }
             if let Some(features) = &output.features {
                 snapshot.market = Some(WireMarket::from_output(features));
                 snapshot.features = Some(WireFeatures::from_output(features));
+                if snapshot.depth.is_some() {
+                    if let Some(market) = &mut snapshot.market {
+                        market.quality.book_pairing_unverified = true;
+                    }
+                    if let Some(features) = &mut snapshot.features {
+                        features.quality.book_pairing_unverified = true;
+                    }
+                }
             }
             let history = self.candles.entry(key.clone()).or_default();
             for candle in output
@@ -270,7 +343,18 @@ impl TelemetryPublisher {
                 {
                     *existing = wire;
                 } else {
+                    let timeframe = wire.timeframe_ns.clone();
                     history.push_back(wire);
+                    if history
+                        .iter()
+                        .filter(|v| v.timeframe_ns == timeframe)
+                        .count()
+                        > MAX_PER_TIMEFRAME
+                        && let Some(oldest) =
+                            history.iter().position(|v| v.timeframe_ns == timeframe)
+                    {
+                        history.remove(oldest);
+                    }
                 }
             }
             while history.len() > MAX_CANDLES {
@@ -285,6 +369,7 @@ impl TelemetryPublisher {
     }
 
     pub fn audit(&mut self, event: AuditEvent) {
+        let _write = WriteGuard::new(&self.shared);
         self.audit.push_back(event);
         while self.audit.len() > MAX_AUDIT {
             self.audit.pop_front();
@@ -308,6 +393,17 @@ pub fn now_ns() -> i64 {
 mod tests {
     use super::*;
     use quant_core::{DepthEvent, DepthLevel};
+    use quant_engine::bars::BarConfig;
+    use quant_engine::features::FeatureConfig;
+    use quant_engine::pipeline::MarketEngine;
+    use quant_engine::{MarketCalendar, TimestampPolicy};
+
+    struct Calendar;
+    impl MarketCalendar for Calendar {
+        fn session_at(&self, _: i64) -> Option<String> {
+            Some("test".into())
+        }
+    }
 
     fn instrument() -> Instrument {
         Instrument {
@@ -350,7 +446,7 @@ mod tests {
             features: None,
         };
         publisher.observe(&record, &output, true);
-        let snapshot = shared.snapshot(7, 5_000_000_000);
+        let snapshot = shared.snapshot(7, 5_000_000_000).unwrap();
         assert_eq!(snapshot.generation, "7");
         assert_eq!(
             snapshot.instruments[0].depth.as_ref().unwrap().bids.len(),
@@ -362,6 +458,15 @@ mod tests {
         );
         assert_eq!(snapshot.counters.replayed_records, 1);
         assert_eq!(snapshot.counters.durably_committed_records, 0);
+        assert_eq!(
+            shared.snapshot(8, 1).unwrap().instruments[0]
+                .depth
+                .as_ref()
+                .unwrap()
+                .bids
+                .len(),
+            20
+        );
     }
 
     #[test]
@@ -369,6 +474,137 @@ mod tests {
         let instrument = instrument();
         assert!(TelemetryShared::new(&vec![instrument.clone(); 51], "REPLAY", "x").is_err());
         let shared = TelemetryShared::new(&[instrument], "REPLAY", "x").unwrap();
-        assert!(shared.snapshot(0, 1).instruments[0].market.is_none());
+        assert!(
+            shared.snapshot(0, 1).unwrap().instruments[0]
+                .market
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn concurrent_snapshots_never_mix_depth_and_receive_generations() {
+        let instrument = instrument();
+        let shared =
+            TelemetryShared::new(std::slice::from_ref(&instrument), "REPLAY", "x").unwrap();
+        let writer_shared = Arc::clone(&shared);
+        let worker = std::thread::spawn(move || {
+            let mut publisher = TelemetryPublisher::new(
+                Arc::clone(&writer_shared),
+                std::slice::from_ref(&instrument),
+            );
+            let output = EngineOutput {
+                volume: None,
+                finalized_candles: Vec::new(),
+                provisional_candles: Vec::new(),
+                features: None,
+            };
+            for n in 1..=1_000 {
+                let record = JournalRecord {
+                    session_id: "x".into(),
+                    event: MarketEvent::Depth(Box::new(DepthEvent {
+                        instrument: instrument.clone(),
+                        exchange_timestamp_ns: None,
+                        receive_timestamp_ns: n,
+                        sequence: None,
+                        bids: [DepthLevel::default(); 20],
+                        asks: [DepthLevel::default(); 20],
+                    })),
+                };
+                publisher.observe(&record, &output, true);
+            }
+        });
+        for _ in 0..1_000 {
+            if let Some(snapshot) = shared.snapshot(0, i64::MAX) {
+                let value = &snapshot.instruments[0];
+                if let Some(depth) = &value.depth {
+                    assert_eq!(
+                        value.last_update_timestamp_ns.as_ref(),
+                        Some(&depth.receive_timestamp_ns)
+                    );
+                }
+            }
+        }
+        worker.join().unwrap();
+        assert_eq!(
+            shared
+                .snapshot(0, i64::MAX)
+                .unwrap()
+                .counters
+                .replayed_records,
+            1_000
+        );
+    }
+
+    #[test]
+    fn stale_status_is_per_instrument_and_book_pairing_is_unverified() {
+        let first = instrument();
+        let second = Instrument {
+            security_id: "2885".into(),
+            symbol: "TATAMOTORS".into(),
+            ..first.clone()
+        };
+        let instruments = [first, second];
+        let shared = TelemetryShared::new(&instruments, "REPLAY", "test").unwrap();
+        let mut publisher = TelemetryPublisher::new(Arc::clone(&shared), &instruments);
+        let mut engine = MarketEngine::new(
+            Box::new(Calendar),
+            BarConfig {
+                timestamp_policy: TimestampPolicy::Receive,
+                max_lateness_ns: 0,
+                max_open_bars_per_instrument: 10,
+            },
+            FeatureConfig {
+                max_cross_feed_age_ns: 1_000_000_000,
+                stale_after_ns: 2_000_000_000,
+                rolling_window: 8,
+            },
+        )
+        .unwrap();
+        for instrument in &instruments {
+            let record = JournalRecord {
+                session_id: "test".into(),
+                event: MarketEvent::Depth(Box::new(DepthEvent {
+                    instrument: instrument.clone(),
+                    exchange_timestamp_ns: None,
+                    receive_timestamp_ns: now_ns(),
+                    sequence: None,
+                    bids: [DepthLevel {
+                        price_nanos: 100_000_000_000,
+                        quantity: 10,
+                        order_count: Some(1),
+                    }; 20],
+                    asks: [DepthLevel {
+                        price_nanos: 101_000_000_000,
+                        quantity: 20,
+                        order_count: Some(2),
+                    }; 20],
+                })),
+            };
+            let output = engine.process(&record).unwrap();
+            publisher.observe(&record, &output, true);
+        }
+        let first_key = instrument_key(&instruments[0]);
+        shared
+            .freshness_clocks
+            .get(&first_key)
+            .unwrap()
+            .store(now_ns() - 10_000_000_000, Ordering::Release);
+        let snapshot = shared.snapshot(1, 1_000_000_000).unwrap();
+        assert_eq!(
+            snapshot.instruments[0].market.as_ref().unwrap().freshness,
+            "STALE"
+        );
+        assert_ne!(
+            snapshot.instruments[1].market.as_ref().unwrap().freshness,
+            "STALE"
+        );
+        assert!(
+            snapshot.instruments[0]
+                .market
+                .as_ref()
+                .unwrap()
+                .quality
+                .book_pairing_unverified
+        );
     }
 }

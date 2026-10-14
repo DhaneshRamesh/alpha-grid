@@ -158,6 +158,7 @@ export interface WireCounters {
   recovered_records?: number | null;
   replayed_records: number;
   telemetry_coalesced_updates: number;
+  telemetry_publication_latency: LatencySummary;
   telemetry_skipped_updates: number;
   [k: string]: unknown;
 }
