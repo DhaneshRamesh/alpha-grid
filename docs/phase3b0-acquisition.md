@@ -1,0 +1,49 @@
+# Historical acquisition contract (DATA_ONLY)
+
+This milestone is offline by default. The documented `quant.apps.acquisition`
+command only plans requests. It never reads a credential or makes a network
+connection. Authenticated collection requires a separate approval and an
+explicit `run_backfill(..., enabled=True)` call; no trading API is present.
+
+## Sources and terms checked 2026-10-15
+
+- [Dhan historical charts](https://dhanhq.co/docs/v2/historical-data/):
+  `POST /v2/charts/historical` returns daily OHLCV with an exclusive `toDate`;
+  `POST /v2/charts/intraday` supports 1, 5, 15, 25 and 60 minute candles,
+  at most 90 days per request, and says up to five years for active
+  instruments. Availability and subscription entitlement remain unverified.
+  Dhan's example uses epoch seconds; intraday timestamp meaning (bar start or
+  bar end), adjustment status, and clock precision need empirical validation.
+- [NSE UDiFF format catalogue](https://www.nseindia.com/static/resources/forms-formats-members)
+  and [public report listing](https://www.nseindia.com/all-reports) identify
+  CM UDiFF bhavcopy archives. Local import needs the exact file format/schema
+  version and a recorded source URL. This is daily exchange data, never ticks.
+- [NSE data use policy](https://www.nseindia.com/static/market-data/nse-data-policy)
+  restricts use and redistribution according to applicable agreements.
+  [Historical data subscriptions](https://www.nseindia.com/static/market-data/eod-historical-data-subscription)
+  are separate. Local import is supported; automated archive fetching and
+  public redistribution remain disabled pending rights review.
+
+## Typed contract
+
+`ohlcv-v1` has NSE cash identity (`venue`, `segment`, `security_id`, symbol,
+optional ISIN), inclusive trading date, interval minutes (null for daily),
+optional UTC bar-start nanoseconds, price in exact INR nanounits, integer
+volume, source name and immutable source SHA-256. Optional turnover and
+delivery quantity retain exchange fields. Historical bars have no quote,
+spread, depth, order event, execution fill or QJ01/QP01 decision claim.
+
+Request windows are half-open `[start, end)` and at most 90 calendar days.
+Plans contain only public request metadata and an approximate bar upper bound.
+The initial universe is explicitly supplied by the operator; there is no
+preselected performance-based universe. The registry later preserves its
+effective-date identity and source manifest.
+
+Run a no-auth dry-run:
+
+```bash
+python -m quant.apps.acquisition --security-id 1333 --symbol RELIANCE --start 2025-01-01 --end 2025-04-01 --interval 1
+```
+
+No raw licensed data belongs in Git (`data/` is ignored). Source-specific
+acquisition is independent of the existing depth journal and paper ledger.
