@@ -66,6 +66,23 @@ separate evidence marks provider outage or confirmed inactivity. Price gaps
 around recorded corporate actions are warnings until an adjustment source is
 verified. No missing observations are synthesized.
 
+## Storage and replay
+
+`stage_raw_file` places original bytes under
+`data/raw/<source>/<SHA-256>` and checks existing copies before reuse.
+`write_dataset` consumes pre-sorted, deduplicated bars in bounded batches.
+Its Parquet/Zstd paths are
+`normalized/source=<source>/interval=<daily|Nm>/year=YYYY/month=MM/security_id=<id>/part-N.parquet`.
+The publication directory is new and appears only after all parts and the
+manifest are written. `verify_dataset` checks every part's hash and the
+canonical manifest digest. A byte-identical input produces the same dataset
+SHA even if the creation time differs. Source files and lake outputs stay
+under ignored `data/`; Git contains only code and synthetic tests.
+
+The manifest records source hashes, date coverage, universe, calendar,
+adjustment policy, quality exclusions, code commit, acquisition mode and
+partitions. Raw sources remain the evidence of record; Parquet is replayable.
+
 Run a no-auth dry-run:
 
 ```bash
