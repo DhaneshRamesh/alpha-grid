@@ -55,6 +55,14 @@ class PartitionInfo:
 
 
 @dataclass(frozen=True, slots=True)
+class RawProvenance:
+    sha256: str
+    source_url: str
+    acquired_at: str
+    format_version: str
+
+
+@dataclass(frozen=True, slots=True)
 class LakeManifest:
     schema_version: str
     dataset_id: str
@@ -73,6 +81,7 @@ class LakeManifest:
     created_at: str
     row_count: int
     partitions: tuple[PartitionInfo, ...]
+    source_provenance: tuple[RawProvenance, ...] = ()
 
 
 def _canonical(value: object) -> bytes:
@@ -123,6 +132,12 @@ def _partition(bar: HistoricalBar) -> str:
     ):
         raise ValueError("unsafe partition identity")
     interval = "daily" if bar.interval_minutes is None else f"{bar.interval_minutes}m"
+    if bar.interval_minutes is None:
+        # Pack many cash equities into a year instead of tiny per-symbol files.
+        return (
+            f"normalized/source={source}/interval=daily/"
+            f"year={bar.trading_date.year:04d}"
+        )
     return (
         f"normalized/source={source}/interval={interval}/year={bar.trading_date.year:04d}/"
         f"month={bar.trading_date.month:02d}/security_id={sid}"
@@ -165,6 +180,7 @@ def write_dataset(
     adjustment_policy: str,
     code_commit: str,
     quality_exclusions: tuple[str, ...] = (),
+    source_provenance: tuple[RawProvenance, ...] = (),
     batch_size: int = 8192,
     max_rows_per_file: int = 131072,
     created_at: datetime | None = None,
@@ -193,7 +209,7 @@ def write_dataset(
     source_hashes: set[str] = set()
     first_date = last_date = None
     total = 0
-    previous_order: tuple[str, str, int] | None = None
+    previous_order: tuple[str, str, str, int] | None = None
 
     def flush() -> None:
         nonlocal buffer
@@ -226,7 +242,12 @@ def write_dataset(
                 raise ValueError("bar outside frozen universe")
             key = _partition(bar)
             stamp = bar.source_timestamp_ns or bar.trading_date.toordinal()
-            order = (key, bar.trading_date.isoformat(), stamp)
+            order = (
+                key,
+                bar.trading_date.isoformat(),
+                bar.instrument.security_id,
+                stamp,
+            )
             if previous_order is not None and order <= previous_order:
                 raise ValueError("input must be strictly sorted and deduplicated")
             previous_order = order
@@ -261,6 +282,8 @@ def write_dataset(
         close_file()
         if total == 0 or first_date is None or last_date is None:
             raise ValueError("empty dataset")
+        if any(item.sha256 not in source_hashes for item in source_provenance):
+            raise ValueError("source provenance checksum has no matching bar")
         core: dict[str, Any] = {
             "schema_version": SCHEMA_VERSION,
             "dataset_id": dataset_id,
@@ -273,6 +296,7 @@ def write_dataset(
             "calendar_version": calendar_version,
             "adjustment_policy": adjustment_policy,
             "source_checksums": sorted(source_hashes),
+            "source_provenance": [asdict(item) for item in source_provenance],
             "quality_exclusions": quality_exclusions,
             "code_commit": code_commit,
             "row_count": total,
@@ -297,6 +321,7 @@ def write_dataset(
             (created_at or datetime.now(UTC)).astimezone(UTC).isoformat(),
             total,
             tuple(files),
+            source_provenance,
         )
         manifest_path = staging / "manifest.json"
         with manifest_path.open("xb") as stream:
@@ -317,11 +342,17 @@ def write_dataset(
 def verify_dataset(output_dir: Path) -> LakeManifest:
     data = json.loads((output_dir / "manifest.json").read_bytes())
     partitions = tuple(PartitionInfo(**item) for item in data.pop("partitions"))
+    provenance = tuple(
+        RawProvenance(**item) for item in data.pop("source_provenance", [])
+    )
     for name in (
-        "sources", "instrument_universe", "source_checksums", "quality_exclusions"
+        "sources",
+        "instrument_universe",
+        "source_checksums",
+        "quality_exclusions",
     ):
         data[name] = tuple(data[name])
-    manifest = LakeManifest(partitions=partitions, **data)
+    manifest = LakeManifest(partitions=partitions, source_provenance=provenance, **data)
     for item in manifest.partitions:
         path = output_dir / item.path
         if file_sha256(path) != item.sha256 or path.stat().st_size != item.bytes:

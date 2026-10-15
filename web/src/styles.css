@@ -1260,6 +1260,12 @@ main {
   font-size: clamp(1rem, 1.7vw, 1.5rem);
   overflow-wrap: anywhere;
 }
+.acquisition-panel {
+  margin-bottom: 16px;
+}
+.acquisition-panel .metric-grid {
+  margin-top: 14px;
+}
 .research-curve {
   display: block;
   width: min(100%, 480px);

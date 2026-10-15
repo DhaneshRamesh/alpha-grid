@@ -51,6 +51,7 @@ struct AppState {
     config: GatewayConfig,
     demo: Option<Arc<DemoControls>>,
     research: Option<serde_json::Value>,
+    acquisition: Option<serde_json::Value>,
 }
 
 pub struct DemoControls {
@@ -86,6 +87,7 @@ impl Gateway {
                 config,
                 demo: None,
                 research: None,
+                acquisition: None,
             }),
         })
     }
@@ -113,12 +115,50 @@ impl Gateway {
         Ok(self)
     }
 
+    /// Serve only approved public summary fields from an offline status file.
+    pub fn with_acquisition_status(
+        mut self,
+        status: serde_json::Value,
+    ) -> Result<Self, &'static str> {
+        if status.get("schema_version").and_then(|v| v.as_str()) != Some("acquisition-status-v1") {
+            return Err("invalid acquisition status");
+        }
+        let mut public = serde_json::Map::new();
+        for key in [
+            "schema_version",
+            "sources_configured",
+            "access_status",
+            "first_date",
+            "last_date",
+            "instrument_count",
+            "independent_sessions",
+            "missing_bars",
+            "quality_warning_count",
+            "partition_count",
+            "partition_bytes",
+            "checksum_verified",
+            "collection_mode",
+            "research_eligibility",
+            "blocked_model_families",
+            "block_reasons",
+        ] {
+            if let Some(value) = status.get(key) {
+                public.insert(key.into(), value.clone());
+            }
+        }
+        Arc::get_mut(&mut self.state)
+            .expect("unshared gateway")
+            .acquisition = Some(serde_json::Value::Object(public));
+        Ok(self)
+    }
+
     pub fn router(&self) -> Router {
         Router::new()
             .route("/api/snapshot", get(snapshot))
             .route("/api/health", get(health))
             .route("/api/paper", get(paper))
             .route("/api/research", get(research))
+            .route("/api/acquisition", get(acquisition))
             .route("/api/instruments/{key}", get(instrument))
             .route("/ws", get(websocket))
             .route("/api/demo/control", post(demo_control))
@@ -303,6 +343,29 @@ async fn research(State(state): State<Arc<AppState>>) -> Json<serde_json::Value>
     }))
 }
 
+async fn acquisition(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(state.acquisition.clone().unwrap_or_else(|| {
+        serde_json::json!({
+            "schema_version": "acquisition-status-v1",
+            "sources_configured": ["DHAN_HISTORICAL_DISABLED", "NSE_LOCAL_IMPORT"],
+            "access_status": "UNVERIFIED",
+            "first_date": null,
+            "last_date": null,
+            "instrument_count": 0,
+            "independent_sessions": 0,
+            "missing_bars": null,
+            "quality_warning_count": null,
+            "partition_count": 0,
+            "partition_bytes": 0,
+            "checksum_verified": false,
+            "collection_mode": "DATA_ONLY_OFFLINE",
+            "research_eligibility": "NOT_TRAINED",
+            "blocked_model_families": ["DEPTH", "ORDER_FLOW", "HAWKES", "EXECUTION"],
+            "block_reasons": ["no_verified_real_market_dataset"]
+        })
+    }))
+}
+
 async fn instrument(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
@@ -428,6 +491,34 @@ async fn client(mut socket: WebSocket, state: Arc<AppState>) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn acquisition_status_is_read_only_and_strips_private_fields() {
+        let instrument = quant_core::Instrument {
+            venue: "NSE".into(),
+            exchange_segment: "NSE_EQ".into(),
+            security_id: "1333".into(),
+            symbol: String::new(),
+        };
+        let shared =
+            crate::read_model::TelemetryShared::new(&[instrument], "REPLAY", "test").unwrap();
+        let empty = Gateway::new(Arc::clone(&shared), GatewayConfig::default()).unwrap();
+        assert_eq!(
+            acquisition(State(Arc::clone(&empty.state))).await.0["access_status"],
+            "UNVERIFIED"
+        );
+        let gateway = Gateway::new(shared, GatewayConfig::default())
+            .unwrap()
+            .with_acquisition_status(serde_json::json!({
+                "schema_version": "acquisition-status-v1",
+                "instrument_count": 5,
+                "access_token": "must-not-leak",
+            }))
+            .unwrap();
+        let value = acquisition(State(Arc::clone(&gateway.state))).await.0;
+        assert_eq!(value["instrument_count"], 5);
+        assert!(value.get("access_token").is_none());
+    }
+
     #[tokio::test]
     async fn research_endpoint_reports_only_precomputed_manifest() {
         let instrument = quant_core::Instrument {

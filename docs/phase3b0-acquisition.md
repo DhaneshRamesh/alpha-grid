@@ -71,8 +71,8 @@ verified. No missing observations are synthesized.
 `stage_raw_file` places original bytes under
 `data/raw/<source>/<SHA-256>` and checks existing copies before reuse.
 `write_dataset` consumes pre-sorted, deduplicated bars in bounded batches.
-Its Parquet/Zstd paths are
-`normalized/source=<source>/interval=<daily|Nm>/year=YYYY/month=MM/security_id=<id>/part-N.parquet`.
+Daily Parquet/Zstd files pack instruments by source/year;
+intraday files use `source/interval/year/month/security_id` partitions.
 The publication directory is new and appears only after all parts and the
 manifest are written. `verify_dataset` checks every part's hash and the
 canonical manifest digest. A byte-identical input produces the same dataset
@@ -111,3 +111,47 @@ python -m quant.apps.acquisition --security-id 1333 --symbol RELIANCE --start 20
 
 No raw licensed data belongs in Git (`data/` is ignored). Source-specific
 acquisition is independent of the existing depth journal and paper ledger.
+
+## Offline operator runbook
+
+1. Freeze a registry JSON with `version` and `records`. Each record requires
+   `instrument` (`venue`, `segment`, `security_id`, `symbol`, optional `isin`),
+   `name`, `effective_from`, optional exclusive `effective_to`,
+   `listing_status`, `source_manifest_version`, and optional
+   `corporate_actions` (`effective_date`, `kind`, `source_reference`). Review
+   historical mappings before import; unresolved identity aborts.
+2. Freeze a universe JSON with `version`, `selection_asof`, `security_ids`,
+   and a predeclared `selection_rule`. Selection date cannot follow the file's
+   trading date. Freeze a calendar JSON with `version`, `holidays` ISO dates,
+   and `special` sessions (`day`, `opens`, `closes`, `kind`). Supply an official
+   complete session schedule for any real completeness claim.
+3. Manually obtain one authorized NSE cash bhavcopy file and record its actual
+   HTTPS source URL and download time. Check rights under the applicable NSE
+   agreement; this code never downloads archives. Import one daily file:
+
+```bash
+python -m quant.apps.import_nse_archive \
+  --archive data/incoming/bhavcopy.csv.zip --format UDIFF_CM \
+  --source-url 'https://www.nseindia.com/all-reports' \
+  --downloaded-at '2025-01-03T08:00:00+05:30' \
+  --registry data/config/registry.json --universe data/config/universe.json \
+  --calendar data/config/calendar.json --dataset-id cm-2025-01-02-v1 \
+  --code-commit "$(git rev-parse HEAD)" --output data/lake/cm-2025-01-02-v1
+```
+
+4. Inspect `manifest.json`, `verify_dataset`, the sibling `*-status.json`,
+   and quality warnings. Hard failures abort publication. The one-day
+   importer is intentionally bounded; multi-year import uses the streaming
+   `write_dataset` API on pre-sorted, deduplicated bars. Do not interpret the
+   example date or universe as an approved acquisition target.
+5. The local read-only telemetry demo can load the status file with
+   `--acquisition-status data/lake/cm-2025-01-02-v1-status.json`. The cockpit
+   displays checksum verification and blocks depth-dependent model families.
+   It never displays credentials. Without a status file the endpoint reports
+   `UNVERIFIED` and `NOT_TRAINED`.
+
+No authenticated Dhan backfill is invoked by either CLI command. A separately
+authorized run would call `run_backfill(..., enabled=True)` with a locally
+configured `DHAN_ACCESS_TOKEN`, then parse immutable response files and
+validate entitlements, timestamp meaning, adjustment and quality before lake
+publication. Do not log or store the token in a dataset.

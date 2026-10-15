@@ -28,6 +28,24 @@ type ResearchStatus = {
   no_trade_rate?: number;
   feature_sensitivity?: string;
 };
+type AcquisitionStatus = {
+  schema_version: "acquisition-status-v1";
+  sources_configured: string[];
+  access_status: string;
+  first_date: string | null;
+  last_date: string | null;
+  instrument_count: number;
+  independent_sessions: number;
+  missing_bars: number | null;
+  quality_warning_count: number | null;
+  partition_count: number;
+  partition_bytes: number;
+  checksum_verified: boolean;
+  collection_mode: string;
+  research_eligibility: string;
+  blocked_model_families: string[];
+  block_reasons: string[];
+};
 
 function Curve({
   points,
@@ -72,6 +90,9 @@ function Curve({
 
 export default function ResearchWorkspace() {
   const [status, setStatus] = useState<ResearchStatus | null>(null);
+  const [acquisition, setAcquisition] = useState<AcquisitionStatus | null>(
+    null,
+  );
   const [error, setError] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
@@ -85,6 +106,17 @@ export default function ResearchWorkspace() {
         if (!(reason instanceof DOMException && reason.name === "AbortError"))
           setError(true);
       });
+    fetch("/api/acquisition", { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok)
+          throw new Error(`Acquisition status ${response.status}`);
+        return response.json() as Promise<AcquisitionStatus>;
+      })
+      .then((value) => {
+        if (value.schema_version === "acquisition-status-v1")
+          setAcquisition(value);
+      })
+      .catch(() => undefined);
     return () => controller.abort();
   }, []);
   const fixture = status?.source_kind === "SYNTHETIC";
@@ -111,6 +143,69 @@ export default function ResearchWorkspace() {
         {fixture ? "TEST FIXTURE / UNVALIDATED" : "NO VALIDATED MARKET ALPHA"} ·
         NO LIVE ORDERS · PAPER POLICY UNCHANGED
       </div>
+      <section className="panel acquisition-panel">
+        <div className="panel-head">
+          <div>
+            <div className="eyebrow">MARKET DATA / 00</div>
+            <h2>Acquisition and quality</h2>
+          </div>
+        </div>
+        <div className="metric-grid research-metrics">
+          <div className="metric">
+            <div className="metric-label">SOURCE / ACCESS</div>
+            <div className="metric-value">
+              {acquisition?.access_status ?? "UNVERIFIED"}
+            </div>
+            <div className="metric-note">
+              {acquisition?.sources_configured?.join(" · ") ??
+                "No source status loaded"}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">HISTORICAL COVERAGE</div>
+            <div className="metric-value">
+              {acquisition?.instrument_count ?? 0} instruments
+            </div>
+            <div className="metric-note">
+              {acquisition?.first_date ?? "N/A"} →{" "}
+              {acquisition?.last_date ?? "N/A"} ·{" "}
+              {acquisition?.independent_sessions ?? 0} sessions
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">QUALITY</div>
+            <div className="metric-value">
+              {acquisition?.missing_bars ?? "UNKNOWN"} missing bars
+            </div>
+            <div className="metric-note">
+              {acquisition?.quality_warning_count ?? "UNKNOWN"} warnings ·
+              checksum{" "}
+              {acquisition?.checksum_verified ? "verified" : "unverified"}
+            </div>
+          </div>
+          <div className="metric">
+            <div className="metric-label">DATA PARTITIONS</div>
+            <div className="metric-value">
+              {acquisition?.partition_count ?? 0}
+            </div>
+            <div className="metric-note">
+              {acquisition
+                ? (acquisition.partition_bytes / 1048576).toFixed(1)
+                : "0.0"}{" "}
+              MiB · {acquisition?.collection_mode ?? "DATA_ONLY_OFFLINE"}
+            </div>
+          </div>
+        </div>
+        <div className="paper-foot">
+          Eligibility {acquisition?.research_eligibility ?? "NOT_TRAINED"} ·
+          Blocked{" "}
+          {acquisition?.blocked_model_families?.join(", ") ??
+            "DEPTH, ORDER_FLOW, HAWKES, EXECUTION"}
+          .{" "}
+          {acquisition?.block_reasons?.join(" · ") ??
+            "No verified real market dataset"}
+        </div>
+      </section>
       {error && (
         <div className="panel">
           <div className="empty">

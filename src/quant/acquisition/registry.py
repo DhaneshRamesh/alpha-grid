@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from datetime import date
+from pathlib import Path
+from typing import Any
 
 from quant.acquisition.contracts import CashInstrument
 
@@ -97,3 +100,42 @@ class InstrumentRegistry:
             if record.instrument.security_id == security_id
             for action in record.corporate_actions
         )
+
+
+def load_registry(path: Path) -> InstrumentRegistry:
+    data: dict[str, Any] = json.loads(path.read_text())
+    records = []
+    for item in data["records"]:
+        identity = CashInstrument(**item["instrument"])
+        actions = tuple(
+            CorporateAction(
+                date.fromisoformat(action["effective_date"]),
+                action["kind"],
+                action["source_reference"],
+            )
+            for action in item.get("corporate_actions", [])
+        )
+        records.append(
+            MappingRecord(
+                identity,
+                item["name"],
+                date.fromisoformat(item["effective_from"]),
+                date.fromisoformat(item["effective_to"])
+                if item.get("effective_to")
+                else None,
+                item["listing_status"],
+                item["source_manifest_version"],
+                actions,
+            )
+        )
+    return InstrumentRegistry(tuple(records), data["version"])
+
+
+def load_universe(path: Path) -> UniverseVersion:
+    data: dict[str, Any] = json.loads(path.read_text())
+    return UniverseVersion(
+        data["version"],
+        date.fromisoformat(data["selection_asof"]),
+        tuple(data["security_ids"]),
+        data["selection_rule"],
+    )

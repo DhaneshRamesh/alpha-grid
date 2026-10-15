@@ -8,7 +8,7 @@ import io
 import zipfile
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from datetime import UTC, date, datetime
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
 from typing import TextIO
@@ -93,6 +93,7 @@ def _rows(
     source: ArchiveSource,
     checksum: str,
     resolve: IdentityResolver,
+    selected_symbols: frozenset[str] | None,
 ) -> Iterator[HistoricalBar]:
     fields = _FIELDS[source.format_version]
     reader = csv.DictReader(stream)
@@ -113,6 +114,11 @@ def _rows(
         raise ValueError("NSE archive schema does not match declared format")
     for row in reader:
         if row[fields["series"]].strip() != "EQ":
+            continue
+        if (
+            selected_symbols is not None
+            and row[fields["symbol"]].strip() not in selected_symbols
+        ):
             continue
         trading_date = _date(row[fields["date"]])
         symbol = row[fields["symbol"]].strip()
@@ -141,7 +147,10 @@ def _rows(
 
 
 def import_archive(
-    source: ArchiveSource, resolve: IdentityResolver
+    source: ArchiveSource,
+    resolve: IdentityResolver,
+    *,
+    selected_symbols: frozenset[str] | None = None,
 ) -> Iterator[HistoricalBar]:
     """Stream one local CSV or one-member ZIP; reject ambiguous ZIP contents."""
     checksum = file_sha256(source.path)
@@ -158,19 +167,20 @@ def import_archive(
                 archive.open(members[0]) as raw,
                 io.TextIOWrapper(raw, encoding="utf-8-sig", newline="") as stream,
             ):
-                yield from _rows(stream, source, checksum, resolve)
+                yield from _rows(stream, source, checksum, resolve, selected_symbols)
     elif source.path.suffix.lower() == ".csv":
         with source.path.open(encoding="utf-8-sig", newline="") as stream:
-            yield from _rows(stream, source, checksum, resolve)
+            yield from _rows(stream, source, checksum, resolve, selected_symbols)
     else:
         raise ValueError("NSE archive must be local CSV or ZIP")
 
 
-def local_source(path: Path, *, format_version: str, source_url: str) -> ArchiveSource:
-    """For manually obtained files, record explicit provenance and file mtime."""
-    return ArchiveSource(
-        path,
-        format_version,
-        source_url,
-        datetime.fromtimestamp(path.stat().st_mtime, UTC),
-    )
+def local_source(
+    path: Path,
+    *,
+    format_version: str,
+    source_url: str,
+    downloaded_at: datetime,
+) -> ArchiveSource:
+    """The caller supplies the actual download time; file mtime is not evidence."""
+    return ArchiveSource(path, format_version, source_url, downloaded_at)

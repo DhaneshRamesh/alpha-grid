@@ -31,6 +31,7 @@ quant-collect-depth = "quant.apps.collect_depth:main"
 quant-export-parquet = "quant.apps.export_parquet:main"
 quant-feed-health = "quant.apps.feed_health:main"
 quant-build-research = "quant.apps.build_research_dataset:main"
+quant-import-nse-archive = "quant.apps.import_nse_archive:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

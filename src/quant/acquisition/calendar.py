@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, time, timedelta
+from pathlib import Path
+from typing import Any
 from zoneinfo import ZoneInfo
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -74,4 +77,22 @@ class NseCalendar:
 def utc_date_from_ns(timestamp_ns: int) -> date:
     return (
         datetime.fromtimestamp(timestamp_ns / 1_000_000_000, UTC).astimezone(IST).date()
+    )
+
+
+def load_calendar(path: Path) -> NseCalendar:
+    data: dict[str, Any] = json.loads(path.read_text())
+    special = {
+        date.fromisoformat(item["day"]): Session(
+            date.fromisoformat(item["day"]),
+            time.fromisoformat(item["opens"]),
+            time.fromisoformat(item["closes"]),
+            item.get("kind", "SPECIAL"),
+        )
+        for item in data.get("special", [])
+    }
+    return NseCalendar(
+        data["version"],
+        frozenset(date.fromisoformat(value) for value in data.get("holidays", [])),
+        special,
     )

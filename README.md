@@ -183,3 +183,7 @@ outside this foundation. No live orders can be placed from this repository.
 ## Offline statistical research
 
 Phase 3B research contracts and validation limits are in [rust/docs/phase3b-research.md](rust/docs/phase3b-research.md); the opt-in, read-only data plan is in [docs/research-acquisition.md](docs/research-acquisition.md). No trained market model or live order path is enabled.
+
+Phase 3B-0 adds offline historical acquisition planning, local NSE archive
+import, point-in-time identity and session quality, a checksummed OHLCV lake,
+and separate candle research. See [docs/phase3b0-acquisition.md](docs/phase3b0-acquisition.md).
