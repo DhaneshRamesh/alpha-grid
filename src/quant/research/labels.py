@@ -20,6 +20,7 @@ class PriceObservation:
 class HorizonLabel:
     horizon_ns: int
     available: bool
+    horizon_covered: bool
     censored: bool
     ambiguous: bool
     first_event: str | None
@@ -137,6 +138,7 @@ def label_path(
     return HorizonLabel(
         horizon_ns,
         available,
+        bool(coverage),
         censored,
         ambiguous,
         first,

@@ -656,6 +656,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "quant-inference"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "quant-journal"
 version = "0.1.0"
 dependencies = [

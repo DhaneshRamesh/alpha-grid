@@ -11,6 +11,7 @@ members = [
   "crates/quant-engine",
   "crates/quant-telemetry",
   "crates/quant-paper",
+  "crates/quant-inference",
 ]
 
 [workspace.package]

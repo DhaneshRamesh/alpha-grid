@@ -16,12 +16,13 @@ dev = [
     "mypy>=1.10,<2",
     "ruff>=0.6,<1",
     "pyarrow>=18,<26",
+    "numpy>=2,<3",
     "polars>=1,<2",
     "pandas>=2.2,<3",
     "dhanhq>=2.3,<2.4",
     "websockets>=14,<18",
 ]
-research = ["pyarrow>=18,<26"]
+research = ["pyarrow>=18,<26", "numpy>=2,<3"]
 dhan = ["dhanhq>=2.3,<2.4", "websockets>=14,<18"]
 
 [project.scripts]

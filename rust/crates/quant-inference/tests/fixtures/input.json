@@ -1,0 +1,1 @@
+{"model_version":"known-answer-v1","feature_schema_version":"research-v1","instrument_key":"NSE:NSE_EQ:1333","asof_receive_ns":150,"horizon_ns":5000000000,"features":{"relative_spread":3.0,"imbalance":0.0}}

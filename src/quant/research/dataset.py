@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -19,11 +20,13 @@ from quant.research.labels import (
     label_path,
     market_observation,
 )
+from quant.research.sufficiency import assess
 
 SCHEMA_VERSION = "research-v1"
 DEFAULT_HORIZONS_NS = (5, 15, 30, 60, 180)
 FEATURE_NAMES = (
     "relative_spread",
+    "microprice_displacement",
     "bid_ask_imbalance",
     "snapshot_ofi_quantity",
     "latest_price_return",
@@ -64,6 +67,13 @@ class DatasetManifest:
     label_rows: int
     independent_sessions: int
     status: str
+    sufficiency_reasons: tuple[str, ...]
+    label_fraction: float
+    quality_fraction: float
+    volume_complete_fraction: float
+    horizon_coverage_fraction: float
+    favorable_events: int
+    adverse_events: int
 
 
 def _feature_row(record: dict[str, Any], market: dict[str, Any]) -> dict[str, Any]:
@@ -132,6 +142,9 @@ def _feature_row(record: dict[str, Any], market: dict[str, Any]) -> dict[str, An
         "behavior_action_probability": None,
     }
     row.update({name: features.get(name) for name in FEATURE_NAMES})
+    mid = features.get("midprice_nanos")
+    micro = features.get("microprice_nanos")
+    row["microprice_displacement"] = (micro / mid - 1) if mid and micro else None
     return row
 
 
@@ -182,6 +195,12 @@ def build_dataset(
                 disconnects[(record["session_id"], key)].append(stamp)
     feature_rows: list[dict[str, Any]] = []
     label_rows: list[dict[str, Any]] = []
+    for points in observations.values():
+        points.sort(key=lambda point: (point.receive_ns, point.source_index))
+    timestamps = {
+        key: [point.receive_ns for point in points]
+        for key, points in observations.items()
+    }
     for record in read_paper(paper_qp):
         if "Decision" not in record["event"]:
             continue
@@ -191,7 +210,16 @@ def build_dataset(
         row = _feature_row(record, indexed[index])
         feature_rows.append(row)
         session_instrument_key = (row["session_id"], row["instrument_key"])
-        paths = observations[session_instrument_key]
+        all_points = observations[session_instrument_key]
+        all_times = timestamps[session_instrument_key]
+        start = bisect_right(all_times, row["asof_receive_ns"])
+        stop = bisect_right(
+            all_times,
+            row["asof_receive_ns"]
+            + max(horizons_seconds) * 1_000_000_000
+            + max_gap_seconds * 1_000_000_000,
+        )
+        paths = all_points[start:stop]
         cutoff = next(
             (
                 time
@@ -226,6 +254,12 @@ def build_dataset(
                     "source_record_index": index,
                     "horizon_ns": seconds * 1_000_000_000,
                     "label_available": label.available if label else False,
+                    "horizon_covered": label.horizon_covered if label else False,
+                    "neither_observed": (
+                        label.horizon_covered and label.first_event is None
+                    )
+                    if label
+                    else False,
                     "right_censored": label.censored if label else True,
                     "ordering_ambiguous": label.ambiguous if label else False,
                     "first_event": label.first_event if label else None,
@@ -260,6 +294,7 @@ def build_dataset(
             }
         )
     ).hexdigest()
+    sufficiency = assess(feature_rows, label_rows, source_kind=source_kind)
     manifest = DatasetManifest(
         SCHEMA_VERSION,
         market_hash,
@@ -273,7 +308,14 @@ def build_dataset(
         len(feature_rows),
         len(label_rows),
         len({r["session_id"] for r in feature_rows}),
-        "NOT_TRAINED",
+        sufficiency.status,
+        sufficiency.reasons,
+        sufficiency.label_fraction,
+        sufficiency.quality_fraction,
+        sufficiency.volume_complete_fraction,
+        sum(bool(row["horizon_covered"]) for row in label_rows) / len(label_rows),
+        sufficiency.favorable_events,
+        sufficiency.adverse_events,
     )
     output_dir.mkdir(parents=True)
     pq.write_table(

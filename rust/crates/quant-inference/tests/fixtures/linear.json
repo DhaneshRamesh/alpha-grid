@@ -1,0 +1,1 @@
+{"artifact_schema_version":1,"model_version":"known-answer-v1","feature_schema_version":"research-v1","status":"TRAINED_UNVALIDATED","valid_from_ns":100,"valid_until_ns":200,"instruments":["NSE:NSE_EQ:1333"],"horizon_ns":5000000000,"intercept":0.5,"feature_names":["relative_spread","imbalance"],"centers":[1.0,0.0],"scales":[2.0,1.0],"weights":[2.0,-1.0],"uncertainty_nanos":null}

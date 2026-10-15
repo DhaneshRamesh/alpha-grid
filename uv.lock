@@ -15,6 +15,7 @@ source = { editable = "." }
 dev = [
     { name = "dhanhq" },
     { name = "mypy" },
+    { name = "numpy" },
     { name = "pandas" },
     { name = "polars" },
     { name = "pyarrow" },
@@ -27,6 +28,7 @@ dhan = [
     { name = "websockets" },
 ]
 research = [
+    { name = "numpy" },
     { name = "pyarrow" },
 ]
 
@@ -35,6 +37,8 @@ requires-dist = [
     { name = "dhanhq", marker = "extra == 'dev'", specifier = ">=2.3,<2.4" },
     { name = "dhanhq", marker = "extra == 'dhan'", specifier = ">=2.3,<2.4" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.10,<2" },
+    { name = "numpy", marker = "extra == 'dev'", specifier = ">=2,<3" },
+    { name = "numpy", marker = "extra == 'research'", specifier = ">=2,<3" },
     { name = "pandas", marker = "extra == 'dev'", specifier = ">=2.2,<3" },
     { name = "polars", marker = "extra == 'dev'", specifier = ">=1,<2" },
     { name = "pyarrow", marker = "extra == 'dev'", specifier = ">=18,<26" },

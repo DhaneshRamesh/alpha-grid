@@ -11,6 +11,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from quant.research.dataset import build_dataset
+from quant.research.experiment import ExperimentConfig, run_experiment
 from quant.research.io import read_paper
 from quant.research.labels import PriceObservation, label_path
 
@@ -100,6 +101,12 @@ def test_dataset_roundtrip_lineage_and_future_isolation(tmp_path: Path) -> None:
     assert label["right_censored"]
     assert feature["source_record_index"] == label["source_record_index"]
     assert not any("forward" in column for column in feature)
+    report = run_experiment(
+        tmp_path / "first",
+        ExperimentConfig("ridge", ("relative_spread",), 5_000_000_000, 2),
+    )
+    assert report.status == "NOT_TRAINED"
+    assert report.validation_mae is None and report.heldout_mae is None
 
 
 def test_future_snapshot_rejected(tmp_path: Path) -> None:
