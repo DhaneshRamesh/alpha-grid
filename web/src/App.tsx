@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import Chart from "./Chart";
 import PaperWorkspace from "./PaperWorkspace";
+import ResearchWorkspace from "./ResearchWorkspace";
 import {
   amount,
   dateTime,
@@ -28,7 +29,8 @@ type View =
   | "Feature monitor"
   | "Reliability"
   | "Session audit"
-  | "Paper research";
+  | "Paper research"
+  | "Statistical research";
 const views: { name: View; icon: string; short: string }[] = [
   { name: "Overview", icon: "◫", short: "01" },
   { name: "Market intelligence", icon: "◈", short: "02" },
@@ -38,6 +40,7 @@ const views: { name: View; icon: string; short: string }[] = [
   { name: "Reliability", icon: "◷", short: "06" },
   { name: "Session audit", icon: "⋮", short: "07" },
   { name: "Paper research", icon: "◇", short: "08" },
+  { name: "Statistical research", icon: "∿", short: "09" },
 ];
 const timeframes = [
   ["1s", "1000000000"],
@@ -1063,7 +1066,7 @@ export default function App() {
             </div>
           </div>
           <div className="sidebar-version">
-            ALPHA GRID <span>·</span> PHASE 3A
+            ALPHA GRID <span>·</span> PHASE 3B
           </div>
         </div>
       </aside>
@@ -1117,6 +1120,7 @@ export default function App() {
             />
           )}
           {view === "Session audit" && <Audit snapshot={snapshot} />}
+          {view === "Statistical research" && <ResearchWorkspace />}
           {view === "Paper research" && (
             <PaperWorkspace
               snapshot={snapshot}

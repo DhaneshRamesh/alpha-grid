@@ -50,6 +50,7 @@ struct AppState {
     updates: watch::Sender<Arc<WireEngineSnapshot>>,
     config: GatewayConfig,
     demo: Option<Arc<DemoControls>>,
+    research: Option<serde_json::Value>,
 }
 
 pub struct DemoControls {
@@ -84,6 +85,7 @@ impl Gateway {
                 updates,
                 config,
                 demo: None,
+                research: None,
             }),
         })
     }
@@ -95,11 +97,28 @@ impl Gateway {
         self
     }
 
+    /// Load a previously produced offline manifest. No analysis runs in the gateway.
+    pub fn with_research_manifest(
+        mut self,
+        manifest: serde_json::Value,
+    ) -> Result<Self, &'static str> {
+        if manifest.get("schema_version").and_then(|v| v.as_str()) != Some("research-v1")
+            || manifest.get("status").and_then(|v| v.as_str()).is_none()
+        {
+            return Err("invalid research manifest");
+        }
+        Arc::get_mut(&mut self.state)
+            .expect("unshared gateway")
+            .research = Some(manifest);
+        Ok(self)
+    }
+
     pub fn router(&self) -> Router {
         Router::new()
             .route("/api/snapshot", get(snapshot))
             .route("/api/health", get(health))
             .route("/api/paper", get(paper))
+            .route("/api/research", get(research))
             .route("/api/instruments/{key}", get(instrument))
             .route("/ws", get(websocket))
             .route("/api/demo/control", post(demo_control))
@@ -267,6 +286,23 @@ async fn paper(
         .ok_or(StatusCode::NOT_FOUND)
 }
 
+async fn research(State(state): State<Arc<AppState>>) -> Json<serde_json::Value> {
+    Json(state.research.clone().unwrap_or_else(|| {
+        serde_json::json!({
+            "schema_version": "research-v1",
+            "status": "NOT_TRAINED",
+            "sufficiency_reasons": ["no_dataset_manifest_loaded"],
+            "source_kind": null,
+            "feature_rows": 0,
+            "label_rows": 0,
+            "independent_sessions": 0,
+            "label_fraction": 0.0,
+            "quality_fraction": 0.0,
+            "dataset_sha256": null
+        })
+    }))
+}
+
 async fn instrument(
     Path(key): Path<String>,
     State(state): State<Arc<AppState>>,
@@ -392,6 +428,33 @@ async fn client(mut socket: WebSocket, state: Arc<AppState>) {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn research_endpoint_reports_only_precomputed_manifest() {
+        let instrument = quant_core::Instrument {
+            venue: "NSE".into(),
+            exchange_segment: "NSE_EQ".into(),
+            security_id: "1333".into(),
+            symbol: String::new(),
+        };
+        let shared =
+            crate::read_model::TelemetryShared::new(&[instrument], "REPLAY", "test").unwrap();
+        let empty = Gateway::new(Arc::clone(&shared), GatewayConfig::default()).unwrap();
+        assert_eq!(
+            research(State(Arc::clone(&empty.state))).await.0["status"],
+            "NOT_TRAINED"
+        );
+        let gateway = Gateway::new(shared, GatewayConfig::default())
+            .unwrap()
+            .with_research_manifest(serde_json::json!({
+                "schema_version": "research-v1", "status": "NOT_TRAINED",
+                "source_kind": "SYNTHETIC", "independent_sessions": 1,
+            }))
+            .unwrap();
+        let value = research(State(Arc::clone(&gateway.state))).await.0;
+        assert_eq!(value["source_kind"], "SYNTHETIC");
+        assert_eq!(value["independent_sessions"], 1);
+    }
+
     use super::*;
     use crate::read_model::TelemetryPublisher;
     use quant_core::{DepthEvent, DepthLevel, Instrument, MarketEvent};

@@ -179,3 +179,7 @@ never silently coerced or truncated.
 The intended later flow is market data → normalized events → research models →
 risk and optimization → execution and OMS. Those later components are deliberately
 outside this foundation. No live orders can be placed from this repository.
+
+## Offline statistical research
+
+Phase 3B research contracts and validation limits are in [rust/docs/phase3b-research.md](rust/docs/phase3b-research.md); the opt-in, read-only data plan is in [docs/research-acquisition.md](docs/research-acquisition.md). No trained market model or live order path is enabled.

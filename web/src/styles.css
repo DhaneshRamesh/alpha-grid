@@ -1255,3 +1255,16 @@ main {
     min-width: 500px;
   }
 }
+
+.research-metrics .metric-value {
+  font-size: clamp(1rem, 1.7vw, 1.5rem);
+  overflow-wrap: anywhere;
+}
+.research-curve {
+  display: block;
+  width: min(100%, 480px);
+  height: 200px;
+  margin: 12px auto;
+  border-bottom: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}

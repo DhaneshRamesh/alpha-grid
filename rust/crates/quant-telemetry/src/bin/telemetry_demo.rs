@@ -367,6 +367,7 @@ fn replay(
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut journal = PathBuf::from(".local/phase2c/demo.qj");
     let mut paper_ledger = None::<PathBuf>;
+    let mut research_manifest = None::<PathBuf>;
     let mut port = 8765_u16;
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
@@ -374,6 +375,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         match flag.as_str() {
             "--journal" => journal = PathBuf::from(value),
             "--paper-ledger" => paper_ledger = Some(PathBuf::from(value)),
+            "--research-manifest" => research_manifest = Some(PathBuf::from(value)),
             "--port" => port = value.parse()?,
             _ => return Err(format!("unknown option {flag}").into()),
         }
@@ -382,8 +384,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instruments = instruments();
     let shared = TelemetryShared::new(&instruments, "REPLAY", SESSION)?;
     let controls = DemoControls::new(Arc::clone(&shared));
-    let gateway = Gateway::new(Arc::clone(&shared), GatewayConfig::default())?
+    let mut gateway = Gateway::new(Arc::clone(&shared), GatewayConfig::default())?
         .with_demo_controls(Arc::clone(&controls));
+    if let Some(path) = &research_manifest {
+        let manifest: serde_json::Value = serde_json::from_slice(&std::fs::read(path)?)?;
+        gateway = gateway.with_research_manifest(manifest)?;
+    }
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     eprintln!(
         "{} synthetic replay on http://127.0.0.1:{port}; journal {}",
