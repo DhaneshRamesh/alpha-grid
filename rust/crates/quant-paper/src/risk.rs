@@ -118,6 +118,21 @@ impl RiskConfig {
         if open_order_exists {
             reasons.push(DecisionReason::Duplicate);
         }
+        if entry
+            && portfolio
+                .positions
+                .values()
+                .any(|position| position.instrument == context.instrument)
+        {
+            reasons.push(DecisionReason::Duplicate);
+        }
+        if candidate.action == DecisionAction::SellExit
+            && !portfolio.positions.values().any(|position| {
+                position.instrument == context.instrument && position.quantity >= quantity
+            })
+        {
+            reasons.push(DecisionReason::RiskLimit);
+        }
         let spread_bps = context.features.relative_spread.map(|v| v * 10_000.0);
         if spread_bps.is_none_or(|v| !v.is_finite() || v > self.max_spread_bps) {
             reasons.push(DecisionReason::SpreadTooWide);
@@ -148,7 +163,20 @@ impl RiskConfig {
             notional_nanos * i128::from(self.assumed_downside_move_bps) / 10_000
                 + costs.map_or(0, |c| c.adverse_total_nanos)
         });
+        let session_pnl = portfolio.realized_pnl_nanos
+            + portfolio
+                .positions
+                .values()
+                .filter_map(|p| p.unrealized_pnl_nanos)
+                .sum::<i128>();
         if entry {
+            if portfolio
+                .positions
+                .values()
+                .any(|p| p.unrealized_pnl_nanos.is_none())
+            {
+                reasons.push(DecisionReason::DataQuality);
+            }
             let exposure: MoneyNanos = portfolio
                 .positions
                 .values()
@@ -166,17 +194,11 @@ impl RiskConfig {
             {
                 reasons.push(DecisionReason::RiskLimit);
             }
-            let session_pnl = portfolio.realized_pnl_nanos
-                + portfolio
-                    .positions
-                    .values()
-                    .filter_map(|p| p.unrealized_pnl_nanos)
-                    .sum::<i128>();
             if session_pnl <= -self.max_session_loss_nanos {
                 reasons.push(DecisionReason::RiskLimit);
             }
         }
-        let remaining = (self.max_session_loss_nanos + portfolio.realized_pnl_nanos).max(0);
+        let remaining = (self.max_session_loss_nanos + session_pnl).max(0);
         RiskAssessment {
             schema_version: PAPER_SCHEMA_VERSION,
             rules_version: self.version.clone(),

@@ -10,6 +10,7 @@ quant-market-data.workspace = true
 quant-engine = { path = "../quant-engine" }
 quant-journal.workspace = true
 quant-replay.workspace = true
+quant-paper.workspace = true
 axum.workspace = true
 arc-swap.workspace = true
 schemars.workspace = true

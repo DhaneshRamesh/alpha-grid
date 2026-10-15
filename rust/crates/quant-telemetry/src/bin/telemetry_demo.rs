@@ -6,6 +6,10 @@ use quant_engine::pipeline::MarketEngine;
 use quant_engine::{MarketCalendar, TimestampPolicy};
 use quant_journal::{DurabilityPolicy, JournalReader, JournalRecord, JournalWriter};
 use quant_market_data::{dhan_standard, dhan20};
+use quant_paper::fees::FeeSchedule;
+use quant_paper::oms::PaperEngine;
+use quant_paper::policy::{PolicyConfig, PolicyMode};
+use quant_paper::risk::RiskConfig;
 use quant_telemetry::gateway::{DemoControls, Gateway, GatewayConfig};
 use quant_telemetry::protocol::AuditEvent;
 use quant_telemetry::read_model::{TelemetryPublisher, TelemetryShared, now_ns};
@@ -96,7 +100,18 @@ fn depth_frame(id: i32, step: i32) -> Vec<u8> {
                 base + 0.05 + level as f64 * 0.05
             };
             frame.extend(price.to_le_bytes());
-            frame.extend((10 + level as u32 + step as u32 % 4).to_le_bytes());
+            let quantity = if step < 45 {
+                if code == 41 {
+                    25 + level as u32 + step as u32 % 8
+                } else {
+                    16 + level as u32 - step as u32 % 5
+                }
+            } else if code == 41 {
+                16 + level as u32 - step as u32 % 5
+            } else {
+                25 + level as u32 + step as u32 % 8
+            };
+            frame.extend(quantity.to_le_bytes());
             frame.extend((2 + level as u32 % 3).to_le_bytes());
         }
     }
@@ -194,6 +209,7 @@ fn build_fixture(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
 }
 fn replay(
     path: PathBuf,
+    paper_ledger: Option<PathBuf>,
     instruments: Vec<Instrument>,
     shared: Arc<TelemetryShared>,
     controls: Arc<DemoControls>,
@@ -211,6 +227,24 @@ fn replay(
             }
         };
         let mut engine = engine();
+        let mut paper = if let Some(path) = &paper_ledger {
+            match PaperEngine::open(
+                path,
+                PolicyConfig::default(),
+                RiskConfig::default(),
+                FeeSchedule::dhan_delivery_research(),
+                PolicyMode::RiskFilteredSignal,
+            ) {
+                Ok(value) => Some(value),
+                Err(error) => {
+                    shared.set_journal_blocked(true);
+                    eprintln!("paper ledger: {error}");
+                    break;
+                }
+            }
+        } else {
+            None
+        };
         let mut publisher = TelemetryPublisher::new(Arc::clone(&shared), &instruments);
         publisher.audit(AuditEvent {
             timestamp_ns: now_ns().to_string(),
@@ -219,6 +253,7 @@ fn replay(
             detail: "Synthetic Dhan-compatible QJ01 fixture; no live feed".into(),
         });
         let mut previous_time = None::<i64>;
+        let mut record_index = 0_u64;
         loop {
             if stop.load(Ordering::Acquire) {
                 break 'run;
@@ -235,6 +270,16 @@ fn replay(
             let record = match reader.next_record() {
                 Ok(Some(v)) => v,
                 Ok(None) => {
+                    if let Some(paper) = &mut paper {
+                        if let Err(error) =
+                            paper.end_session(record_index, previous_time.unwrap_or_default())
+                        {
+                            shared.set_journal_blocked(true);
+                            eprintln!("paper session end: {error}");
+                            break 'run;
+                        }
+                        shared.publish_paper(&paper.snapshot());
+                    }
                     publisher.audit(AuditEvent {
                         timestamp_ns: now_ns().to_string(),
                         instrument_key: None,
@@ -282,8 +327,26 @@ fn replay(
                 }
             }
             previous_time = Some(timestamp);
+            record_index += 1;
             match engine.process(&record) {
-                Ok(output) => publisher.observe(&record, &output, true),
+                Ok(output) => {
+                    publisher.observe(&record, &output, true);
+                    if let Some(paper) = &mut paper {
+                        match paper.on_market_record(record_index, &record, &output) {
+                            Ok(snapshot) => shared.publish_paper(&snapshot),
+                            Err(error) => {
+                                shared.set_journal_blocked(true);
+                                publisher.audit(AuditEvent {
+                                    timestamp_ns: now_ns().to_string(),
+                                    instrument_key: None,
+                                    kind: "PAPER_LEDGER_ERROR".into(),
+                                    detail: error.to_string(),
+                                });
+                                break 'run;
+                            }
+                        }
+                    }
+                }
                 Err(error) => {
                     shared.set_journal_blocked(true);
                     publisher.audit(AuditEvent {
@@ -303,12 +366,14 @@ fn replay(
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut journal = PathBuf::from(".local/phase2c/demo.qj");
+    let mut paper_ledger = None::<PathBuf>;
     let mut port = 8765_u16;
     let mut arguments = std::env::args().skip(1);
     while let Some(flag) = arguments.next() {
         let value = arguments.next().ok_or("missing argument value")?;
         match flag.as_str() {
             "--journal" => journal = PathBuf::from(value),
+            "--paper-ledger" => paper_ledger = Some(PathBuf::from(value)),
             "--port" => port = value.parse()?,
             _ => return Err(format!("unknown option {flag}").into()),
         }
@@ -321,14 +386,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_demo_controls(Arc::clone(&controls));
     let listener = TcpListener::bind(("127.0.0.1", port)).await?;
     eprintln!(
-        "DATA_ONLY synthetic replay on http://127.0.0.1:{port}; journal {}",
+        "{} synthetic replay on http://127.0.0.1:{port}; journal {}",
+        if paper_ledger.is_some() {
+            "PAPER_REPLAY"
+        } else {
+            "DATA_ONLY"
+        },
         journal.display()
     );
     let stopped = Arc::new(AtomicBool::new(false));
     let worker = std::thread::spawn({
         let shared = Arc::clone(&shared);
         let stopped = Arc::clone(&stopped);
-        move || replay(journal, instruments, shared, controls, stopped)
+        move || {
+            replay(
+                journal,
+                paper_ledger,
+                instruments,
+                shared,
+                controls,
+                stopped,
+            )
+        }
     });
     let (shutdown, shutdown_rx) = watch::channel(false);
     let server = tokio::spawn(gateway.serve(listener, shutdown_rx));
@@ -343,6 +422,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use quant_paper::experience::{RewardConfig, load_experiences, reward_for_experience};
+    use quant_paper::ledger::{LedgerEvent, PaperLedgerReader};
     #[test]
     fn fixture_round_trips_through_existing_decoders_and_journal() {
         let dir = tempfile::tempdir().unwrap();
@@ -363,5 +444,80 @@ mod tests {
         assert_eq!(count, 962);
         assert_eq!(depth, 240);
         assert_eq!(quotes, 240);
+    }
+
+    #[test]
+    fn paper_replay_uses_phase2b_outputs_and_recovers_without_duplicate_events() {
+        let dir = tempfile::tempdir().unwrap();
+        let market_path = dir.path().join("market.qj");
+        let paper_path = dir.path().join("paper.qp");
+        build_fixture(&market_path).unwrap();
+        let run = || {
+            let mut market = JournalReader::open(&market_path).unwrap();
+            let mut engine = engine();
+            let mut paper = PaperEngine::open(
+                &paper_path,
+                PolicyConfig::default(),
+                RiskConfig::default(),
+                FeeSchedule::dhan_delivery_research(),
+                PolicyMode::RiskFilteredSignal,
+            )
+            .unwrap();
+            let mut index = 0;
+            let mut last_time = 0;
+            while let Some(record) = market.next_record().unwrap() {
+                index += 1;
+                last_time = record.event.receive_timestamp_ns();
+                let output = engine.process(&record).unwrap();
+                paper.on_market_record(index, &record, &output).unwrap();
+            }
+            paper.end_session(index, last_time).unwrap();
+            let result = paper.snapshot();
+            paper.close().unwrap();
+            result
+        };
+        let first = run();
+        let before_size = std::fs::metadata(&paper_path).unwrap().len();
+        let second = run();
+        assert_eq!(second.portfolio, first.portfolio);
+        assert_eq!(std::fs::metadata(&paper_path).unwrap().len(), before_size);
+        let mut reader = PaperLedgerReader::open(&paper_path).unwrap();
+        let mut decisions = 0;
+        let mut fills = 0;
+        let mut outcomes = 0;
+        while let Some(record) = reader.next_record().unwrap() {
+            match record.event {
+                LedgerEvent::Decision(_) => decisions += 1,
+                LedgerEvent::Fill(_) => fills += 1,
+                LedgerEvent::Outcome { .. } => outcomes += 1,
+                _ => {}
+            }
+        }
+        assert_eq!(decisions, 240);
+        assert!(
+            fills > 0,
+            "synthetic market should exercise conservative fills"
+        );
+        assert!(
+            outcomes > 0,
+            "synthetic market should complete a paper round trip"
+        );
+        let experiences = load_experiences(&paper_path).unwrap();
+        assert_eq!(experiences.len(), 240);
+        assert!(experiences.iter().any(|v| v.attribution.is_some()));
+        assert!(experiences.iter().any(|v| v.decision.action
+            == quant_paper::DecisionAction::NoTrade
+            && v.fill_ids.is_empty()
+            && v.attribution.is_none()));
+        assert!(
+            experiences
+                .iter()
+                .filter(|v| v.attribution.is_some())
+                .all(
+                    |v| reward_for_experience(v, 20_000_000_000_000, &RewardConfig::default())
+                        .total_nanos
+                        .is_some()
+                )
+        );
     }
 }

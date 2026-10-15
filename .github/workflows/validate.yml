@@ -1,4 +1,4 @@
-name: Validate DATA_ONLY foundation
+name: Validate data and paper research foundation
 
 on:
   push:
@@ -40,7 +40,7 @@ jobs:
         run: rustup toolchain install 1.99.0 --profile minimal --component clippy --component rustfmt
       - name: Rust tests and static checks
         run: |
-          cargo test --locked --workspace --manifest-path rust/Cargo.toml
+          cargo test --locked --workspace --all-targets --manifest-path rust/Cargo.toml
           cargo fmt --all --manifest-path rust/Cargo.toml -- --check
           cargo clippy --locked --workspace --all-targets --manifest-path rust/Cargo.toml -- -D warnings
           cargo build --locked --workspace --release --manifest-path rust/Cargo.toml

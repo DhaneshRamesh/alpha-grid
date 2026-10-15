@@ -99,6 +99,7 @@ impl Gateway {
         Router::new()
             .route("/api/snapshot", get(snapshot))
             .route("/api/health", get(health))
+            .route("/api/paper", get(paper))
             .route("/api/instruments/{key}", get(instrument))
             .route("/ws", get(websocket))
             .route("/api/demo/control", post(demo_control))
@@ -252,6 +253,18 @@ async fn snapshot(State(state): State<Arc<AppState>>) -> Json<Envelope> {
 
 async fn health(State(state): State<Arc<AppState>>) -> Json<WireEngineSnapshotStatus> {
     Json((&*state.current.load_full()).into())
+}
+
+async fn paper(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<crate::protocol::WirePaperSnapshot>, StatusCode> {
+    state
+        .current
+        .load()
+        .paper
+        .clone()
+        .map(Json)
+        .ok_or(StatusCode::NOT_FOUND)
 }
 
 async fn instrument(

@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import Chart from "./Chart";
+import PaperWorkspace from "./PaperWorkspace";
 import {
   amount,
   dateTime,
@@ -26,7 +27,8 @@ type View =
   | "Order book"
   | "Feature monitor"
   | "Reliability"
-  | "Session audit";
+  | "Session audit"
+  | "Paper research";
 const views: { name: View; icon: string; short: string }[] = [
   { name: "Overview", icon: "◫", short: "01" },
   { name: "Market intelligence", icon: "◈", short: "02" },
@@ -35,6 +37,7 @@ const views: { name: View; icon: string; short: string }[] = [
   { name: "Feature monitor", icon: "⌁", short: "05" },
   { name: "Reliability", icon: "◷", short: "06" },
   { name: "Session audit", icon: "⋮", short: "07" },
+  { name: "Paper research", icon: "◇", short: "08" },
 ];
 const timeframes = [
   ["1s", "1000000000"],
@@ -165,7 +168,9 @@ function Header({
       </div>
       <div className="top-actions">
         <span className="mode-pill">
-          {snapshot?.mode ?? "DATA_ONLY"} · SIMULATED
+          {snapshot?.paper
+            ? "PAPER · SYNTHETIC · REPLAY"
+            : `${snapshot?.mode ?? "DATA_ONLY"} · SIMULATED`}
         </span>
         <span
           className={`connection-pill ${connection === "CONNECTED" ? "online" : ""}`}
@@ -1051,12 +1056,14 @@ export default function App() {
           <div className="sidebar-system">
             <span className="small-indicator" />
             <div>
-              <strong>DATA_ONLY MODE</strong>
-              <small>Execution disabled</small>
+              <strong>
+                {snapshot?.paper ? "PAPER SIMULATION" : "DATA_ONLY MODE"}
+              </strong>
+              <small>Real execution disabled</small>
             </div>
           </div>
           <div className="sidebar-version">
-            ALPHA GRID <span>·</span> PHASE 2C
+            ALPHA GRID <span>·</span> PHASE 3A
           </div>
         </div>
       </aside>
@@ -1110,6 +1117,13 @@ export default function App() {
             />
           )}
           {view === "Session audit" && <Audit snapshot={snapshot} />}
+          {view === "Paper research" && (
+            <PaperWorkspace
+              snapshot={snapshot}
+              connection={connection}
+              instrumentKey={instrument?.instrument.key ?? null}
+            />
+          )}
         </main>
       </div>
     </div>

@@ -719,6 +719,7 @@ dependencies = [
  "quant-engine",
  "quant-journal",
  "quant-market-data",
+ "quant-paper",
  "quant-replay",
  "schemars",
  "serde",

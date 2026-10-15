@@ -21,6 +21,7 @@ pub enum LedgerEvent {
     Outcome {
         decision_id: String,
         attribution: OutcomeAttribution,
+        timestamp_ns: i64,
     },
     Halt {
         reason: DecisionReason,

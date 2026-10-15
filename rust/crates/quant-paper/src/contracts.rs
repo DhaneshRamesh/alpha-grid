@@ -263,6 +263,8 @@ pub struct ExperienceRecord {
     pub decision: DecisionRecord,
     pub order_ids: Vec<String>,
     pub fill_ids: Vec<String>,
+    pub total_paper_turnover_nanos: Option<MoneyNanos>,
+    pub total_paper_fees_nanos: Option<MoneyNanos>,
     pub attribution: Option<OutcomeAttribution>,
     pub outcome_is_counterfactual: bool,
     pub recorded_at_ns: i64,

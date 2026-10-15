@@ -2,12 +2,14 @@
 //! durable append and engine processing; gateway reads never lock ingestion.
 use crate::protocol::{
     AuditEvent, LatencySummary, WireCandle, WireCounters, WireDepth, WireEngineSnapshot,
-    WireFeatures, WireInstrument, WireInstrumentSnapshot, WireMarket, instrument_key,
+    WireFeatures, WireInstrument, WireInstrumentSnapshot, WireMarket, WirePaperSnapshot,
+    instrument_key,
 };
 use arc_swap::{ArcSwap, ArcSwapOption};
 use quant_core::{Instrument, MarketEvent, MarketSessionKind};
 use quant_engine::pipeline::EngineOutput;
 use quant_journal::JournalRecord;
+use quant_paper::oms::PaperSnapshot;
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU64, AtomicUsize, Ordering};
@@ -23,6 +25,7 @@ pub struct TelemetryShared {
     revision: AtomicU64,
     pub(crate) counters: ArcSwap<WireCounters>,
     pub(crate) audit: ArcSwap<Vec<AuditEvent>>,
+    paper: ArcSwapOption<WirePaperSnapshot>,
     pub(crate) connected_clients: AtomicUsize,
     pub(crate) coalesced_updates: AtomicU64,
     pub(crate) skipped_updates: AtomicU64,
@@ -64,6 +67,7 @@ impl TelemetryShared {
             revision: AtomicU64::new(0),
             counters: ArcSwap::from_pointee(WireCounters::default()),
             audit: ArcSwap::from_pointee(Vec::new()),
+            paper: ArcSwapOption::empty(),
             connected_clients: AtomicUsize::new(0),
             coalesced_updates: AtomicU64::new(0),
             skipped_updates: AtomicU64::new(0),
@@ -108,6 +112,7 @@ impl TelemetryShared {
         }
         self.counters.store(Arc::new(WireCounters::default()));
         self.audit.store(Arc::new(Vec::new()));
+        self.paper.store(None);
         self.replay_epoch.fetch_add(1, Ordering::AcqRel);
         self.last_observed_wall_ns.store(0, Ordering::Release);
         self.last_observed_mono_ns.store(0, Ordering::Release);
@@ -126,6 +131,13 @@ impl TelemetryShared {
             }
         }
         None
+    }
+
+    /// Publish only after the paper ledger has fsynced and accepted the transition.
+    pub fn publish_paper(&self, snapshot: &PaperSnapshot) {
+        let _write = WriteGuard::new(self);
+        self.paper
+            .store(Some(Arc::new(WirePaperSnapshot::from(snapshot))));
     }
 
     fn snapshot_once(&self, generation: u64, stale_after_ns: i64) -> WireEngineSnapshot {
@@ -210,6 +222,7 @@ impl TelemetryShared {
             counters,
             instruments,
             audit: (**self.audit.load()).clone(),
+            paper: self.paper.load_full().map(|value| (*value).clone()),
         }
     }
 }

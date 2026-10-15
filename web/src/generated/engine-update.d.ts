@@ -132,6 +132,7 @@ export interface WireEngineSnapshotStatus {
   feed_connected: boolean;
   journal_blocked: boolean;
   latest_data_timestamp_ns?: string | null;
+  paper?: WirePaperSnapshot | null;
   replay_paused: boolean;
   replay_speed?: number | null;
   storage_status: string;
@@ -168,5 +169,128 @@ export interface LatencySummary {
   p95_ns?: string | null;
   p99_ns?: string | null;
   sample_count: number;
+  [k: string]: unknown;
+}
+export interface WirePaperSnapshot {
+  fee_schedule_version: string;
+  last_source_record_index: string;
+  ledger_healthy: boolean;
+  ledger_recovered_tail_bytes: string;
+  mode: string;
+  orders: WirePaperOrder[];
+  policy_version: string;
+  portfolio: WirePaperPortfolio;
+  recent_decisions: WirePaperDecision[];
+  recent_fills: WirePaperFill[];
+  recent_outcomes: WirePaperOutcome[];
+  risk_limits: WirePaperRiskLimits;
+  risk_rules_version: string;
+  schema_version: number;
+  [k: string]: unknown;
+}
+export interface WirePaperOrder {
+  created_at_ns: string;
+  decision_id: string;
+  expires_at_ns: string;
+  filled_quantity: string;
+  instrument: WireInstrument;
+  kind: string;
+  last_transition_ns: string;
+  order_id: string;
+  price_collar_nanos?: string | null;
+  quantity: string;
+  remaining_quantity: string;
+  scenario: string;
+  side: string;
+  status: string;
+  [k: string]: unknown;
+}
+export interface WirePaperPortfolio {
+  available_cash_nanos: string;
+  cash_nanos: string;
+  exposure_nanos: string;
+  fees_paid_nanos: string;
+  halt_reason?: string | null;
+  halted: boolean;
+  marked_equity_nanos?: string | null;
+  max_drawdown_nanos?: string | null;
+  positions: WirePaperPosition[];
+  realized_pnl_nanos: string;
+  remaining_session_loss_nanos?: string | null;
+  reserved_cash_nanos: string;
+  starting_capital_nanos: string;
+  [k: string]: unknown;
+}
+export interface WirePaperPosition {
+  cost_basis_nanos: string;
+  entry_order_id: string;
+  instrument: WireInstrument;
+  last_bid_mark_nanos?: string | null;
+  opened_at_ns: string;
+  quantity: string;
+  unrealized_pnl_nanos?: string | null;
+  [k: string]: unknown;
+}
+export interface WirePaperDecision {
+  action: string;
+  adverse_cost_nanos?: string | null;
+  candidate_action: string;
+  cost_provisional: boolean;
+  cross_feed_uncertain: boolean;
+  decision_id: string;
+  estimated_cost_nanos?: string | null;
+  evidence: string[];
+  expected_gross_edge_nanos?: string | null;
+  expected_net_edge_nanos?: string | null;
+  expires_at_ns: string;
+  forecast_uncertainty_nanos?: string | null;
+  hypothesis_id: string;
+  instrument: WireInstrument;
+  model_status: string;
+  model_version: string;
+  notional_nanos?: string | null;
+  quantity?: string | null;
+  reason: string;
+  risk_approved: boolean;
+  risk_reasons: string[];
+  source_receive_timestamp_ns: string;
+  source_record_index: string;
+  volume_complete: boolean;
+  [k: string]: unknown;
+}
+export interface WirePaperFill {
+  assumptions: string[];
+  fees_nanos: string;
+  fill_id: string;
+  instrument: WireInstrument;
+  order_id: string;
+  price_nanos: string;
+  quantity: string;
+  side: string;
+  timestamp_ns: string;
+  [k: string]: unknown;
+}
+export interface WirePaperOutcome {
+  categories: string[];
+  decision_id: string;
+  explanation: string;
+  holding_time_ns?: string | null;
+  max_adverse_excursion_nanos?: string | null;
+  max_favorable_excursion_nanos?: string | null;
+  net_pnl_nanos?: string | null;
+  [k: string]: unknown;
+}
+export interface WirePaperRiskLimits {
+  allow_uncalibrated_paper: boolean;
+  max_deployed_nanos: string;
+  max_instrument_notional_nanos: string;
+  max_loss_per_decision_nanos: string;
+  max_market_age_ns: string;
+  max_order_age_ns: string;
+  max_positions: number;
+  max_return_volatility: number;
+  max_session_loss_nanos: string;
+  max_slippage_bps: number;
+  max_spread_bps: number;
   [k: string]: unknown;
 }

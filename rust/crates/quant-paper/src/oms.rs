@@ -11,8 +11,26 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::io;
 use std::path::Path;
+use std::time::Instant;
 
 const RECENT_LIMIT: usize = 100;
+const DECISION_LIMIT: usize = 500;
+
+/// Monotonic, non-overlapping wall-time slices for one replayed source record.
+/// Journal time includes serialization, write and sync_data for every transition.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaperTiming {
+    pub candidate_ns: u64,
+    pub risk_ns: u64,
+    pub journal_durability_ns: u64,
+    pub oms_transition_ns: u64,
+    pub snapshot_ns: u64,
+    pub total_ns: u64,
+}
+
+fn elapsed_ns(started: Instant) -> u64 {
+    u64::try_from(started.elapsed().as_nanos()).unwrap_or(u64::MAX)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PaperOrderView {
@@ -38,6 +56,7 @@ pub struct PaperSnapshot {
     pub fee_schedule_version: String,
     pub risk_rules_version: String,
     pub policy_version: String,
+    pub risk_limits: RiskConfig,
 }
 
 fn key(instrument: &quant_core::Instrument) -> String {
@@ -89,6 +108,8 @@ pub struct PaperEngine {
     equity_peak_nanos: MoneyNanos,
     feed_connected: bool,
     ledger_healthy: bool,
+    last_timing: PaperTiming,
+    last_journal_writes_ns: Vec<u64>,
 }
 
 impl PaperEngine {
@@ -154,7 +175,31 @@ impl PaperEngine {
             equity_peak_nanos: starting_capital,
             feed_connected: true,
             ledger_healthy: true,
+            last_timing: PaperTiming::default(),
+            last_journal_writes_ns: Vec::new(),
         })
+    }
+
+    pub fn last_timing(&self) -> PaperTiming {
+        self.last_timing
+    }
+
+    pub fn last_journal_writes_ns(&self) -> &[u64] {
+        &self.last_journal_writes_ns
+    }
+
+    fn timed_snapshot(&mut self, started: Instant) -> PaperSnapshot {
+        let snapshot_started = Instant::now();
+        let snapshot = self.snapshot();
+        self.last_timing.snapshot_ns = elapsed_ns(snapshot_started);
+        self.last_timing.total_ns = elapsed_ns(started);
+        self.last_timing.oms_transition_ns = self.last_timing.total_ns.saturating_sub(
+            self.last_timing.candidate_ns
+                + self.last_timing.risk_ns
+                + self.last_timing.journal_durability_ns
+                + self.last_timing.snapshot_ns,
+        );
+        snapshot
     }
 
     pub fn snapshot(&self) -> PaperSnapshot {
@@ -180,12 +225,21 @@ impl PaperEngine {
             fee_schedule_version: self.fees.version.clone(),
             risk_rules_version: self.risk.version.clone(),
             policy_version: self.policy.version.clone(),
+            risk_limits: self.risk.clone(),
         }
     }
 
     fn persist(&mut self, index: u64, event: LedgerEvent) -> io::Result<()> {
         let record = LedgerRecord::new(index, event);
-        if let Err(error) = self.ledger.append(&record) {
+        let started = Instant::now();
+        let result = self.ledger.append(&record);
+        let write_ns = elapsed_ns(started);
+        self.last_journal_writes_ns.push(write_ns);
+        self.last_timing.journal_durability_ns = self
+            .last_timing
+            .journal_durability_ns
+            .saturating_add(write_ns);
+        if let Err(error) = result {
             self.ledger_healthy = false;
             self.portfolio.halted = true;
             self.portfolio.halt_reason = Some(DecisionReason::JournalFailure);
@@ -203,7 +257,10 @@ impl PaperEngine {
     fn apply(&mut self, record: &LedgerRecord) -> io::Result<()> {
         match &record.event {
             LedgerEvent::Decision(decision) => {
-                push_bounded(&mut self.recent_decisions, (**decision).clone());
+                self.recent_decisions.push_back((**decision).clone());
+                while self.recent_decisions.len() > DECISION_LIMIT {
+                    self.recent_decisions.pop_front();
+                }
             }
             LedgerEvent::Order(event) => {
                 if !self.seen_event_ids.insert(event.event_id.clone()) {
@@ -258,6 +315,7 @@ impl PaperEngine {
             LedgerEvent::Outcome {
                 decision_id,
                 attribution,
+                ..
             } => {
                 push_bounded(
                     &mut self.recent_outcomes,
@@ -403,8 +461,11 @@ impl PaperEngine {
         record: &quant_journal::JournalRecord,
         output: &EngineOutput,
     ) -> io::Result<PaperSnapshot> {
+        self.last_timing = PaperTiming::default();
+        self.last_journal_writes_ns.clear();
+        let started = Instant::now();
         if index == self.last_source_index {
-            return Ok(self.snapshot());
+            return Ok(self.timed_snapshot(started));
         }
         if index != self.last_source_index + 1 {
             return Err(io::Error::other("paper source index gap"));
@@ -435,7 +496,7 @@ impl PaperEngine {
                     .next_record()?;
             }
             self.mark(record);
-            return Ok(self.snapshot());
+            return Ok(self.timed_snapshot(started));
         }
         self.recovery = None;
         self.next_recovered = None;
@@ -447,7 +508,7 @@ impl PaperEngine {
                 self.decide(index, record, depth, features)?;
             }
         }
-        Ok(self.snapshot())
+        Ok(self.timed_snapshot(started))
     }
 
     fn mark(&mut self, record: &quant_journal::JournalRecord) {
@@ -519,6 +580,11 @@ impl PaperEngine {
                     Some(DecisionReason::HorizonExpired),
                     None,
                 )?;
+                continue;
+            }
+            // A depth print after a feed disconnect cannot establish a safe
+            // cross-feed execution opportunity; leave the paper order working.
+            if !self.feed_connected {
                 continue;
             }
             if depth.receive_timestamp_ns
@@ -634,6 +700,7 @@ impl PaperEngine {
             LedgerEvent::Outcome {
                 decision_id,
                 attribution,
+                timestamp_ns: now,
             },
         )?;
         self.portfolio.updated_at_ns = Some(now);
@@ -664,6 +731,7 @@ impl PaperEngine {
             journal_healthy: self.ledger_healthy,
             feed_connected: self.feed_connected,
         };
+        let candidate_started = Instant::now();
         let (mut candidate, mut reason) = self.policy.candidate(
             &context,
             position.as_ref().map_or(0, |p| p.quantity),
@@ -705,6 +773,11 @@ impl PaperEngine {
             .orders
             .values()
             .any(|o| key(&o.view.intent.instrument) == instrument_key);
+        self.last_timing.candidate_ns = self
+            .last_timing
+            .candidate_ns
+            .saturating_add(elapsed_ns(candidate_started));
+        let risk_started = Instant::now();
         let risk = self.risk.assess(RiskInput {
             context: &context,
             candidate: &candidate,
@@ -716,6 +789,10 @@ impl PaperEngine {
             open_order_exists,
             evaluation_time_ns: depth.receive_timestamp_ns,
         });
+        self.last_timing.risk_ns = self
+            .last_timing
+            .risk_ns
+            .saturating_add(elapsed_ns(risk_started));
         let action = if risk.approved_for_paper {
             candidate.action
         } else {
@@ -1349,5 +1426,157 @@ mod tests {
         let again = paper.on_market_record(1, &record, &output).unwrap();
         assert_eq!(again.recent_decisions.len(), 1);
         assert!(again.recent_fills.is_empty());
+    }
+
+    #[test]
+    fn risk_rejects_unprofitable_forecast_exposure_and_unknown_open_mark() {
+        let dir = tempfile::tempdir().unwrap();
+        let paper = open_paper(&dir.path().join("paper.qp"));
+        let (record, output) = sample(1, 1, 100_000_000_000, 5, true);
+        let MarketEvent::Depth(depth) = &record.event else {
+            panic!("depth")
+        };
+        let features = output.features.expect("features");
+        let context = DecisionContext {
+            schema_version: PAPER_SCHEMA_VERSION,
+            source_record_index: 1,
+            source_event_id: "synthetic:1".into(),
+            instrument: depth.instrument.clone(),
+            session_id: record.session_id,
+            source_receive_timestamp_ns: depth.receive_timestamp_ns,
+            evaluated_at_ns: depth.receive_timestamp_ns,
+            market: features.market,
+            features: features.features,
+            health: features.health,
+            depth: Some((**depth).clone()),
+            journal_healthy: true,
+            feed_connected: true,
+        };
+        let (candidate, _) =
+            PolicyConfig::default().candidate(&context, 0, None, PolicyMode::RiskFilteredSignal);
+        assert_eq!(candidate.action, DecisionAction::Buy);
+        let mut model = UntrainedModel.estimate(&context, 60_000_000_000);
+        model.status = EstimateStatus::Calibrated;
+        model.expected_gross_edge_nanos = Some(1);
+        let fees = FeeSchedule::dhan_delivery_research();
+        let cost =
+            fees.estimate_round_trip(depth.asks[0].price_nanos, 8, 50_000_000, 5, 2, Some(1));
+        let notional = i128::from(depth.asks[0].price_nanos) * 8;
+        let mut portfolio = paper.snapshot().portfolio;
+        let assess = |config: &RiskConfig, portfolio: &PaperPortfolio, model: &ModelEstimate| {
+            config.assess(RiskInput {
+                context: &context,
+                candidate: &candidate,
+                model,
+                costs: Some(&cost),
+                portfolio,
+                quantity: 8,
+                notional_nanos: notional,
+                open_order_exists: false,
+                evaluation_time_ns: depth.receive_timestamp_ns,
+            })
+        };
+        assert!(
+            assess(&RiskConfig::default(), &portfolio, &model)
+                .reasons
+                .contains(&DecisionReason::CostExceedsEdge)
+        );
+        model.expected_gross_edge_nanos = Some(cost.expected_total_nanos + 1);
+        let narrow = RiskConfig {
+            max_instrument_notional_nanos: 100_000_000_000,
+            ..RiskConfig::default()
+        };
+        assert!(
+            assess(&narrow, &portfolio, &model)
+                .reasons
+                .contains(&DecisionReason::RiskLimit)
+        );
+        portfolio.positions.insert(
+            key(&context.instrument),
+            PaperPosition {
+                instrument: context.instrument.clone(),
+                quantity: 1,
+                cost_basis_nanos: 100_000_000_000,
+                entry_order_id: "prior".into(),
+                opened_at_ns: depth.receive_timestamp_ns,
+                last_bid_mark_nanos: None,
+                unrealized_pnl_nanos: None,
+            },
+        );
+        let guarded = assess(&RiskConfig::default(), &portfolio, &model);
+        assert!(guarded.reasons.contains(&DecisionReason::DataQuality));
+        assert!(guarded.reasons.contains(&DecisionReason::Duplicate));
+    }
+
+    #[test]
+    fn reconnect_blocks_intervening_paper_fills_and_keeps_position_state() {
+        use quant_core::{
+            MarketSessionEvent, MarketSessionKind, PriceObservation, PriceSource,
+            SourceTimestampMetadata,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut paper = open_paper(&dir.path().join("paper.qp"));
+        let (first, first_output) = sample(1, 1, 100_000_000_000, 5, true);
+        let MarketEvent::Depth(depth) = &first.event else {
+            panic!("depth")
+        };
+        let instrument = depth.instrument.clone();
+        let empty = EngineOutput {
+            volume: None,
+            finalized_candles: Vec::new(),
+            provisional_candles: Vec::new(),
+            features: None,
+        };
+        paper.on_market_record(1, &first, &first_output).unwrap();
+        let metadata = |index: u64| SourceTimestampMetadata {
+            receive_timestamp_ns: 1_700_000_000_000_000_000 + index as i64 * 1_000_000_000,
+            source_last_trade_timestamp_ns: None,
+            feed_session_id: "synthetic".into(),
+            arrival_ordinal: index,
+            frame_id: index,
+            packet_offset: 0,
+            protocol: SourceProtocol::DhanStandardV2,
+        };
+        let disconnected = JournalRecord {
+            session_id: "synthetic".into(),
+            event: MarketEvent::Session(Box::new(MarketSessionEvent {
+                instrument: Some(instrument.clone()),
+                metadata: metadata(2),
+                kind: MarketSessionKind::Disconnected { reason_code: 1006 },
+            })),
+        };
+        paper.on_market_record(2, &disconnected, &empty).unwrap();
+        let (during_gap, output) = sample(3, 3, 100_000_000_000, 5, true);
+        let gap = paper.on_market_record(3, &during_gap, &output).unwrap();
+        assert!(gap.recent_fills.is_empty());
+        assert!(gap.portfolio.positions.is_empty());
+        assert_eq!(
+            gap.recent_decisions.last().unwrap().reason,
+            DecisionReason::FeedDisconnected
+        );
+        let recovered_quote = JournalRecord {
+            session_id: "synthetic".into(),
+            event: MarketEvent::Price(PriceObservation {
+                instrument,
+                metadata: metadata(4),
+                source: PriceSource::Ticker,
+                price_nanos: 100_000_000_000,
+                quality: MarketDataQuality::default(),
+            }),
+        };
+        paper.on_market_record(4, &recovered_quote, &empty).unwrap();
+        let (after_gap, output) = sample(5, 5, 100_000_000_000, 5, true);
+        let resumed = paper.on_market_record(5, &after_gap, &output).unwrap();
+        assert_eq!(resumed.recent_fills.len(), 1);
+        assert_eq!(
+            resumed
+                .portfolio
+                .positions
+                .values()
+                .next()
+                .unwrap()
+                .quantity,
+            1
+        );
     }
 }

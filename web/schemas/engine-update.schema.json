@@ -374,6 +374,16 @@
             "null"
           ]
         },
+        "paper": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WirePaperSnapshot"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "replay_paused": {
           "type": "boolean"
         },
@@ -655,6 +665,530 @@
         "freshness",
         "quality",
         "provenance"
+      ],
+      "type": "object"
+    },
+    "WirePaperDecision": {
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "adverse_cost_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "candidate_action": {
+          "type": "string"
+        },
+        "cost_provisional": {
+          "type": "boolean"
+        },
+        "cross_feed_uncertain": {
+          "type": "boolean"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "estimated_cost_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "evidence": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "expected_gross_edge_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_net_edge_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expires_at_ns": {
+          "type": "string"
+        },
+        "forecast_uncertainty_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "hypothesis_id": {
+          "type": "string"
+        },
+        "instrument": {
+          "$ref": "#/$defs/WireInstrument"
+        },
+        "model_status": {
+          "type": "string"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "notional_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quantity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": "string"
+        },
+        "risk_approved": {
+          "type": "boolean"
+        },
+        "risk_reasons": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "source_receive_timestamp_ns": {
+          "type": "string"
+        },
+        "source_record_index": {
+          "type": "string"
+        },
+        "volume_complete": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "decision_id",
+        "source_record_index",
+        "instrument",
+        "action",
+        "candidate_action",
+        "reason",
+        "hypothesis_id",
+        "evidence",
+        "model_version",
+        "model_status",
+        "cost_provisional",
+        "risk_approved",
+        "risk_reasons",
+        "source_receive_timestamp_ns",
+        "expires_at_ns",
+        "volume_complete",
+        "cross_feed_uncertain"
+      ],
+      "type": "object"
+    },
+    "WirePaperFill": {
+      "properties": {
+        "assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "fees_nanos": {
+          "type": "string"
+        },
+        "fill_id": {
+          "type": "string"
+        },
+        "instrument": {
+          "$ref": "#/$defs/WireInstrument"
+        },
+        "order_id": {
+          "type": "string"
+        },
+        "price_nanos": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "string"
+        },
+        "side": {
+          "type": "string"
+        },
+        "timestamp_ns": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "fill_id",
+        "order_id",
+        "instrument",
+        "side",
+        "quantity",
+        "price_nanos",
+        "fees_nanos",
+        "timestamp_ns",
+        "assumptions"
+      ],
+      "type": "object"
+    },
+    "WirePaperOrder": {
+      "properties": {
+        "created_at_ns": {
+          "type": "string"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "expires_at_ns": {
+          "type": "string"
+        },
+        "filled_quantity": {
+          "type": "string"
+        },
+        "instrument": {
+          "$ref": "#/$defs/WireInstrument"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "last_transition_ns": {
+          "type": "string"
+        },
+        "order_id": {
+          "type": "string"
+        },
+        "price_collar_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quantity": {
+          "type": "string"
+        },
+        "remaining_quantity": {
+          "type": "string"
+        },
+        "scenario": {
+          "type": "string"
+        },
+        "side": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "order_id",
+        "decision_id",
+        "instrument",
+        "side",
+        "status",
+        "kind",
+        "scenario",
+        "quantity",
+        "remaining_quantity",
+        "filled_quantity",
+        "created_at_ns",
+        "last_transition_ns",
+        "expires_at_ns"
+      ],
+      "type": "object"
+    },
+    "WirePaperOutcome": {
+      "properties": {
+        "categories": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "decision_id": {
+          "type": "string"
+        },
+        "explanation": {
+          "type": "string"
+        },
+        "holding_time_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_adverse_excursion_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_favorable_excursion_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "net_pnl_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "decision_id",
+        "categories",
+        "explanation"
+      ],
+      "type": "object"
+    },
+    "WirePaperPortfolio": {
+      "properties": {
+        "available_cash_nanos": {
+          "type": "string"
+        },
+        "cash_nanos": {
+          "type": "string"
+        },
+        "exposure_nanos": {
+          "type": "string"
+        },
+        "fees_paid_nanos": {
+          "type": "string"
+        },
+        "halt_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "halted": {
+          "type": "boolean"
+        },
+        "marked_equity_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_drawdown_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "positions": {
+          "items": {
+            "$ref": "#/$defs/WirePaperPosition"
+          },
+          "type": "array"
+        },
+        "realized_pnl_nanos": {
+          "type": "string"
+        },
+        "remaining_session_loss_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reserved_cash_nanos": {
+          "type": "string"
+        },
+        "starting_capital_nanos": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "starting_capital_nanos",
+        "cash_nanos",
+        "reserved_cash_nanos",
+        "available_cash_nanos",
+        "realized_pnl_nanos",
+        "fees_paid_nanos",
+        "exposure_nanos",
+        "halted",
+        "positions"
+      ],
+      "type": "object"
+    },
+    "WirePaperPosition": {
+      "properties": {
+        "cost_basis_nanos": {
+          "type": "string"
+        },
+        "entry_order_id": {
+          "type": "string"
+        },
+        "instrument": {
+          "$ref": "#/$defs/WireInstrument"
+        },
+        "last_bid_mark_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "opened_at_ns": {
+          "type": "string"
+        },
+        "quantity": {
+          "type": "string"
+        },
+        "unrealized_pnl_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "instrument",
+        "quantity",
+        "cost_basis_nanos",
+        "entry_order_id",
+        "opened_at_ns"
+      ],
+      "type": "object"
+    },
+    "WirePaperRiskLimits": {
+      "properties": {
+        "allow_uncalibrated_paper": {
+          "type": "boolean"
+        },
+        "max_deployed_nanos": {
+          "type": "string"
+        },
+        "max_instrument_notional_nanos": {
+          "type": "string"
+        },
+        "max_loss_per_decision_nanos": {
+          "type": "string"
+        },
+        "max_market_age_ns": {
+          "type": "string"
+        },
+        "max_order_age_ns": {
+          "type": "string"
+        },
+        "max_positions": {
+          "format": "uint",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_return_volatility": {
+          "format": "double",
+          "type": "number"
+        },
+        "max_session_loss_nanos": {
+          "type": "string"
+        },
+        "max_slippage_bps": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "max_spread_bps": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "max_deployed_nanos",
+        "max_instrument_notional_nanos",
+        "max_positions",
+        "max_loss_per_decision_nanos",
+        "max_session_loss_nanos",
+        "max_spread_bps",
+        "max_market_age_ns",
+        "max_slippage_bps",
+        "max_return_volatility",
+        "max_order_age_ns",
+        "allow_uncalibrated_paper"
+      ],
+      "type": "object"
+    },
+    "WirePaperSnapshot": {
+      "properties": {
+        "fee_schedule_version": {
+          "type": "string"
+        },
+        "last_source_record_index": {
+          "type": "string"
+        },
+        "ledger_healthy": {
+          "type": "boolean"
+        },
+        "ledger_recovered_tail_bytes": {
+          "type": "string"
+        },
+        "mode": {
+          "type": "string"
+        },
+        "orders": {
+          "items": {
+            "$ref": "#/$defs/WirePaperOrder"
+          },
+          "type": "array"
+        },
+        "policy_version": {
+          "type": "string"
+        },
+        "portfolio": {
+          "$ref": "#/$defs/WirePaperPortfolio"
+        },
+        "recent_decisions": {
+          "items": {
+            "$ref": "#/$defs/WirePaperDecision"
+          },
+          "type": "array"
+        },
+        "recent_fills": {
+          "items": {
+            "$ref": "#/$defs/WirePaperFill"
+          },
+          "type": "array"
+        },
+        "recent_outcomes": {
+          "items": {
+            "$ref": "#/$defs/WirePaperOutcome"
+          },
+          "type": "array"
+        },
+        "risk_limits": {
+          "$ref": "#/$defs/WirePaperRiskLimits"
+        },
+        "risk_rules_version": {
+          "type": "string"
+        },
+        "schema_version": {
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "schema_version",
+        "mode",
+        "portfolio",
+        "recent_decisions",
+        "orders",
+        "recent_fills",
+        "recent_outcomes",
+        "last_source_record_index",
+        "ledger_recovered_tail_bytes",
+        "ledger_healthy",
+        "fee_schedule_version",
+        "risk_rules_version",
+        "policy_version",
+        "risk_limits"
       ],
       "type": "object"
     },

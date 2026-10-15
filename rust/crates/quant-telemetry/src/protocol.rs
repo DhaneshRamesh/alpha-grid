@@ -4,6 +4,7 @@ use quant_core::{DepthEvent, DepthLevel, Instrument, MarketDataQuality, SourcePr
 use quant_engine::Provenance;
 use quant_engine::bars::CandleSnapshot;
 use quant_engine::features::FeatureOutput;
+use quant_paper::oms::PaperSnapshot;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -385,6 +386,7 @@ pub struct WireEngineSnapshot {
     pub counters: WireCounters,
     pub instruments: Vec<WireInstrumentSnapshot>,
     pub audit: Vec<AuditEvent>,
+    pub paper: Option<WirePaperSnapshot>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -406,6 +408,7 @@ pub struct WireEngineSnapshotStatus {
     pub storage_status: String,
     pub backpressure_state: String,
     pub counters: WireCounters,
+    pub paper: Option<WirePaperSnapshot>,
 }
 
 impl From<&WireEngineSnapshot> for WireEngineSnapshotStatus {
@@ -420,6 +423,310 @@ impl From<&WireEngineSnapshot> for WireEngineSnapshotStatus {
             storage_status: value.storage_status.clone(),
             backpressure_state: value.backpressure_state.clone(),
             counters: value.counters.clone(),
+            paper: value.paper.clone(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperPosition {
+    pub instrument: WireInstrument,
+    pub quantity: String,
+    pub cost_basis_nanos: String,
+    pub entry_order_id: String,
+    pub opened_at_ns: String,
+    pub last_bid_mark_nanos: Option<String>,
+    pub unrealized_pnl_nanos: Option<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperPortfolio {
+    pub starting_capital_nanos: String,
+    pub cash_nanos: String,
+    pub reserved_cash_nanos: String,
+    pub available_cash_nanos: String,
+    pub realized_pnl_nanos: String,
+    pub fees_paid_nanos: String,
+    pub marked_equity_nanos: Option<String>,
+    pub max_drawdown_nanos: Option<String>,
+    pub exposure_nanos: String,
+    pub remaining_session_loss_nanos: Option<String>,
+    pub halted: bool,
+    pub halt_reason: Option<String>,
+    pub positions: Vec<WirePaperPosition>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperDecision {
+    pub decision_id: String,
+    pub source_record_index: String,
+    pub instrument: WireInstrument,
+    pub action: String,
+    pub candidate_action: String,
+    pub reason: String,
+    pub hypothesis_id: String,
+    pub evidence: Vec<String>,
+    pub model_version: String,
+    pub model_status: String,
+    pub expected_gross_edge_nanos: Option<String>,
+    pub expected_net_edge_nanos: Option<String>,
+    pub forecast_uncertainty_nanos: Option<String>,
+    pub estimated_cost_nanos: Option<String>,
+    pub adverse_cost_nanos: Option<String>,
+    pub cost_provisional: bool,
+    pub risk_approved: bool,
+    pub risk_reasons: Vec<String>,
+    pub quantity: Option<String>,
+    pub notional_nanos: Option<String>,
+    pub source_receive_timestamp_ns: String,
+    pub expires_at_ns: String,
+    pub volume_complete: bool,
+    pub cross_feed_uncertain: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperOrder {
+    pub order_id: String,
+    pub decision_id: String,
+    pub instrument: WireInstrument,
+    pub side: String,
+    pub status: String,
+    pub kind: String,
+    pub scenario: String,
+    pub quantity: String,
+    pub remaining_quantity: String,
+    pub filled_quantity: String,
+    pub price_collar_nanos: Option<String>,
+    pub created_at_ns: String,
+    pub last_transition_ns: String,
+    pub expires_at_ns: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperFill {
+    pub fill_id: String,
+    pub order_id: String,
+    pub instrument: WireInstrument,
+    pub side: String,
+    pub quantity: String,
+    pub price_nanos: String,
+    pub fees_nanos: String,
+    pub timestamp_ns: String,
+    pub assumptions: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperOutcome {
+    pub decision_id: String,
+    pub net_pnl_nanos: Option<String>,
+    pub max_favorable_excursion_nanos: Option<String>,
+    pub max_adverse_excursion_nanos: Option<String>,
+    pub holding_time_ns: Option<String>,
+    pub categories: Vec<String>,
+    pub explanation: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperSnapshot {
+    pub schema_version: u16,
+    pub mode: String,
+    pub portfolio: WirePaperPortfolio,
+    pub recent_decisions: Vec<WirePaperDecision>,
+    pub orders: Vec<WirePaperOrder>,
+    pub recent_fills: Vec<WirePaperFill>,
+    pub recent_outcomes: Vec<WirePaperOutcome>,
+    pub last_source_record_index: String,
+    pub ledger_recovered_tail_bytes: String,
+    pub ledger_healthy: bool,
+    pub fee_schedule_version: String,
+    pub risk_rules_version: String,
+    pub policy_version: String,
+    pub risk_limits: WirePaperRiskLimits,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperRiskLimits {
+    pub max_deployed_nanos: String,
+    pub max_instrument_notional_nanos: String,
+    pub max_positions: usize,
+    pub max_loss_per_decision_nanos: String,
+    pub max_session_loss_nanos: String,
+    pub max_spread_bps: f64,
+    pub max_market_age_ns: String,
+    pub max_slippage_bps: u32,
+    pub max_return_volatility: f64,
+    pub max_order_age_ns: String,
+    pub allow_uncalibrated_paper: bool,
+}
+
+impl From<&PaperSnapshot> for WirePaperSnapshot {
+    fn from(value: &PaperSnapshot) -> Self {
+        let p = &value.portfolio;
+        Self {
+            schema_version: value.schema_version,
+            mode: value.mode.clone(),
+            portfolio: WirePaperPortfolio {
+                starting_capital_nanos: p.starting_capital_nanos.to_string(),
+                cash_nanos: p.cash_nanos.to_string(),
+                reserved_cash_nanos: p.reserved_cash_nanos.to_string(),
+                available_cash_nanos: (p.cash_nanos - p.reserved_cash_nanos).to_string(),
+                realized_pnl_nanos: p.realized_pnl_nanos.to_string(),
+                fees_paid_nanos: p.fees_paid_nanos.to_string(),
+                marked_equity_nanos: p.marked_equity_nanos.map(|v| v.to_string()),
+                max_drawdown_nanos: p.max_drawdown_nanos.map(|v| v.to_string()),
+                exposure_nanos: p
+                    .positions
+                    .values()
+                    .map(|v| v.cost_basis_nanos)
+                    .sum::<i128>()
+                    .to_string(),
+                remaining_session_loss_nanos: p
+                    .positions
+                    .values()
+                    .map(|position| position.unrealized_pnl_nanos)
+                    .sum::<Option<i128>>()
+                    .map(|unrealized| {
+                        (value.risk_limits.max_session_loss_nanos
+                            + p.realized_pnl_nanos
+                            + unrealized)
+                            .max(0)
+                            .to_string()
+                    }),
+                halted: p.halted,
+                halt_reason: p.halt_reason.map(|v| format!("{v:?}")),
+                positions: p
+                    .positions
+                    .values()
+                    .map(|v| WirePaperPosition {
+                        instrument: WireInstrument::from(&v.instrument),
+                        quantity: v.quantity.to_string(),
+                        cost_basis_nanos: v.cost_basis_nanos.to_string(),
+                        entry_order_id: v.entry_order_id.clone(),
+                        opened_at_ns: v.opened_at_ns.to_string(),
+                        last_bid_mark_nanos: v.last_bid_mark_nanos.map(|n| n.to_string()),
+                        unrealized_pnl_nanos: v.unrealized_pnl_nanos.map(|n| n.to_string()),
+                    })
+                    .collect(),
+            },
+            recent_decisions: value
+                .recent_decisions
+                .iter()
+                .map(|d| WirePaperDecision {
+                    decision_id: d.decision_id.clone(),
+                    source_record_index: d.context.source_record_index.to_string(),
+                    instrument: WireInstrument::from(&d.context.instrument),
+                    action: format!("{:?}", d.action),
+                    candidate_action: format!("{:?}", d.candidate.action),
+                    reason: format!("{:?}", d.reason),
+                    hypothesis_id: d.candidate.hypothesis_id.clone(),
+                    evidence: d.candidate.evidence.clone(),
+                    model_version: d.model.model_version.clone(),
+                    model_status: format!("{:?}", d.model.status),
+                    expected_gross_edge_nanos: d
+                        .model
+                        .expected_gross_edge_nanos
+                        .map(|n| n.to_string()),
+                    expected_net_edge_nanos: d
+                        .cost
+                        .as_ref()
+                        .and_then(|c| c.expected_net_edge_nanos.map(|n| n.to_string())),
+                    forecast_uncertainty_nanos: d
+                        .model
+                        .forecast_uncertainty_nanos
+                        .map(|n| n.to_string()),
+                    estimated_cost_nanos: d
+                        .cost
+                        .as_ref()
+                        .map(|c| c.expected_total_nanos.to_string()),
+                    adverse_cost_nanos: d.cost.as_ref().map(|c| c.adverse_total_nanos.to_string()),
+                    cost_provisional: d.cost.as_ref().is_some_and(|c| c.provisional),
+                    risk_approved: d.risk.approved_for_paper,
+                    risk_reasons: d.risk.reasons.iter().map(|r| format!("{r:?}")).collect(),
+                    quantity: d.quantity.map(|n| n.to_string()),
+                    notional_nanos: d.notional_nanos.map(|n| n.to_string()),
+                    source_receive_timestamp_ns: d.context.source_receive_timestamp_ns.to_string(),
+                    expires_at_ns: d.expires_at_ns.to_string(),
+                    volume_complete: !d.context.market.quality.volume_interval_incomplete,
+                    cross_feed_uncertain: d.context.market.quality.cross_feed_uncertain,
+                })
+                .collect(),
+            orders: value
+                .orders
+                .iter()
+                .map(|o| WirePaperOrder {
+                    order_id: o.intent.order_id.clone(),
+                    decision_id: o.intent.decision_id.clone(),
+                    instrument: WireInstrument::from(&o.intent.instrument),
+                    side: format!("{:?}", o.intent.side),
+                    status: format!("{:?}", o.status),
+                    kind: format!("{:?}", o.intent.kind),
+                    scenario: format!("{:?}", o.intent.scenario),
+                    quantity: o.intent.quantity.to_string(),
+                    remaining_quantity: o.remaining_quantity.to_string(),
+                    filled_quantity: o.filled_quantity.to_string(),
+                    price_collar_nanos: o.intent.limit_price_nanos.map(|n| n.to_string()),
+                    created_at_ns: o.intent.created_at_ns.to_string(),
+                    last_transition_ns: o.last_transition_ns.to_string(),
+                    expires_at_ns: o.intent.expires_at_ns.to_string(),
+                })
+                .collect(),
+            recent_fills: value
+                .recent_fills
+                .iter()
+                .map(|f| WirePaperFill {
+                    fill_id: f.fill_id.clone(),
+                    order_id: f.order_id.clone(),
+                    instrument: WireInstrument::from(&f.instrument),
+                    side: format!("{:?}", f.side),
+                    quantity: f.quantity.to_string(),
+                    price_nanos: f.price_nanos.to_string(),
+                    fees_nanos: f.fees_nanos.to_string(),
+                    timestamp_ns: f.filled_at_ns.to_string(),
+                    assumptions: f.assumptions.clone(),
+                })
+                .collect(),
+            recent_outcomes: value
+                .recent_outcomes
+                .iter()
+                .map(|(id, a)| WirePaperOutcome {
+                    decision_id: id.clone(),
+                    net_pnl_nanos: a.observed_net_pnl_nanos.map(|n| n.to_string()),
+                    max_favorable_excursion_nanos: a
+                        .max_favorable_excursion_nanos
+                        .map(|n| n.to_string()),
+                    max_adverse_excursion_nanos: a
+                        .max_adverse_excursion_nanos
+                        .map(|n| n.to_string()),
+                    holding_time_ns: a.holding_time_ns.map(|n| n.to_string()),
+                    categories: a.categories.iter().map(|c| format!("{c:?}")).collect(),
+                    explanation: a.explanation.clone(),
+                })
+                .collect(),
+            last_source_record_index: value.last_source_record_index.to_string(),
+            ledger_recovered_tail_bytes: value.ledger_recovered_tail_bytes.to_string(),
+            ledger_healthy: value.ledger_healthy,
+            fee_schedule_version: value.fee_schedule_version.clone(),
+            risk_rules_version: value.risk_rules_version.clone(),
+            policy_version: value.policy_version.clone(),
+            risk_limits: WirePaperRiskLimits {
+                max_deployed_nanos: value.risk_limits.max_deployed_nanos.to_string(),
+                max_instrument_notional_nanos: value
+                    .risk_limits
+                    .max_instrument_notional_nanos
+                    .to_string(),
+                max_positions: value.risk_limits.max_positions,
+                max_loss_per_decision_nanos: value
+                    .risk_limits
+                    .max_loss_per_decision_nanos
+                    .to_string(),
+                max_session_loss_nanos: value.risk_limits.max_session_loss_nanos.to_string(),
+                max_spread_bps: value.risk_limits.max_spread_bps,
+                max_market_age_ns: value.risk_limits.max_market_age_ns.to_string(),
+                max_slippage_bps: value.risk_limits.max_slippage_bps,
+                max_return_volatility: value.risk_limits.max_return_volatility,
+                max_order_age_ns: value.risk_limits.max_order_age_ns.to_string(),
+                allow_uncalibrated_paper: value.risk_limits.allow_uncalibrated_paper,
+            },
         }
     }
 }
