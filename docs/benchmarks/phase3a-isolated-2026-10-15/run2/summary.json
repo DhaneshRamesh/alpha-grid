@@ -1,0 +1,470 @@
+[
+  {
+    "active_candidate_latency_ns": {
+      "max_ns": 14208,
+      "p50_ns": 208,
+      "p95_ns": 333,
+      "p999_ns": null,
+      "p99_ns": 667,
+      "samples": 240
+    },
+    "active_risk_latency_ns": {
+      "max_ns": 667,
+      "p50_ns": 84,
+      "p95_ns": 208,
+      "p999_ns": null,
+      "p99_ns": 375,
+      "samples": 240
+    },
+    "benchmark_version": "phase3a-paper-eval-v1",
+    "cash_nanos": "20000000000000",
+    "elapsed_ns": "1219041625",
+    "fees_paid_nanos": "0",
+    "latency_ns": {
+      "candidate_evaluation": {
+        "max_ns": 14208,
+        "p50_ns": 0,
+        "p95_ns": 250,
+        "p999_ns": null,
+        "p99_ns": 333,
+        "samples": 962
+      },
+      "feature_update": {
+        "max_ns": 32875,
+        "p50_ns": 458,
+        "p95_ns": 6917,
+        "p999_ns": null,
+        "p99_ns": 12042,
+        "samples": 962
+      },
+      "journal_read": {
+        "max_ns": 27458,
+        "p50_ns": 3042,
+        "p95_ns": 11208,
+        "p999_ns": null,
+        "p99_ns": 14792,
+        "samples": 962
+      },
+      "paper_journal_durability": {
+        "max_ns": 10637791,
+        "p50_ns": 0,
+        "p95_ns": 3885750,
+        "p999_ns": null,
+        "p99_ns": 4348083,
+        "samples": 962
+      },
+      "paper_oms_transition": {
+        "max_ns": 27708,
+        "p50_ns": 84,
+        "p95_ns": 9168,
+        "p999_ns": null,
+        "p99_ns": 14667,
+        "samples": 962
+      },
+      "paper_snapshot": {
+        "max_ns": 349541,
+        "p50_ns": 136291,
+        "p95_ns": 234541,
+        "p999_ns": null,
+        "p99_ns": 253958,
+        "samples": 962
+      },
+      "risk_evaluation": {
+        "max_ns": 667,
+        "p50_ns": 0,
+        "p95_ns": 125,
+        "p999_ns": null,
+        "p99_ns": 250,
+        "samples": 962
+      },
+      "telemetry_publication": {
+        "max_ns": 633833,
+        "p50_ns": 304583,
+        "p95_ns": 510875,
+        "p999_ns": null,
+        "p99_ns": 554083,
+        "samples": 962
+      }
+    },
+    "marked_equity_nanos": "20000000000000",
+    "market_journal_path": ".local/phase3a/demo.qj",
+    "max_drawdown_nanos": "0",
+    "paper_journal_transition_latency_ns": {
+      "max_ns": 10637791,
+      "p50_ns": 3337833,
+      "p95_ns": 4230000,
+      "p999_ns": null,
+      "p99_ns": 5586000,
+      "samples": 240
+    },
+    "paper_ledger_bytes": 1562736,
+    "paper_ledger_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/always_no_trade.qp",
+    "policy": "always_no_trade",
+    "raw_measurements_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/always_no_trade.jsonl",
+    "realized_paper_pnl_nanos": "0",
+    "recent_decisions": 240,
+    "recent_fills": 0,
+    "recent_outcomes": 0,
+    "records": 962,
+    "records_per_second": 789.1445052173669,
+    "source": "local synthetic QJ01 replay, not live capture or market evidence",
+    "starting_capital_nanos": "20000000000000",
+    "unclosed_positions": 0,
+    "unmeasured": [
+      "feed decode",
+      "market journal fsync",
+      "browser reception"
+    ]
+  },
+  {
+    "active_candidate_latency_ns": {
+      "max_ns": 15750,
+      "p50_ns": 1166,
+      "p95_ns": 4292,
+      "p999_ns": null,
+      "p99_ns": 10958,
+      "samples": 240
+    },
+    "active_risk_latency_ns": {
+      "max_ns": 2958,
+      "p50_ns": 125,
+      "p95_ns": 1709,
+      "p999_ns": null,
+      "p99_ns": 2416,
+      "samples": 240
+    },
+    "benchmark_version": "phase3a-paper-eval-v1",
+    "cash_nanos": "19851600000000",
+    "elapsed_ns": "2249206375",
+    "fees_paid_nanos": "134960000000",
+    "latency_ns": {
+      "candidate_evaluation": {
+        "max_ns": 15750,
+        "p50_ns": 0,
+        "p95_ns": 2375,
+        "p999_ns": null,
+        "p99_ns": 5416,
+        "samples": 962
+      },
+      "feature_update": {
+        "max_ns": 48959,
+        "p50_ns": 1167,
+        "p95_ns": 19167,
+        "p999_ns": null,
+        "p99_ns": 31792,
+        "samples": 962
+      },
+      "journal_read": {
+        "max_ns": 48667,
+        "p50_ns": 3875,
+        "p95_ns": 15583,
+        "p999_ns": null,
+        "p99_ns": 22458,
+        "samples": 962
+      },
+      "paper_journal_durability": {
+        "max_ns": 31645957,
+        "p50_ns": 0,
+        "p95_ns": 10031958,
+        "p999_ns": null,
+        "p99_ns": 15584917,
+        "samples": 962
+      },
+      "paper_oms_transition": {
+        "max_ns": 237790,
+        "p50_ns": 84,
+        "p95_ns": 61169,
+        "p999_ns": null,
+        "p99_ns": 93625,
+        "samples": 962
+      },
+      "paper_snapshot": {
+        "max_ns": 702333,
+        "p50_ns": 200167,
+        "p95_ns": 301083,
+        "p999_ns": null,
+        "p99_ns": 452959,
+        "samples": 962
+      },
+      "risk_evaluation": {
+        "max_ns": 2958,
+        "p50_ns": 0,
+        "p95_ns": 1000,
+        "p999_ns": null,
+        "p99_ns": 1833,
+        "samples": 962
+      },
+      "telemetry_publication": {
+        "max_ns": 1114417,
+        "p50_ns": 459167,
+        "p95_ns": 671250,
+        "p999_ns": null,
+        "p99_ns": 809709,
+        "samples": 962
+      }
+    },
+    "marked_equity_nanos": "19851600000000",
+    "market_journal_path": ".local/phase3a/demo.qj",
+    "max_drawdown_nanos": "177870050000",
+    "paper_journal_transition_latency_ns": {
+      "max_ns": 7869208,
+      "p50_ns": 3009458,
+      "p95_ns": 5183333,
+      "p999_ns": null,
+      "p99_ns": 6270167,
+      "samples": 500
+    },
+    "paper_ledger_bytes": 1749799,
+    "paper_ledger_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/simple_signal.qp",
+    "policy": "simple_signal",
+    "raw_measurements_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/simple_signal.jsonl",
+    "realized_paper_pnl_nanos": "-148400000000",
+    "recent_decisions": 240,
+    "recent_fills": 94,
+    "recent_outcomes": 8,
+    "records": 962,
+    "records_per_second": 427.70641711345854,
+    "source": "local synthetic QJ01 replay, not live capture or market evidence",
+    "starting_capital_nanos": "20000000000000",
+    "unclosed_positions": 0,
+    "unmeasured": [
+      "feed decode",
+      "market journal fsync",
+      "browser reception"
+    ]
+  },
+  {
+    "active_candidate_latency_ns": {
+      "max_ns": 6708,
+      "p50_ns": 1084,
+      "p95_ns": 3084,
+      "p999_ns": null,
+      "p99_ns": 6417,
+      "samples": 240
+    },
+    "active_risk_latency_ns": {
+      "max_ns": 1375,
+      "p50_ns": 125,
+      "p95_ns": 292,
+      "p999_ns": null,
+      "p99_ns": 958,
+      "samples": 240
+    },
+    "benchmark_version": "phase3a-paper-eval-v1",
+    "cash_nanos": "20000000000000",
+    "elapsed_ns": "1380043209",
+    "fees_paid_nanos": "0",
+    "latency_ns": {
+      "candidate_evaluation": {
+        "max_ns": 6708,
+        "p50_ns": 0,
+        "p95_ns": 1542,
+        "p999_ns": null,
+        "p99_ns": 4792,
+        "samples": 962
+      },
+      "feature_update": {
+        "max_ns": 64916,
+        "p50_ns": 1166,
+        "p95_ns": 7834,
+        "p999_ns": null,
+        "p99_ns": 18250,
+        "samples": 962
+      },
+      "journal_read": {
+        "max_ns": 25292,
+        "p50_ns": 3458,
+        "p95_ns": 8917,
+        "p999_ns": null,
+        "p99_ns": 15666,
+        "samples": 962
+      },
+      "paper_journal_durability": {
+        "max_ns": 7819250,
+        "p50_ns": 0,
+        "p95_ns": 4451708,
+        "p999_ns": null,
+        "p99_ns": 6272708,
+        "samples": 962
+      },
+      "paper_oms_transition": {
+        "max_ns": 107668,
+        "p50_ns": 84,
+        "p95_ns": 10957,
+        "p999_ns": null,
+        "p99_ns": 26126,
+        "samples": 962
+      },
+      "paper_snapshot": {
+        "max_ns": 443917,
+        "p50_ns": 148458,
+        "p95_ns": 245416,
+        "p999_ns": null,
+        "p99_ns": 293958,
+        "samples": 962
+      },
+      "risk_evaluation": {
+        "max_ns": 1375,
+        "p50_ns": 0,
+        "p95_ns": 166,
+        "p999_ns": null,
+        "p99_ns": 458,
+        "samples": 962
+      },
+      "telemetry_publication": {
+        "max_ns": 788375,
+        "p50_ns": 332417,
+        "p95_ns": 540417,
+        "p999_ns": null,
+        "p99_ns": 627833,
+        "samples": 962
+      }
+    },
+    "marked_equity_nanos": "20000000000000",
+    "market_journal_path": ".local/phase3a/demo.qj",
+    "max_drawdown_nanos": "0",
+    "paper_journal_transition_latency_ns": {
+      "max_ns": 7819250,
+      "p50_ns": 3619541,
+      "p95_ns": 5892792,
+      "p999_ns": null,
+      "p99_ns": 7262875,
+      "samples": 240
+    },
+    "paper_ledger_bytes": 1610601,
+    "paper_ledger_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/cost_aware.qp",
+    "policy": "cost_aware",
+    "raw_measurements_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/cost_aware.jsonl",
+    "realized_paper_pnl_nanos": "0",
+    "recent_decisions": 240,
+    "recent_fills": 0,
+    "recent_outcomes": 0,
+    "records": 962,
+    "records_per_second": 697.0796231062067,
+    "source": "local synthetic QJ01 replay, not live capture or market evidence",
+    "starting_capital_nanos": "20000000000000",
+    "unclosed_positions": 0,
+    "unmeasured": [
+      "feed decode",
+      "market journal fsync",
+      "browser reception"
+    ]
+  },
+  {
+    "active_candidate_latency_ns": {
+      "max_ns": 9584,
+      "p50_ns": 1000,
+      "p95_ns": 3292,
+      "p999_ns": null,
+      "p99_ns": 7333,
+      "samples": 240
+    },
+    "active_risk_latency_ns": {
+      "max_ns": 2083,
+      "p50_ns": 166,
+      "p95_ns": 1458,
+      "p999_ns": null,
+      "p99_ns": 1791,
+      "samples": 240
+    },
+    "benchmark_version": "phase3a-paper-eval-v1",
+    "cash_nanos": "19851600000000",
+    "elapsed_ns": "2277806500",
+    "fees_paid_nanos": "134960000000",
+    "latency_ns": {
+      "candidate_evaluation": {
+        "max_ns": 9584,
+        "p50_ns": 0,
+        "p95_ns": 1709,
+        "p999_ns": null,
+        "p99_ns": 3792,
+        "samples": 962
+      },
+      "feature_update": {
+        "max_ns": 71583,
+        "p50_ns": 1042,
+        "p95_ns": 12792,
+        "p999_ns": null,
+        "p99_ns": 27958,
+        "samples": 962
+      },
+      "journal_read": {
+        "max_ns": 203709,
+        "p50_ns": 3875,
+        "p95_ns": 11791,
+        "p999_ns": null,
+        "p99_ns": 17875,
+        "samples": 962
+      },
+      "paper_journal_durability": {
+        "max_ns": 26944458,
+        "p50_ns": 0,
+        "p95_ns": 9741208,
+        "p999_ns": null,
+        "p99_ns": 16994958,
+        "samples": 962
+      },
+      "paper_oms_transition": {
+        "max_ns": 277250,
+        "p50_ns": 124,
+        "p95_ns": 33083,
+        "p999_ns": null,
+        "p99_ns": 98375,
+        "samples": 962
+      },
+      "paper_snapshot": {
+        "max_ns": 727167,
+        "p50_ns": 198334,
+        "p95_ns": 278083,
+        "p999_ns": null,
+        "p99_ns": 435500,
+        "samples": 962
+      },
+      "risk_evaluation": {
+        "max_ns": 2083,
+        "p50_ns": 0,
+        "p95_ns": 542,
+        "p999_ns": null,
+        "p99_ns": 1500,
+        "samples": 962
+      },
+      "telemetry_publication": {
+        "max_ns": 1503000,
+        "p50_ns": 463583,
+        "p95_ns": 630542,
+        "p999_ns": null,
+        "p99_ns": 742458,
+        "samples": 962
+      }
+    },
+    "marked_equity_nanos": "19851600000000",
+    "market_journal_path": ".local/phase3a/demo.qj",
+    "max_drawdown_nanos": "177870050000",
+    "paper_journal_transition_latency_ns": {
+      "max_ns": 9545208,
+      "p50_ns": 3031375,
+      "p95_ns": 4802833,
+      "p999_ns": null,
+      "p99_ns": 6614542,
+      "samples": 500
+    },
+    "paper_ledger_bytes": 1749799,
+    "paper_ledger_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/risk_filtered.qp",
+    "policy": "risk_filtered",
+    "raw_measurements_path": ".local/phase3a/eval-locked-final-2026-10-15-run2/risk_filtered.jsonl",
+    "realized_paper_pnl_nanos": "-148400000000",
+    "recent_decisions": 240,
+    "recent_fills": 94,
+    "recent_outcomes": 8,
+    "records": 962,
+    "records_per_second": 422.33613785894454,
+    "source": "local synthetic QJ01 replay, not live capture or market evidence",
+    "starting_capital_nanos": "20000000000000",
+    "unclosed_positions": 0,
+    "unmeasured": [
+      "feed decode",
+      "market journal fsync",
+      "browser reception"
+    ]
+  }
+]

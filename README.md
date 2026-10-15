@@ -1,8 +1,15 @@
 # Alpha Grid
 
-Python 3.12+ foundation for a cloud-native NSE research and trading platform. It
-now includes a Dhan 20-level depth source, durable storage, and feed health.
-It has no strategy or order API.
+Python 3.12+ and Rust research foundation for NSE market data and offline paper
+trading. It includes a Dhan 20-level depth source, durable storage, feed health,
+and a local synthetic paper decision cockpit. It has no broker order API.
+
+## Local SHADOW / PAPER research
+
+The [Phase 3A paper guide](rust/docs/phase3a-paper.md) describes the independent
+paper risk gate, provisional cost model, conservative fill simulator, QP01
+experience ledger, offline evaluator and local launch commands. The synthetic
+fixture is a correctness aid; it is not evidence of a profitable strategy.
 
 ## Local DATA_ONLY cockpit
 
