@@ -37,6 +37,7 @@ def assess(
     labels: list[dict[str, Any]],
     *,
     source_kind: str,
+    data_modality: str = "DEPTH_EVENTS",
     policy: SufficiencyPolicy = DEFAULT_POLICY,
 ) -> SufficiencyResult:
     if (
@@ -75,6 +76,8 @@ def assess(
         else 0.0
     )
     reasons = []
+    if data_modality != "DEPTH_EVENTS":
+        reasons.append("depth_models_require_recorded_depth_events")
     if source_kind != "REAL_VERIFIED":
         reasons.append("source_is_not_verified_real_market_data")
     if sessions < policy.min_independent_sessions:

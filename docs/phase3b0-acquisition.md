@@ -83,6 +83,26 @@ The manifest records source hashes, date coverage, universe, calendar,
 adjustment policy, quality exclusions, code commit, acquisition mode and
 partitions. Raw sources remain the evidence of record; Parquet is replayable.
 
+## Separate candle research pathway
+
+`ohlcv_research.py` emits candle-only feature/label Parquet and a lineage
+manifest. It accepts intraday candles only after their source timestamp is
+externally verified as bar start. A decision occurs after the bar completes
+plus a declared publication lag; the feature window contains only completed
+past candles. Daily candles require a verified post-close publication time
+callback and an injected session calendar. Future candles appear only in
+labels. If one future candle touches profit and stop barriers, its first
+crossing is `AMBIGUOUS` and the label is unusable for first-hit training.
+Missing forward bars are censored. These are market ranges, never executable
+fills or tick-level event paths.
+
+Research manifests count instruments, sessions, censoring, outcomes and a
+conservative non-overlap effective-sample estimate. Regime coverage,
+corporate-action certainty and train/test separation remain unknown or not
+performed. The existing depth sufficiency gate explicitly rejects an OHLCV
+modality. Neither imported historical candles nor this research dataset
+promotes a model or changes paper decisions.
+
 Run a no-auth dry-run:
 
 ```bash
