@@ -28,7 +28,8 @@ explicit `run_backfill(..., enabled=True)` call; no trading API is present.
 
 `ohlcv-v1` has NSE cash identity (`venue`, `segment`, `security_id`, symbol,
 optional ISIN), inclusive trading date, interval minutes (null for daily),
-optional UTC bar-start nanoseconds, price in exact INR nanounits, integer
+optional UTC source-timestamp nanoseconds (bar-start/end meaning unverified),
+price in exact INR nanounits, integer
 volume, source name and immutable source SHA-256. Optional turnover and
 delivery quantity retain exchange fields. Historical bars have no quote,
 spread, depth, order event, execution fill or QJ01/QP01 decision claim.
@@ -38,6 +39,14 @@ Plans contain only public request metadata and an approximate bar upper bound.
 The initial universe is explicitly supplied by the operator; there is no
 preselected performance-based universe. The registry later preserves its
 effective-date identity and source manifest.
+
+The local NSE importer accepts declared `UDIFF_CM` or `LEGACY_CM` CSV/ZIP
+files and rejects unknown column layouts. UDiFF field names are based on the
+NSE published catalogue; a real archive from the current release still needs
+schema validation before any bulk import. The caller supplies an as-of
+identity resolver because a ticker or ISIN alone cannot establish Dhan's
+historical security ID. Both source URL and download time are explicit
+metadata; no archive is fetched by this code.
 
 Run a no-auth dry-run:
 

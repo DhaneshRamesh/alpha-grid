@@ -30,7 +30,7 @@ class HistoricalBar:
     instrument: CashInstrument
     interval_minutes: int | None  # None means exchange daily bar
     trading_date: date
-    bar_start_ns: int | None  # UTC epoch; daily bars have no intraday start
+    source_timestamp_ns: int | None  # UTC epoch; Dhan bar semantics unverified
     open_nanos: int
     high_nanos: int
     low_nanos: int
@@ -38,16 +38,17 @@ class HistoricalBar:
     volume: int
     source: str
     source_sha256: str
+    timestamp_semantics: str = "UNVERIFIED"
     turnover_nanos: int | None = None
     delivery_quantity: int | None = None
 
     def __post_init__(self) -> None:
         if self.interval_minutes is not None and (
-            self.interval_minutes <= 0 or self.bar_start_ns is None
+            self.interval_minutes <= 0 or self.source_timestamp_ns is None
         ):
             raise ValueError("intraday bar requires interval and start time")
-        if self.interval_minutes is None and self.bar_start_ns is not None:
-            raise ValueError("daily bar has no intraday start time")
+        if self.interval_minutes is None and self.source_timestamp_ns is not None:
+            raise ValueError("daily bar has no intraday timestamp")
         if min(self.open_nanos, self.high_nanos, self.low_nanos, self.close_nanos) <= 0:
             raise ValueError("prices must be positive")
         if self.high_nanos < max(self.open_nanos, self.close_nanos, self.low_nanos):
@@ -65,7 +66,7 @@ class HistoricalBar:
             self.source,
             self.instrument.security_id,
             self.interval_minutes,
-            self.bar_start_ns
-            if self.bar_start_ns is not None
+            self.source_timestamp_ns
+            if self.source_timestamp_ns is not None
             else self.trading_date.toordinal(),
         )

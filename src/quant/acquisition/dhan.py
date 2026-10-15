@@ -7,14 +7,17 @@ import os
 import time
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 from typing import Any, Protocol, cast
 from zoneinfo import ZoneInfo
 
-from quant.acquisition.contracts import CashInstrument
+from quant.acquisition.contracts import PRICE_SCALE, CashInstrument, HistoricalBar
 
 _IST = ZoneInfo("Asia/Kolkata")
 SUPPORTED_INTERVALS = (1, 5, 15, 25, 60)
@@ -144,19 +147,39 @@ def run_backfill(
         )
         path = output_dir / f"{label}.json"
         if path.exists():
+            raw_existing = path.read_bytes()
+            parse_response(raw_existing, req)
+            checksum = path.with_suffix(".sha256")
+            if (
+                checksum.exists()
+                and checksum.read_text().strip() != sha256(raw_existing).hexdigest()
+            ):
+                raise ValueError("checkpoint source checksum mismatch")
             paths.append(path)
             continue
         for attempt in range(max_retries + 1):
             try:
                 raw = client.post_json(req.endpoint, req.payload(), secret)
-                parsed: Any = json.loads(raw)
-                if not isinstance(parsed, dict) or "timestamp" not in parsed:
-                    raise ValueError("invalid Dhan chart response")
-                # Original response bytes remain immutable. O_EXCL prevents overwrite.
-                with path.open("xb") as stream:
-                    stream.write(raw)
+                parse_response(raw, req)
+                temporary = output_dir / f".{label}.{uuid.uuid4().hex}.partial"
+                try:
+                    with temporary.open("xb") as stream:
+                        stream.write(raw)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.link(temporary, path)
+                finally:
+                    temporary.unlink(missing_ok=True)
+                checksum = path.with_suffix(".sha256")
+                with checksum.open("x") as stream:
+                    stream.write(sha256(raw).hexdigest() + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
+                directory = os.open(output_dir, os.O_RDONLY)
+                try:
+                    os.fsync(directory)
+                finally:
+                    os.close(directory)
                 paths.append(path)
                 break
             except urllib.error.HTTPError as exc:
@@ -173,3 +196,92 @@ def run_backfill(
 
 def timestamp_to_date(epoch_seconds: int) -> date:
     return datetime.fromtimestamp(epoch_seconds, UTC).astimezone(_IST).date()
+
+
+def _price_nanos(value: object) -> int:
+    if isinstance(value, bool) or not isinstance(value, (Decimal, int)):
+        raise ValueError("invalid chart price")
+    scaled = Decimal(value) * PRICE_SCALE
+    if not scaled.is_finite() or scaled != scaled.to_integral_value():
+        raise ValueError("chart price exceeds nanounit precision")
+    return int(scaled)
+
+
+def parse_response(raw: bytes, request: HistoricalRequest) -> list[HistoricalBar]:
+    """Parse parallel arrays without trusting their order or clock meaning."""
+    data: Any = json.loads(raw, parse_float=Decimal)
+    if not isinstance(data, dict):
+        raise ValueError("Dhan chart response must be an object")
+    fields = ("timestamp", "open", "high", "low", "close", "volume")
+    if any(not isinstance(data.get(name), list) for name in fields):
+        raise ValueError("missing Dhan chart arrays")
+    arrays = [data[name] for name in fields]
+    count = len(arrays[0])
+    if any(len(array) != count for array in arrays):
+        raise ValueError("Dhan chart arrays have unequal lengths")
+    result = []
+    digest = sha256(raw).hexdigest()
+    previous = -1
+    for stamp, opened, high, low, close, volume in zip(*arrays, strict=True):
+        if isinstance(stamp, bool) or not isinstance(stamp, int) or stamp <= previous:
+            raise ValueError("Dhan chart timestamps must increase")
+        if isinstance(volume, bool) or not isinstance(volume, int):
+            raise ValueError("invalid chart volume")
+        previous = stamp
+        trading_date = timestamp_to_date(stamp)
+        if not request.start <= trading_date < request.end:
+            raise ValueError("Dhan chart timestamp outside request")
+        result.append(
+            HistoricalBar(
+                instrument=request.instrument,
+                interval_minutes=request.interval_minutes,
+                trading_date=trading_date,
+                source_timestamp_ns=stamp * 1_000_000_000
+                if request.interval_minutes is not None
+                else None,
+                open_nanos=_price_nanos(opened),
+                high_nanos=_price_nanos(high),
+                low_nanos=_price_nanos(low),
+                close_nanos=_price_nanos(close),
+                volume=volume,
+                source="DHAN_HISTORICAL",
+                source_sha256=digest,
+                timestamp_semantics="UNVERIFIED"
+                if request.interval_minutes is not None
+                else "DAILY",
+            )
+        )
+    return result
+
+
+def deduplicate_windows(groups: list[list[HistoricalBar]]) -> list[HistoricalBar]:
+    """Identical overlaps collapse; conflicting source bars stop the import."""
+    seen: dict[tuple[str, int | None, int], HistoricalBar] = {}
+    for group in groups:
+        for bar in group:
+            stamp = (
+                bar.source_timestamp_ns
+                if bar.source_timestamp_ns is not None
+                else bar.trading_date.toordinal()
+            )
+            key = (bar.instrument.security_id, bar.interval_minutes, stamp)
+            prior = seen.get(key)
+            if prior is not None:
+                values = (
+                    "open_nanos",
+                    "high_nanos",
+                    "low_nanos",
+                    "close_nanos",
+                    "volume",
+                )
+                if any(getattr(prior, name) != getattr(bar, name) for name in values):
+                    raise ValueError("conflicting bars at window boundary")
+            else:
+                seen[key] = bar
+    return sorted(
+        seen.values(),
+        key=lambda bar: (
+            bar.instrument.security_id,
+            bar.source_timestamp_ns or bar.trading_date.toordinal(),
+        ),
+    )
