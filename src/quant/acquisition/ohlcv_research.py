@@ -157,7 +157,7 @@ def _label(
         policy.horizon_bars,
         first if complete else None,
         ambiguous,
-        not complete or ambiguous,
+        not complete,
         future[-1].close_nanos / decision.close_nanos - 1
         if complete and not ambiguous
         else None,
@@ -346,7 +346,8 @@ def write_research_rows(
             "ambiguous_labels": ambiguous,
             "favorable_events": favorable,
             "adverse_events": adverse,
-            "effective_sample_size_estimate": (count - censored) // policy.horizon_bars,
+            "effective_sample_size_estimate": (count - censored - ambiguous)
+            // policy.horizon_bars,
             "market_regime_coverage": "UNKNOWN",
             "train_validation_test_separation": "NOT_PERFORMED",
             "corporate_action_uncertainty": "UNKNOWN",

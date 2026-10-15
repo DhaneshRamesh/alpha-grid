@@ -155,3 +155,49 @@ authorized run would call `run_backfill(..., enabled=True)` with a locally
 configured `DHAN_ACCESS_TOKEN`, then parse immutable response files and
 validate entitlements, timestamp meaning, adjustment and quality before lake
 publication. Do not log or store the token in a dataset.
+
+## Disabled 5–10 instrument live-depth pilot sizing (D6)
+
+`LiveCaptureProfile` is disabled and DATA_ONLY. A future profile requires five
+to ten preselected NSE cash IDs, independent standard/20-level feed monitoring,
+QJ01, receive and supplied source clocks, reconnect/gap evidence, and session
+integrity verification. No default securities are selected. Account
+entitlements, actual payload semantics (snapshots versus deltas), peak
+per-instrument rates, authentication validity, license, storage and host costs
+must be measured and approved before capture. Aggregated depth does not reveal
+individual order additions, cancellations, or exact queue position.
+
+For transparent **assumption-only** sizing, the prior [Utho Bangalore
+synthetic full-depth trial](../infra/benchmark/utho-bangalore-trial-20261014.md)
+measured about 516 bytes/event for Rust QJ01 and 1,182 bytes/event for the
+Python journal under its respective serialization and batching. It is not a
+live Dhan rate sample. At an *assumed* combined peak of 100 events/s per
+instrument across both feeds and 6.25 hours/session:
+
+| Instruments | Assumed events/session | Rust raw/session at 516 B/event | Python raw/session at 1,182 B/event |
+| ---: | ---: | ---: | ---: |
+| 5 | 11.25 million | 5.805 GB | 13.298 GB |
+| 10 | 22.5 million | 11.610 GB | 26.595 GB |
+
+Twenty retained sessions with two copies would require about 232 GB/532 GB
+for the five-instrument Rust/Python examples, before filesystem overhead,
+indexes, research Parquet, backups and bursts. For ten instruments, double
+those figures. These are deliberately not disk recommendations. The old
+Bangalore synthetic run handled 10,000/s with Rust group commit and 1,000/s
+with Python group commit, but did not include live decoding or feed behavior;
+the actual live headroom is **UNKNOWN**. A 50 ms fsync target also leaves a
+nonzero crash-loss window for accepted but uncommitted records.
+
+Recompute with measured future peak rate and measured bytes/event:
+
+```bash
+python -m quant.apps.estimate_capture --instruments 5 \
+  --assumed-peak-rate-per-instrument 100 --assumed-bytes-per-event 516 \
+  --retention-sessions 20 --copies 2
+```
+
+Before any pilot, record open/mid/close feed counts and 20-level message
+size across several sessions, compare accepted/kernel-written/durable and
+recovered counts, inspect p99.9 fsync and queue tails, establish off-host
+copy and integrity checks, and verify account data access and ongoing cost.
+No real-data, subscription, alpha or live execution readiness claim exists.

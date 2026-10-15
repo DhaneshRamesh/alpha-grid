@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, time
+from datetime import date, time, timedelta
 from pathlib import Path
 
 import pyarrow.parquet as pq
@@ -58,7 +58,7 @@ def test_only_completed_past_bars_enter_features_and_intrabar_is_ambiguous(
     assert feature.past_mean_volume == 100.5
     assert feature.latest_close_nanos == 100_000_000_000
     assert label.first_event == "AMBIGUOUS"
-    assert label.ambiguous and label.right_censored
+    assert label.ambiguous and not label.right_censored
     changed = bars.copy()
     changed[2] = replace(
         changed[2], high_nanos=101_000_000_000, low_nanos=99_000_000_000
@@ -131,3 +131,33 @@ def test_ohlcv_never_satisfies_depth_sufficiency() -> None:
     result = assess([], [], source_kind="REAL_VERIFIED", data_modality="OHLCV")
     assert "depth_models_require_recorded_depth_events" in result.reasons
     assert result.status == "NOT_TRAINED"
+
+
+def test_daily_path_needs_verified_availability_and_calendar_continuity() -> None:
+    policy = CandleResearchPolicy(history_bars=1, horizon_bars=1)
+    days = [DAY, DAY + timedelta(days=1), DAY + timedelta(days=5)]
+    daily = [
+        replace(
+            minute(0),
+            trading_date=day,
+            interval_minutes=None,
+            source_timestamp_ns=None,
+            timestamp_semantics="DAILY",
+        )
+        for day in days
+    ]
+    calendar = NseCalendar("fixture")
+
+    def published(bar: HistoricalBar) -> int:
+        session = calendar.session(bar.trading_date)
+        assert session is not None
+        return session.end_ns() + 60_000_000_000
+
+    rows = list(
+        iter_research_rows(
+            daily, policy, daily_available_at=published, calendar=calendar
+        )
+    )
+    assert len(rows) == 3
+    assert not rows[0][1].right_censored
+    assert rows[1][1].right_censored  # Monday's bar is missing
