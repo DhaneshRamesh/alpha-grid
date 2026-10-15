@@ -198,7 +198,10 @@ def audit_bars(
                                 "MISSING_BARS", sid, day, str(gap_count), "WARNING"
                             )
                         )
-    return QualityReport(count, len(observed), missing, tuple(issues))
+    # Instruments observed on one trading day are one independent session.
+    return QualityReport(
+        count, len({day for _, day in observed}), missing, tuple(issues)
+    )
 
 
 def reconcile_daily(left: HistoricalBar, right: HistoricalBar) -> tuple[str, ...]:

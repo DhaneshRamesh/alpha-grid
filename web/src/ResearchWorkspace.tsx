@@ -30,8 +30,14 @@ type ResearchStatus = {
 };
 type AcquisitionStatus = {
   schema_version: "acquisition-status-v1";
+  status?: string;
   sources_configured: string[];
   access_status: string;
+  source_files_available?: number;
+  genuine_source_files_available?: number;
+  source_verification_status?: string;
+  calendar_completeness?: string;
+  mapping_uncertainty?: string;
   first_date: string | null;
   last_date: string | null;
   instrument_count: number;
@@ -43,6 +49,8 @@ type AcquisitionStatus = {
   checksum_verified: boolean;
   collection_mode: string;
   research_eligibility: string;
+  historical_dataset_eligibility?: string;
+  training_blocked?: boolean;
   blocked_model_families: string[];
   block_reasons: string[];
 };
@@ -150,6 +158,12 @@ export default function ResearchWorkspace() {
             <h2>Acquisition and quality</h2>
           </div>
         </div>
+        <div className="paper-foot">
+          {acquisition?.status ?? "WAITING_FOR_REAL_SOURCE"} · Original files{" "}
+          {acquisition?.source_files_available ?? 0} · Confirmed genuine{" "}
+          {acquisition?.genuine_source_files_available ?? 0} · Source{" "}
+          {acquisition?.source_verification_status ?? "UNVERIFIED"}
+        </div>
         <div className="metric-grid research-metrics">
           <div className="metric">
             <div className="metric-label">SOURCE / ACCESS</div>
@@ -197,6 +211,11 @@ export default function ResearchWorkspace() {
           </div>
         </div>
         <div className="paper-foot">
+          Calendar {acquisition?.calendar_completeness ?? "UNVERIFIED"} ·
+          Mapping {acquisition?.mapping_uncertainty ?? "UNVERIFIED"} ·
+          Historical eligibility{" "}
+          {acquisition?.historical_dataset_eligibility ?? "BLOCKED"} · Training{" "}
+          {acquisition?.training_blocked === false ? "permitted" : "blocked"} ·
           Eligibility {acquisition?.research_eligibility ?? "NOT_TRAINED"} ·
           Blocked{" "}
           {acquisition?.blocked_model_families?.join(", ") ??

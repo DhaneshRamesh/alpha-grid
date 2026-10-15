@@ -112,6 +112,27 @@ def test_calendar_holiday_special_and_gap_classification() -> None:
     assert any(issue.detail == "PROVIDER_OUTAGE" for issue in confirmed.issues)
 
 
+def test_two_instruments_on_one_day_are_one_session() -> None:
+    day = date(2025, 1, 2)
+    other = CashInstrument("NSE", "NSE_EQ", "200", "OTHER")
+    mapping = InstrumentRegistry(
+        registry().records
+        + (MappingRecord(other, "Other", day, None, "LISTED", "master-2025"),),
+        "two-instrument-fixture",
+    )
+    report = audit_bars(
+        [daily(day), daily(day, other)],
+        calendar=NseCalendar("fixture"),
+        registry=mapping,
+        universe=("100", "200"),
+        start=day,
+        end=date(2025, 1, 3),
+        interval_minutes=None,
+    )
+    assert report.rows == 2
+    assert report.independent_sessions == 1
+
+
 def test_intraday_missing_bars_only_with_verified_timestamp() -> None:
     day = date(2025, 1, 2)
     special = Session(day, time(9, 15), time(9, 18), "TEST")

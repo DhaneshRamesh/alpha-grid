@@ -57,6 +57,18 @@ def test_90_day_windows_and_dry_run_cannot_contact_network(tmp_path: Path) -> No
         run_backfill(requests, output_dir=tmp_path, token="fake")
 
 
+def test_missing_dhan_entitlement_credentials_never_calls_transport(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("DHAN_ACCESS_TOKEN", raising=False)
+    request = plan_requests((INSTRUMENT,), date(2025, 1, 2), date(2025, 1, 3), 1)
+    transport = FakeTransport([])
+    with pytest.raises(ValueError, match="access token required"):
+        run_backfill(request, output_dir=tmp_path, enabled=True, transport=transport)
+    assert transport.calls == 0
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_dhan_parse_empty_overlap_and_conflict() -> None:
     req = plan_requests((INSTRUMENT,), date(2025, 1, 1), date(2025, 1, 5), 1)[0]
     first = parse_response(response(stamp(2), stamp(3)), req)
@@ -161,6 +173,19 @@ def test_nse_udiff_local_zip_preserves_daily_provenance(tmp_path: Path) -> None:
                 lambda symbol, isin, day: CashInstrument("NSE", "NSE_EQ", "1", "WRONG"),
             )
         )
+
+
+def test_nse_duplicate_required_header_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "duplicate.csv"
+    path.write_text(
+        "TradDt,TckrSymb,SctySrs,OpnPric,OpnPric,HghPric,LwPric,ClsPric,TtlTradgVol\n"
+        "2025-01-02,RELIANCE,EQ,100,100,101,99,100,5\n"
+    )
+    source = ArchiveSource(
+        path, "UDIFF_CM", "https://www.nseindia.com/all-reports", datetime.now(UTC)
+    )
+    with pytest.raises(ValueError, match="schema"):
+        list(import_archive(source, lambda symbol, isin, day: INSTRUMENT))
 
 
 def test_saved_windows_stream_with_checksum_and_boundary_dedup(tmp_path: Path) -> None:

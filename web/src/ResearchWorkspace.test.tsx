@@ -15,8 +15,14 @@ describe("offline research status", () => {
             url === "/api/acquisition"
               ? {
                   schema_version: "acquisition-status-v1",
+                  status: "SOURCE_AUDIT_REQUIRED",
                   sources_configured: ["NSE_LOCAL_IMPORT"],
                   access_status: "UNVERIFIED",
+                  source_files_available: 1,
+                  genuine_source_files_available: 0,
+                  source_verification_status: "UNVERIFIED",
+                  calendar_completeness: "UNVERIFIED",
+                  mapping_uncertainty: "UNVERIFIED",
                   first_date: "2025-01-01",
                   last_date: "2025-02-01",
                   instrument_count: 5,
@@ -28,6 +34,8 @@ describe("offline research status", () => {
                   checksum_verified: true,
                   collection_mode: "LOCAL_FILE",
                   research_eligibility: "NOT_TRAINED",
+                  historical_dataset_eligibility: "BLOCKED",
+                  training_blocked: true,
                   blocked_model_families: ["DEPTH", "HAWKES"],
                   block_reasons: ["historical_candles_do_not_supply_depth"],
                 }
@@ -48,6 +56,8 @@ describe("offline research status", () => {
     render(<ResearchWorkspace />);
     expect(await screen.findByText("5 instruments")).toBeTruthy();
     expect(screen.getByText(/checksum verified/)).toBeTruthy();
+    expect(screen.getByText(/SOURCE_AUDIT_REQUIRED/)).toBeTruthy();
+    expect(screen.getByText(/Confirmed genuine 0/)).toBeTruthy();
     expect(screen.getByText(/Blocked DEPTH, HAWKES/)).toBeTruthy();
   });
 

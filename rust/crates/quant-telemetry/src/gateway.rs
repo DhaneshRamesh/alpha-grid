@@ -126,8 +126,14 @@ impl Gateway {
         let mut public = serde_json::Map::new();
         for key in [
             "schema_version",
+            "status",
             "sources_configured",
             "access_status",
+            "source_files_available",
+            "genuine_source_files_available",
+            "source_verification_status",
+            "calendar_completeness",
+            "mapping_uncertainty",
             "first_date",
             "last_date",
             "instrument_count",
@@ -139,6 +145,8 @@ impl Gateway {
             "checksum_verified",
             "collection_mode",
             "research_eligibility",
+            "historical_dataset_eligibility",
+            "training_blocked",
             "blocked_model_families",
             "block_reasons",
         ] {
@@ -347,8 +355,14 @@ async fn acquisition(State(state): State<Arc<AppState>>) -> Json<serde_json::Val
     Json(state.acquisition.clone().unwrap_or_else(|| {
         serde_json::json!({
             "schema_version": "acquisition-status-v1",
+            "status": "WAITING_FOR_REAL_SOURCE",
             "sources_configured": ["DHAN_HISTORICAL_DISABLED", "NSE_LOCAL_IMPORT"],
             "access_status": "UNVERIFIED",
+            "source_files_available": 0,
+            "genuine_source_files_available": 0,
+            "source_verification_status": "UNVERIFIED",
+            "calendar_completeness": "UNVERIFIED",
+            "mapping_uncertainty": "UNVERIFIED",
             "first_date": null,
             "last_date": null,
             "instrument_count": 0,
@@ -360,6 +374,8 @@ async fn acquisition(State(state): State<Arc<AppState>>) -> Json<serde_json::Val
             "checksum_verified": false,
             "collection_mode": "DATA_ONLY_OFFLINE",
             "research_eligibility": "NOT_TRAINED",
+            "historical_dataset_eligibility": "BLOCKED",
+            "training_blocked": true,
             "blocked_model_families": ["DEPTH", "ORDER_FLOW", "HAWKES", "EXECUTION"],
             "block_reasons": ["no_verified_real_market_dataset"]
         })
@@ -506,16 +522,24 @@ mod tests {
             acquisition(State(Arc::clone(&empty.state))).await.0["access_status"],
             "UNVERIFIED"
         );
+        assert_eq!(
+            acquisition(State(Arc::clone(&empty.state))).await.0["status"],
+            "WAITING_FOR_REAL_SOURCE"
+        );
         let gateway = Gateway::new(shared, GatewayConfig::default())
             .unwrap()
             .with_acquisition_status(serde_json::json!({
                 "schema_version": "acquisition-status-v1",
                 "instrument_count": 5,
+                "source_verification_status": "UNVERIFIED",
+                "training_blocked": true,
                 "access_token": "must-not-leak",
             }))
             .unwrap();
         let value = acquisition(State(Arc::clone(&gateway.state))).await.0;
         assert_eq!(value["instrument_count"], 5);
+        assert_eq!(value["source_verification_status"], "UNVERIFIED");
+        assert_eq!(value["training_blocked"], true);
         assert!(value.get("access_token").is_none());
     }
 

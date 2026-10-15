@@ -110,7 +110,11 @@ def _rows(
             "volume",
         )
     }
-    if reader.fieldnames is None or not required.issubset(reader.fieldnames):
+    if (
+        reader.fieldnames is None
+        or len(reader.fieldnames) != len(set(reader.fieldnames))
+        or not required.issubset(reader.fieldnames)
+    ):
         raise ValueError("NSE archive schema does not match declared format")
     for row in reader:
         if row[fields["series"]].strip() != "EQ":

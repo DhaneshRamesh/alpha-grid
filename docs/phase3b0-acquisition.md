@@ -132,15 +132,15 @@ acquisition is independent of the existing depth journal and paper ledger.
 ```bash
 python -m quant.apps.import_nse_archive \
   --archive data/incoming/bhavcopy.csv.zip --format UDIFF_CM \
-  --source-url 'https://www.nseindia.com/all-reports' \
-  --downloaded-at '2025-01-03T08:00:00+05:30' \
+  --source-url '<actual-HTTPS-file-URL>' \
+  --downloaded-at '<actual-ISO-8601-time-with-offset>' \
   --registry data/config/registry.json --universe data/config/universe.json \
   --calendar data/config/calendar.json --dataset-id cm-2025-01-02-v1 \
   --code-commit "$(git rev-parse HEAD)" --output data/lake/cm-2025-01-02-v1
 ```
 
-4. Inspect `manifest.json`, `verify_dataset`, the sibling `*-status.json`,
-   and quality warnings. Hard failures abort publication. The one-day
+4. Inspect `manifest.json`, `verify_dataset`, sibling `*-status.json` and
+   `*-quality.json`, and quality warnings. Hard failures abort publication. The one-day
    importer is intentionally bounded; multi-year import uses the streaming
    `write_dataset` API on pre-sorted, deduplicated bars. Do not interpret the
    example date or universe as an approved acquisition target.

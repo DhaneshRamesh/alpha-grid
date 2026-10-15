@@ -15,6 +15,9 @@ def test_status_default_and_verified_local_manifest(tmp_path: Path) -> None:
     empty = acquisition_status()
     assert empty["access_status"] == "UNVERIFIED"
     assert empty["checksum_verified"] is False
+    assert empty["status"] == "WAITING_FOR_REAL_SOURCE"
+    assert empty["genuine_source_files_available"] == 0
+    assert empty["training_blocked"] is True
     bar = HistoricalBar(
         CashInstrument("NSE", "NSE_EQ", "1333", "RELIANCE"),
         None,
@@ -35,7 +38,7 @@ def test_status_default_and_verified_local_manifest(tmp_path: Path) -> None:
         output,
         dataset_id="fixture",
         acquisition_mode="LOCAL_FILE",
-        instrument_universe=("1333",),
+        instrument_universe=("1333", "9999"),
         calendar_version="fixture",
         adjustment_policy="UNADJUSTED",
         code_commit="fixture",
@@ -49,6 +52,9 @@ def test_status_default_and_verified_local_manifest(tmp_path: Path) -> None:
     status = acquisition_status(dataset_dir=output, quality=quality)
     assert status["checksum_verified"] is True
     assert status["instrument_count"] == 1
+    assert status["source_verification_status"] == "UNVERIFIED"
+    assert status["calendar_completeness"] == "UNVERIFIED"
+    assert "source_provenance_missing" in status["block_reasons"]
     assert status["access_status"] == "UNVERIFIED"
     assert status["research_eligibility"] == "NOT_TRAINED"
     path = tmp_path / "status.json"
