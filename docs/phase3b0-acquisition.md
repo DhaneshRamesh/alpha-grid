@@ -48,6 +48,24 @@ identity resolver because a ticker or ISIN alone cannot establish Dhan's
 historical security ID. Both source URL and download time are explicit
 metadata; no archive is fetched by this code.
 
+## Point-in-time quality contract
+
+Registry records have inclusive `effective_from`, exclusive `effective_to`,
+the source manifest version, listing status, and referenced corporate actions.
+Unresolved or overlapping mappings stop identity resolution. A versioned
+universe records its selection date and predeclared selection rule.
+
+The injectable NSE calendar defaults to the conventional 09:15–15:30 IST
+weekday schedule, with explicit holiday and special-session overrides. This
+default is **not** proof of a complete historical holiday calendar: load an
+official dated calendar before claiming complete coverage. Quality audits
+check identity, duplicates, timestamp order, session boundaries, tick
+precision, large price gaps, missing sessions and (only when timestamp meaning
+is verified) missing intraday bars. Missing sessions are `UNKNOWN` unless
+separate evidence marks provider outage or confirmed inactivity. Price gaps
+around recorded corporate actions are warnings until an adjustment source is
+verified. No missing observations are synthesized.
+
 Run a no-auth dry-run:
 
 ```bash
