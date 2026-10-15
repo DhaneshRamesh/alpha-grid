@@ -6,6 +6,7 @@ rust-version.workspace = true
 
 [dependencies]
 quant-journal.workspace = true
+serde_json.workspace = true
 tokio.workspace = true
 
 [dev-dependencies]

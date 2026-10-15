@@ -704,6 +704,7 @@ dependencies = [
  "quant-core",
  "quant-journal",
  "quant-market-data",
+ "serde_json",
  "tempfile",
  "tokio",
 ]
