@@ -8,7 +8,7 @@ import time
 import urllib.error
 import urllib.request
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
@@ -150,11 +150,16 @@ def run_backfill(
             raw_existing = path.read_bytes()
             parse_response(raw_existing, req)
             checksum = path.with_suffix(".sha256")
-            if (
-                checksum.exists()
-                and checksum.read_text().strip() != sha256(raw_existing).hexdigest()
-            ):
-                raise ValueError("checkpoint source checksum mismatch")
+            digest = sha256(raw_existing).hexdigest()
+            if checksum.exists():
+                if checksum.read_text().strip() != digest:
+                    raise ValueError("checkpoint source checksum mismatch")
+            else:
+                # Recover the sidecar after atomic raw publication.
+                with checksum.open("x") as stream:
+                    stream.write(digest + "\n")
+                    stream.flush()
+                    os.fsync(stream.fileno())
             paths.append(path)
             continue
         for attempt in range(max_retries + 1):
@@ -285,3 +290,43 @@ def deduplicate_windows(groups: list[list[HistoricalBar]]) -> list[HistoricalBar
             bar.source_timestamp_ns or bar.trading_date.toordinal(),
         ),
     )
+
+
+def iter_saved_backfill(
+    requests: tuple[HistoricalRequest, ...], paths: list[Path]
+) -> Iterator[HistoricalBar]:
+    """Replay one bounded raw window at a time, verifying checkpoint hashes."""
+    if len(requests) != len(paths):
+        raise ValueError("one original response is required per request")
+    previous: dict[tuple[str, int | None], HistoricalBar] = {}
+    for request, path in zip(requests, paths, strict=True):
+        raw = path.read_bytes()
+        checksum_path = path.with_suffix(".sha256")
+        if (
+            not checksum_path.exists()
+            or checksum_path.read_text().strip() != sha256(raw).hexdigest()
+        ):
+            raise ValueError("saved Dhan response checksum mismatch")
+        for bar in parse_response(raw, request):
+            key = (bar.instrument.security_id, bar.interval_minutes)
+            prior = previous.get(key)
+            if prior is not None:
+                old_stamp = prior.source_timestamp_ns or prior.trading_date.toordinal()
+                new_stamp = bar.source_timestamp_ns or bar.trading_date.toordinal()
+                if new_stamp < old_stamp:
+                    raise ValueError("saved Dhan windows are out of order")
+                if new_stamp == old_stamp:
+                    values = (
+                        "open_nanos",
+                        "high_nanos",
+                        "low_nanos",
+                        "close_nanos",
+                        "volume",
+                    )
+                    if any(
+                        getattr(prior, name) != getattr(bar, name) for name in values
+                    ):
+                        raise ValueError("conflicting bars at window boundary")
+                    continue
+            previous[key] = bar
+            yield bar

@@ -155,6 +155,10 @@ authorized run would call `run_backfill(..., enabled=True)` with a locally
 configured `DHAN_ACCESS_TOKEN`, then parse immutable response files and
 validate entitlements, timestamp meaning, adjustment and quality before lake
 publication. Do not log or store the token in a dataset.
+`iter_saved_backfill(requests, paths)` verifies every saved SHA-256 and
+streams one 90-day response window at a time, collapsing identical boundary
+bars and rejecting conflicts. An interrupted sidecar write can be recovered
+from a fully published, valid original response without another API call.
 
 ## Disabled 5–10 instrument live-depth pilot sizing (D6)
 

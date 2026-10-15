@@ -16,6 +16,7 @@ from quant.acquisition.contracts import CashInstrument
 from quant.acquisition.dhan import (
     deduplicate_windows,
     dry_run,
+    iter_saved_backfill,
     parse_response,
     plan_requests,
     run_backfill,
@@ -108,6 +109,7 @@ def test_retry_checkpoint_and_original_response_immutable(tmp_path: Path) -> Non
         paths[0].with_suffix(".sha256").read_text().strip()
         == hashlib.sha256(raw).hexdigest()
     )
+    paths[0].with_suffix(".sha256").unlink()
     assert (
         run_backfill(
             req,
@@ -120,6 +122,7 @@ def test_retry_checkpoint_and_original_response_immutable(tmp_path: Path) -> Non
         == paths
     )
     assert transport.calls == 2
+    assert paths[0].with_suffix(".sha256").exists()
     paths[0].write_bytes(raw + b"corrupt")
     with pytest.raises(ValueError):
         run_backfill(
@@ -158,3 +161,18 @@ def test_nse_udiff_local_zip_preserves_daily_provenance(tmp_path: Path) -> None:
                 lambda symbol, isin, day: CashInstrument("NSE", "NSE_EQ", "1", "WRONG"),
             )
         )
+
+
+def test_saved_windows_stream_with_checksum_and_boundary_dedup(tmp_path: Path) -> None:
+    first_req = plan_requests((INSTRUMENT,), date(2025, 1, 1), date(2025, 1, 4), 1)[0]
+    second_req = plan_requests((INSTRUMENT,), date(2025, 1, 3), date(2025, 1, 5), 1)[0]
+    paths = [tmp_path / "first.json", tmp_path / "second.json"]
+    for path, raw in zip(
+        paths, (response(stamp(2), stamp(3)), response(stamp(3), stamp(4))), strict=True
+    ):
+        path.write_bytes(raw)
+        path.with_suffix(".sha256").write_text(hashlib.sha256(raw).hexdigest() + "\n")
+    assert len(list(iter_saved_backfill((first_req, second_req), paths))) == 3
+    paths[1].with_suffix(".sha256").write_text("bad\n")
+    with pytest.raises(ValueError, match="checksum"):
+        list(iter_saved_backfill((first_req, second_req), paths))
