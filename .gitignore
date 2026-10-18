@@ -11,6 +11,7 @@ dist/
 work/
 outputs/
 data/
+.quarantine/
 benchmark-data/
 rust/target/
 .local/

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 import time
 import urllib.error
 import urllib.request
@@ -115,6 +116,62 @@ def response_path(request: HistoricalRequest, output_dir: Path) -> Path:
     return output_dir / f"{label}.json"
 
 
+def _private_directory(path: Path) -> None:
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
+    mode = path.lstat().st_mode
+    if not stat.S_ISDIR(mode) or mode & 0o077:
+        raise PermissionError(f"quarantine directory is not private: {path}")
+
+
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags, 0o600)
+    with os.fdopen(fd, "wb") as stream:
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+
+
+def _write_private_json(path: Path, value: dict[str, object]) -> None:
+    encoded = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.partial")
+    try:
+        _write_private_bytes(temporary, encoded)
+        os.replace(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _quarantine_response(
+    raw: bytes, request: HistoricalRequest, directory: Path, received_at: str
+) -> Path:
+    _private_directory(directory)
+    path = directory / f"{uuid.uuid4().hex}.response"
+    digest = sha256(raw).hexdigest()
+    _write_private_bytes(path, raw)
+    folder = os.open(directory, os.O_RDONLY)
+    try:
+        os.fsync(folder)
+    finally:
+        os.close(folder)
+    _write_private_json(
+        path.with_suffix(".meta.json"),
+        {
+            "schema_version": "dhan-chart-quarantine-v1",
+            "sha256": digest,
+            "received_at": received_at,
+            "endpoint": request.endpoint,
+            "request": request.payload(),
+        },
+    )
+    return path
+
+
 @dataclass(frozen=True, slots=True)
 class SavedResponseAudit:
     path: Path
@@ -140,12 +197,92 @@ def verify_saved_response(request: HistoricalRequest, path: Path) -> SavedRespon
             or metadata.get("sha256") != digest
         ):
             raise ValueError("saved Dhan response provenance mismatch")
+        if "normalization" in metadata:
+            diagnostics = diagnose_response(raw, request)
+            expected = {
+                "reordered": diagnostics["reordered"],
+                "sorted_original_indices": diagnostics["sorted_original_indices"],
+                "collapsed_duplicate_indices": diagnostics[
+                    "identical_duplicate_indices"
+                ],
+            }
+            if metadata["normalization"] != expected:
+                raise ValueError("saved Dhan normalization provenance mismatch")
         retrieved_at = datetime.fromisoformat(metadata["received_at"])
         if retrieved_at.tzinfo is None:
             raise ValueError("saved Dhan retrieval time has no timezone")
     return SavedResponseAudit(
         path, digest, retrieved_at, tuple(parse_response(raw, request))
     )
+
+
+def recover_quarantined_response(
+    request: HistoricalRequest, evidence: Path, output_dir: Path
+) -> SavedResponseAudit:
+    """Publish an already received chart body offline, retaining its receipt time."""
+    raw = evidence.read_bytes()
+    digest = sha256(raw).hexdigest()
+    receipt = json.loads(evidence.with_suffix(".meta.json").read_text())
+    if (
+        receipt.get("schema_version") != "dhan-chart-quarantine-v1"
+        or receipt.get("sha256") != digest
+        or receipt.get("endpoint") != request.endpoint
+        or receipt.get("request") != request.payload()
+    ):
+        raise ValueError("quarantined Dhan response provenance mismatch")
+    received_at = datetime.fromisoformat(receipt["received_at"])
+    if received_at.tzinfo is None:
+        raise ValueError("quarantined Dhan receipt time has no timezone")
+    bars = parse_response(raw, request)
+    diagnostics = diagnose_response(raw, request)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = response_path(request, output_dir)
+    if path.exists():
+        if path.read_bytes() != raw:
+            raise ValueError("existing Dhan checkpoint has different response bytes")
+    else:
+        temporary = output_dir / f".{path.stem}.{uuid.uuid4().hex}.partial"
+        try:
+            _write_private_bytes(temporary, raw)
+            os.link(temporary, path)
+        finally:
+            temporary.unlink(missing_ok=True)
+    checksum = path.with_suffix(".sha256")
+    if checksum.exists():
+        if checksum.read_text().strip() != digest:
+            raise ValueError("checkpoint source checksum mismatch")
+    else:
+        _write_private_bytes(checksum, (digest + "\n").encode())
+    metadata_path = path.with_suffix(".meta.json")
+    if not metadata_path.exists():
+        _write_private_json(
+            metadata_path,
+            {
+                "schema_version": "dhan-chart-raw-v1",
+                "endpoint": request.endpoint,
+                "method": "POST",
+                "request": request.payload(),
+                "received_at": receipt["received_at"],
+                "sha256": digest,
+                "normalization": {
+                    "reordered": diagnostics["reordered"],
+                    "sorted_original_indices": diagnostics["sorted_original_indices"],
+                    "collapsed_duplicate_indices": diagnostics[
+                        "identical_duplicate_indices"
+                    ],
+                },
+                "recovered_from_quarantine": evidence.name,
+            },
+        )
+    directory = os.open(output_dir, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+    audit = verify_saved_response(request, path)
+    if len(audit.bars) != len(bars):
+        raise ValueError("recovered Dhan bar count changed")
+    return audit
 
 
 class HistoricalTransport(Protocol):
@@ -168,6 +305,7 @@ def run_backfill(
     requests: tuple[HistoricalRequest, ...],
     *,
     output_dir: Path,
+    quarantine_dir: Path | None = None,
     enabled: bool = False,
     transport: HistoricalTransport | None = None,
     token: str | None = None,
@@ -185,6 +323,7 @@ def run_backfill(
         raise ValueError("invalid pacing or retry policy")
     client = transport or UrlLibTransport()
     output_dir.mkdir(parents=True, exist_ok=True)
+    quarantine = quarantine_dir or output_dir / ".quarantine"
     paths = []
     for req in requests:
         path = response_path(req, output_dir)
@@ -209,7 +348,25 @@ def run_backfill(
             try:
                 raw = client.post_json(req.endpoint, req.payload(), secret)
                 received_at = datetime.now(UTC).isoformat()
-                parse_response(raw, req)
+                # The received bytes are evidence even when validation fails. Never
+                # retry a validation error or advance the checkpoint without them.
+                evidence = _quarantine_response(raw, req, quarantine, received_at)
+                diagnostics = diagnose_response(raw, req)
+                try:
+                    parse_response(raw, req)
+                except (ValueError, json.JSONDecodeError) as exc:
+                    _write_private_json(
+                        evidence.with_suffix(".diagnostics.json"),
+                        {**diagnostics, "validation_error": str(exc)},
+                    )
+                    exc.add_note(
+                        f"Response quarantined at {evidence}; "
+                        f"SHA-256 {sha256(raw).hexdigest()}"
+                    )
+                    raise
+                _write_private_json(
+                    evidence.with_suffix(".diagnostics.json"), diagnostics
+                )
                 temporary = output_dir / f".{label}.{uuid.uuid4().hex}.partial"
                 try:
                     with temporary.open("xb") as stream:
@@ -237,6 +394,15 @@ def run_backfill(
                                         "request": req.payload(),
                                         "received_at": received_at,
                                         "sha256": sha256(raw).hexdigest(),
+                                        "normalization": {
+                                            "reordered": diagnostics["reordered"],
+                                            "sorted_original_indices": diagnostics[
+                                                "sorted_original_indices"
+                                            ],
+                                            "collapsed_duplicate_indices": diagnostics[
+                                                "identical_duplicate_indices"
+                                            ],
+                                        },
                                     },
                                     sort_keys=True,
                                     separators=(",", ":"),
@@ -281,8 +447,129 @@ def _price_nanos(value: object) -> int:
     return int(scaled)
 
 
+def _timestamp_unit(stamp: int) -> str:
+    magnitude = abs(stamp)
+    if magnitude < 100_000_000_000:
+        return "seconds"
+    if magnitude < 100_000_000_000_000:
+        return "milliseconds"
+    if magnitude < 100_000_000_000_000_000:
+        return "microseconds"
+    return "nanoseconds_or_larger"
+
+
+def _integral_json_number(value: object) -> int | None:
+    """Accept exact JSON integers, including Dhan's integral decimal encoding."""
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if (
+        isinstance(value, Decimal)
+        and value.is_finite()
+        and abs(value) < 10**20
+        and value == value.to_integral_value()
+    ):
+        return int(value)
+    return None
+
+
+def diagnose_response(raw: bytes, request: HistoricalRequest) -> dict[str, object]:
+    """Inspect saved bytes offline; never assume chart array ordering or units."""
+    fields = ("timestamp", "open", "high", "low", "close", "volume")
+    report: dict[str, object] = {
+        "sha256": sha256(raw).hexdigest(),
+        "request_start_inclusive": request.start.isoformat(),
+        "request_end_exclusive": request.end.isoformat(),
+    }
+    try:
+        data: Any = json.loads(raw, parse_float=Decimal)
+    except (ValueError, UnicodeDecodeError) as exc:
+        report["json_error"] = type(exc).__name__
+        return report
+    if not isinstance(data, dict):
+        report["structure_error"] = "response is not an object"
+        return report
+    arrays = {name: data.get(name) for name in fields}
+    report["array_lengths"] = {
+        name: len(value) if isinstance(value, list) else None
+        for name, value in arrays.items()
+    }
+    stamps = arrays["timestamp"]
+    if not isinstance(stamps, list):
+        return report
+    normalized_stamps = [_integral_json_number(stamp) for stamp in stamps]
+    report["timestamp_encodings"] = sorted({type(stamp).__name__ for stamp in stamps})
+    report["timestamp_units"] = sorted(
+        {
+            _timestamp_unit(stamp) if stamp is not None else "invalid"
+            for stamp in normalized_stamps
+        }
+    )
+    out_of_order = []
+    for index in range(1, len(normalized_stamps)):
+        prior, current = normalized_stamps[index - 1], normalized_stamps[index]
+        if prior is not None and current is not None and current < prior:
+            out_of_order.append([index - 1, index])
+    report["out_of_order_pairs"] = out_of_order
+    if any(
+        not isinstance(value, list) or len(value) != len(stamps)
+        for value in arrays.values()
+    ):
+        return report
+    rows = list(zip(*(arrays[name] for name in fields), strict=True))
+    groups: dict[int, list[int]] = {}
+    for index, stamp in enumerate(normalized_stamps):
+        if stamp is not None:
+            groups.setdefault(stamp, []).append(index)
+    report["duplicate_timestamp_groups"] = [
+        {"timestamp": stamp, "indices": indices}
+        for stamp, indices in groups.items()
+        if len(indices) > 1
+    ]
+    report["conflicting_duplicate_timestamps"] = [
+        stamp
+        for stamp, indices in groups.items()
+        if len(indices) > 1
+        and any(rows[index][1:] != rows[indices[0]][1:] for index in indices[1:])
+    ]
+    report["identical_duplicate_indices"] = [
+        index
+        for indices in groups.values()
+        for index in indices[1:]
+        if rows[index][1:] == rows[indices[0]][1:]
+    ]
+    valid_stamps = [stamp for stamp in normalized_stamps if stamp is not None]
+    if len(valid_stamps) == len(stamps):
+        original_indices = sorted(
+            range(len(stamps)), key=lambda index: valid_stamps[index]
+        )
+        report["sorted_original_indices"] = original_indices
+        report["reordered"] = original_indices != list(range(len(stamps)))
+    else:
+        report["sorted_original_indices"] = []
+        report["reordered"] = False
+    boundaries = []
+    for index, stamp in enumerate(normalized_stamps):
+        if stamp is not None and _timestamp_unit(stamp) == "seconds":
+            try:
+                trading_date = timestamp_to_date(stamp)
+            except (ValueError, OSError, OverflowError):
+                continue
+            if not request.start <= trading_date < request.end:
+                boundaries.append(
+                    {
+                        "index": index,
+                        "timestamp": stamp,
+                        "trading_date": trading_date.isoformat(),
+                    }
+                )
+    report["outside_request"] = boundaries
+    return report
+
+
 def parse_response(raw: bytes, request: HistoricalRequest) -> list[HistoricalBar]:
-    """Parse parallel arrays without trusting their order or clock meaning."""
+    """Sort complete index-aligned candles; collapse only identical duplicates."""
     data: Any = json.loads(raw, parse_float=Decimal)
     if not isinstance(data, dict):
         raise ValueError("Dhan chart response must be an object")
@@ -293,38 +580,65 @@ def parse_response(raw: bytes, request: HistoricalRequest) -> list[HistoricalBar
     count = len(arrays[0])
     if any(len(array) != count for array in arrays):
         raise ValueError("Dhan chart arrays have unequal lengths")
-    result = []
+    result: list[HistoricalBar] = []
     digest = sha256(raw).hexdigest()
-    previous = -1
+    previous_stamp: int | None = None
+    rows = []
     for stamp, opened, high, low, close, volume in zip(*arrays, strict=True):
-        if isinstance(stamp, bool) or not isinstance(stamp, int) or stamp <= previous:
-            raise ValueError("Dhan chart timestamps must increase")
-        if isinstance(volume, bool) or not isinstance(volume, int):
+        normalized_stamp = _integral_json_number(stamp)
+        if normalized_stamp is None:
+            raise ValueError("invalid Dhan chart timestamp")
+        rows.append((normalized_stamp, opened, high, low, close, volume))
+    rows.sort(key=lambda row: row[0])
+    for stamp, opened, high, low, close, volume in rows:
+        if _timestamp_unit(stamp) != "seconds":
+            raise ValueError("Dhan chart timestamp unit is not epoch seconds")
+        normalized_volume = _integral_json_number(volume)
+        if normalized_volume is None:
             raise ValueError("invalid chart volume")
-        previous = stamp
-        trading_date = timestamp_to_date(stamp)
+        try:
+            trading_date = timestamp_to_date(stamp)
+        except (ValueError, OSError, OverflowError) as exc:
+            raise ValueError("invalid Dhan chart timestamp") from exc
         if not request.start <= trading_date < request.end:
             raise ValueError("Dhan chart timestamp outside request")
-        result.append(
-            HistoricalBar(
-                instrument=request.instrument,
-                interval_minutes=request.interval_minutes,
-                trading_date=trading_date,
-                source_timestamp_ns=stamp * 1_000_000_000
-                if request.interval_minutes is not None
-                else None,
-                open_nanos=_price_nanos(opened),
-                high_nanos=_price_nanos(high),
-                low_nanos=_price_nanos(low),
-                close_nanos=_price_nanos(close),
-                volume=volume,
-                source="DHAN_HISTORICAL",
-                source_sha256=digest,
-                timestamp_semantics="UNVERIFIED"
-                if request.interval_minutes is not None
-                else "DAILY",
-            )
+        bar = HistoricalBar(
+            instrument=request.instrument,
+            interval_minutes=request.interval_minutes,
+            trading_date=trading_date,
+            source_timestamp_ns=stamp * 1_000_000_000
+            if request.interval_minutes is not None
+            else None,
+            open_nanos=_price_nanos(opened),
+            high_nanos=_price_nanos(high),
+            low_nanos=_price_nanos(low),
+            close_nanos=_price_nanos(close),
+            volume=normalized_volume,
+            source="DHAN_HISTORICAL",
+            source_sha256=digest,
+            timestamp_semantics="UNVERIFIED"
+            if request.interval_minutes is not None
+            else "DAILY",
         )
+        if result and stamp == previous_stamp:
+            prior = result[-1]
+            if (
+                prior.open_nanos,
+                prior.high_nanos,
+                prior.low_nanos,
+                prior.close_nanos,
+                prior.volume,
+            ) != (
+                bar.open_nanos,
+                bar.high_nanos,
+                bar.low_nanos,
+                bar.close_nanos,
+                bar.volume,
+            ):
+                raise ValueError("conflicting duplicate Dhan chart candles")
+            continue
+        result.append(bar)
+        previous_stamp = stamp
     return result
 
 

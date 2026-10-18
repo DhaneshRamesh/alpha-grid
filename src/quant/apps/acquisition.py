@@ -16,8 +16,10 @@ from quant.acquisition.contracts import CashInstrument, HistoricalBar
 from quant.acquisition.dhan import (
     HistoricalRequest,
     SavedResponseAudit,
+    diagnose_response,
     dry_run,
     plan_requests,
+    recover_quarantined_response,
     response_path,
     run_backfill,
     verify_saved_response,
@@ -33,7 +35,16 @@ from quant.acquisition.quality import QualityReport, audit_bars
 from quant.acquisition.registry import load_registry
 from quant.acquisition.status import acquisition_status, write_json_atomic, write_status
 
-_COMMANDS = ("dry-run", "verify-config", "pilot", "verify", "import", "report")
+_COMMANDS = (
+    "dry-run",
+    "verify-config",
+    "pilot",
+    "verify",
+    "import",
+    "report",
+    "diagnose",
+    "recover",
+)
 _IST = ZoneInfo("Asia/Kolkata")
 
 
@@ -67,6 +78,8 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--subscription-confirmed", action="store_true")
             command.add_argument("--pilot-authorized", action="store_true")
             command.add_argument("--execute-read-only", action="store_true")
+        if name in {"diagnose", "recover"}:
+            command.add_argument("--response-file", type=Path, required=True)
     return parser
 
 
@@ -153,6 +166,27 @@ def run(argv: list[str]) -> dict[str, object]:
         argv = ["dry-run", *argv]
     args = _parser().parse_args(argv)
     requests = _requests(args)
+    if args.command == "diagnose":
+        if len(requests) != 1:
+            raise ValueError("offline diagnosis requires exactly one request")
+        return diagnose_response(args.response_file.read_bytes(), requests[0])
+    if args.command == "recover":
+        _validate_pilot_scope(args, requests)
+        identity = _identity(args)
+        audit = recover_quarantined_response(
+            requests[0], args.response_file, args.output_dir
+        )
+        return {
+            "mode": "RECOVER_QUARANTINED_NO_NETWORK",
+            "instrument_evidence": identity,
+            "saved_response": str(audit.path),
+            "response_sha256": audit.sha256,
+            "retrieved_at": audit.retrieved_at.isoformat()
+            if audit.retrieved_at is not None
+            else None,
+            "rows": len(audit.bars),
+            "orders": "DISABLED",
+        }
     if args.command == "dry-run":
         result = dry_run(requests, args.output_dir)
         result.update(

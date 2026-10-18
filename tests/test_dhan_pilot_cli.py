@@ -112,6 +112,83 @@ def test_pilot_guard_and_no_network_dry_run(
     assert not (tmp_path / "raw").exists()
 
 
+def test_diagnose_saved_bytes_is_offline(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    master, manifest = master_fixture(tmp_path)
+    raw = tmp_path / "response.json"
+    raw.write_bytes(
+        b'{"timestamp":[1740000000000],"open":[],"high":[],"low":[],"close":[],"volume":[]}'
+    )
+    monkeypatch.setattr(
+        "quant.apps.acquisition.run_backfill",
+        lambda *a, **k: pytest.fail("network path reached"),
+    )
+    result = run(
+        ["diagnose", *arguments(master, manifest), "--response-file", str(raw)]
+    )
+    assert result["timestamp_units"] == ["milliseconds"]
+    assert result["array_lengths"]["open"] == 0
+
+
+def test_recover_quarantined_response_without_network(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    master, manifest = master_fixture(tmp_path)
+    stamp = int(
+        datetime(2025, 1, 2, 9, 15, tzinfo=ZoneInfo("Asia/Kolkata")).timestamp()
+    )
+    raw = json.dumps(
+        {
+            "timestamp": [float(stamp)],
+            "open": [100.0],
+            "high": [101.0],
+            "low": [99.0],
+            "close": [100.5],
+            "volume": [123.0],
+        }
+    ).encode()
+    request = plan_requests(
+        (CashInstrument("NSE", "NSE_EQ", "2885", "RELIANCE"),),
+        date(2025, 1, 2),
+        date(2025, 1, 3),
+        1,
+    )
+    run_backfill(
+        request,
+        output_dir=tmp_path / "source",
+        enabled=True,
+        token="fixture-only",
+        transport=FakeTransport(raw),
+        sleep=lambda _: None,
+    )
+    evidence = next((tmp_path / "source" / ".quarantine").glob("*.response"))
+    receipt = json.loads(evidence.with_suffix(".meta.json").read_text())
+    monkeypatch.setattr(
+        "quant.apps.acquisition.run_backfill",
+        lambda *a, **k: pytest.fail("network path reached"),
+    )
+    args = [
+        "recover",
+        *arguments(master, manifest),
+        "--response-file",
+        str(evidence),
+        "--output-dir",
+        str(tmp_path / "recovered"),
+    ]
+    result = run(args)
+    assert result["mode"] == "RECOVER_QUARANTINED_NO_NETWORK"
+    assert result["rows"] == 1
+    assert result["response_sha256"] == hashlib.sha256(raw).hexdigest()
+    checkpoint = Path(result["saved_response"])
+    assert checkpoint.read_bytes() == raw
+    assert (
+        json.loads(checkpoint.with_suffix(".meta.json").read_text())["received_at"]
+        == receipt["received_at"]
+    )
+    assert run(args)["response_sha256"] == result["response_sha256"]
+
+
 class FakeTransport:
     def __init__(self, raw: bytes) -> None:
         self.raw = raw

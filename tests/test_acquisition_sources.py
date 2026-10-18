@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import stat
 import urllib.error
 import zipfile
 from datetime import UTC, date, datetime
@@ -15,6 +16,7 @@ import pytest
 from quant.acquisition.contracts import CashInstrument
 from quant.acquisition.dhan import (
     deduplicate_windows,
+    diagnose_response,
     dry_run,
     iter_saved_backfill,
     parse_response,
@@ -86,6 +88,115 @@ def test_dhan_parse_empty_overlap_and_conflict() -> None:
             b'{"timestamp":[1],"open":[],"high":[],"low":[],"close":[],"volume":[]}',
             req,
         )
+
+
+def test_integral_decimal_chart_timestamps_and_volume() -> None:
+    req = plan_requests((INSTRUMENT,), date(2025, 1, 1), date(2025, 1, 5), 1)[0]
+    raw = (
+        response(stamp(2), stamp(3))
+        .replace(str(stamp(2)).encode(), f"{stamp(2)}.0".encode())
+        .replace(str(stamp(3)).encode(), f"{stamp(3)}.0".encode())
+    )
+    raw = raw.replace(b'"volume": [123, 123]', b'"volume": [123.0, 123.0]')
+    report = diagnose_response(raw, req)
+    assert report["timestamp_encodings"] == ["Decimal"]
+    assert report["timestamp_units"] == ["seconds"]
+    bars = parse_response(raw, req)
+    assert len(bars) == 2
+    assert bars[0].source_timestamp_ns == stamp(2) * 1_000_000_000
+    assert [bar.volume for bar in bars] == [123, 123]
+    fractional = raw.replace(f"{stamp(2)}.0".encode(), f"{stamp(2)}.5".encode())
+    assert diagnose_response(fractional, req)["timestamp_units"] == [
+        "invalid",
+        "seconds",
+    ]
+    with pytest.raises(ValueError, match="timestamp"):
+        parse_response(fractional, req)
+    with pytest.raises(ValueError, match="volume"):
+        parse_response(raw.replace(b"123.0", b"123.5"), req)
+
+
+def test_out_of_order_rows_sort_together_and_duplicate_provenance(
+    tmp_path: Path,
+) -> None:
+    req = plan_requests((INSTRUMENT,), date(2025, 1, 1), date(2025, 1, 5), 1)[0]
+    data = json.loads(response(stamp(3), stamp(2), stamp(2)))
+    data["open"] = [100.3, 100.2, 100.2]
+    data["volume"] = [30, 20, 20]
+    raw = json.dumps(data).encode()
+    report = diagnose_response(raw, req)
+    assert report["out_of_order_pairs"] == [[0, 1]]
+    assert report["duplicate_timestamp_groups"] == [
+        {"timestamp": stamp(2), "indices": [1, 2]}
+    ]
+    assert report["sorted_original_indices"] == [1, 2, 0]
+    bars = parse_response(raw, req)
+    assert [(bar.open_nanos, bar.volume) for bar in bars] == [
+        (100_200_000_000, 20),
+        (100_300_000_000, 30),
+    ]
+    transport = FakeTransport([raw])
+    paths = run_backfill(
+        (req,),
+        output_dir=tmp_path / "raw",
+        enabled=True,
+        transport=transport,
+        token="secret-marker",
+        sleep=lambda _: None,
+    )
+    assert paths[0].read_bytes() == raw
+    metadata = json.loads(paths[0].with_suffix(".meta.json").read_text())
+    assert metadata["normalization"]["collapsed_duplicate_indices"] == [2]
+    assert metadata["normalization"]["sorted_original_indices"] == [1, 2, 0]
+    assert "secret-marker" not in json.dumps(metadata)
+
+
+@pytest.mark.parametrize("failure", ["conflict", "length", "units", "boundary"])
+def test_invalid_response_is_quarantined_before_validation(
+    tmp_path: Path, failure: str
+) -> None:
+    req = plan_requests((INSTRUMENT,), date(2025, 1, 1), date(2025, 1, 5), 1)[0]
+    data = json.loads(response(stamp(2), stamp(2)))
+    if failure == "conflict":
+        data["close"][1] = 999.0
+    elif failure == "length":
+        data["volume"].pop()
+    elif failure == "units":
+        data["timestamp"] = [value * 1000 for value in data["timestamp"]]
+    else:
+        data["timestamp"] = [stamp(2), stamp(5)]
+    raw = (json.dumps(data) + " \n").encode()
+    transport = FakeTransport([raw])
+    raw_dir = tmp_path / "raw"
+    with pytest.raises(ValueError):
+        run_backfill(
+            (req,),
+            output_dir=raw_dir,
+            enabled=True,
+            transport=transport,
+            token="secret-marker",
+            sleep=lambda _: None,
+        )
+    assert transport.calls == 1
+    assert not list(raw_dir.glob("*.json"))
+    quarantine = raw_dir / ".quarantine"
+    saved = list(quarantine.glob("*.response"))
+    assert len(saved) == 1 and saved[0].read_bytes() == raw
+    assert stat.S_IMODE(quarantine.stat().st_mode) == 0o700
+    assert stat.S_IMODE(saved[0].stat().st_mode) == 0o600
+    metadata = json.loads(saved[0].with_suffix(".meta.json").read_text())
+    diagnostics = json.loads(saved[0].with_suffix(".diagnostics.json").read_text())
+    assert metadata["sha256"] == hashlib.sha256(raw).hexdigest()
+    assert diagnostics["sha256"] == metadata["sha256"]
+    assert "secret-marker" not in json.dumps(metadata) + json.dumps(diagnostics)
+    if failure == "conflict":
+        assert diagnostics["conflicting_duplicate_timestamps"] == [stamp(2)]
+    elif failure == "length":
+        assert diagnostics["array_lengths"]["volume"] == 1
+    elif failure == "units":
+        assert diagnostics["timestamp_units"] == ["milliseconds"]
+    else:
+        assert diagnostics["outside_request"][0]["index"] == 1
 
 
 class FakeTransport:

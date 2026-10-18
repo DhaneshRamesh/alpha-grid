@@ -1,8 +1,11 @@
 # Dhan-only first historical pilot (DATA_ONLY)
 
-Status on 2026-10-18: **subscription INACTIVE per operator; authenticated
-pilot NOT AUTHORIZED**. No historical chart call has been sent. The NSE
-importer remains available but is not being used in this acquisition phase.
+Status on 2026-10-18: the operator ran the authorized read-only pilot.
+The received RELIANCE response was quarantined, then recovered offline into
+the raw checkpoint: 1,800 one-minute candles, SHA-256
+`9ad62caf5c889bae31f0709c61cb7b7b7ab7855285770a525669b22232db399d`.
+Historical instrument identity, timestamp meaning, calendar completeness and
+adjustments remain unverified. No model is trained or promoted.
 
 ## Operator activation
 
@@ -63,10 +66,9 @@ These **offline commands have run** without credentials or network access:
 ```
 
 `verify-config` only reports token presence; it cannot prove subscription
-activity offline. The following **prepared command has NOT run**. It requires
-the active subscription, an unexpired local token and fresh explicit
-authorization. Refresh the public master and its manifest if older than seven
-days at that point.
+activity offline. The operator ran the following read-only pilot command with
+a local token. Do not repeat it to recover the same response; use the saved
+bytes and offline recovery command below.
 
 ```bash
 .venv/bin/python -m quant.apps.acquisition pilot \
@@ -80,12 +82,52 @@ days at that point.
 ## Verification and research boundary
 
 After an approved response, `verify` checks original bytes, SHA, request
-metadata, OHLCV array lengths, increasing timestamps and session/identity
+metadata, OHLCV array lengths, unique normalized timestamps and session/identity
 quality using an independently sourced `data/config/calendar.json` and
 dated `data/config/registry.json`. The current chart response schema has no
 independent instrument ID or interval field; metadata binds it to the
 request, while timestamp bar-start/bar-end meaning and adjustment policy
 remain **UNVERIFIED**. A provisional weekday calendar is not holiday proof.
+
+Each received chart body is now fsynced byte-for-byte to a mode-0700
+`data/historical/raw/.quarantine/` directory before parsing. Its mode-0600
+receipt records the SHA-256, request and receipt time, without the token.
+An offline diagnostics sidecar records array lengths, timestamp units,
+out-of-order pairs, duplicates, conflicts and dates outside the requested
+window. Complete index-aligned OHLCV records are sorted together; identical
+duplicate timestamps collapse with original indices recorded in the raw
+checkpoint metadata. Conflicting duplicates fail validation and remain in
+quarantine. The quarantine is gitignored and contains sensitive market data.
+This pilot's timestamp and volume arrays use integral JSON decimals (for
+example epoch seconds ending in `.0`). Those are now accepted exactly as
+integers; fractional values remain invalid. The preserved response has equal
+array lengths, increasing timestamps, no duplicate timestamps and no dates
+outside the requested window. It was recovered without another API call.
+Offline replay found exactly 360 consecutive rows per date, 09:15–15:14 IST,
+with no internal gaps. This is 15 rows per date below the project's
+375-minute session estimate. End-of-session completeness is therefore
+**UNVERIFIED**; no research import or model promotion should infer those
+missing minutes are valid absences.
+
+The offline recovery command was:
+
+```bash
+.venv/bin/python -m quant.apps.acquisition recover \
+  --security-id 2885 --symbol RELIANCE \
+  --start 2026-10-12 --end 2026-10-17 --interval 1 \
+  --master data/instruments/dhan-scrip-master-2026-10-18.csv \
+  --master-manifest data/instruments/dhan-scrip-master-2026-10-18.manifest.json \
+  --response-file data/historical/raw/.quarantine/92980c492f7c4933b60f2a7a2301186b.response
+```
+
+To recheck one saved response without credentials or a network call:
+
+```bash
+.venv/bin/python -m quant.apps.acquisition diagnose \
+  --security-id 2885 --symbol RELIANCE \
+  --start 2026-10-12 --end 2026-10-17 --interval 1 \
+  --response-file data/historical/raw/.quarantine/RECEIPT_ID.response
+```
 
 ```bash
 .venv/bin/python -m quant.apps.acquisition verify \
