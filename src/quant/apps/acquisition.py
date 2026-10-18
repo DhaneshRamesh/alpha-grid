@@ -109,7 +109,11 @@ def _identity(args: argparse.Namespace) -> dict[str, object]:
 def _requests(args: argparse.Namespace) -> tuple[HistoricalRequest, ...]:
     if len(args.security_id) != len(args.symbol):
         raise ValueError("one symbol required for each security ID")
-    registry = load_registry(args.registry) if args.registry is not None else None
+    registry = (
+        load_registry(args.registry)
+        if args.registry is not None and args.command not in {"verify", "import"}
+        else None
+    )
     instruments = []
     for sid, symbol in zip(args.security_id, args.symbol, strict=True):
         if registry is None:
@@ -147,6 +151,19 @@ def _quality(args: argparse.Namespace, bars: list[HistoricalBar]) -> QualityRepo
     )
 
 
+def _require_quality_inputs(args: argparse.Namespace) -> None:
+    missing = [
+        str(path) if path is not None else f"--{name}"
+        for name, path in (("calendar", args.calendar), ("registry", args.registry))
+        if path is None or not path.is_file()
+    ]
+    if missing:
+        raise ValueError(
+            "offline verification requires evidenced calendar and registry files: "
+            + ", ".join(missing)
+        )
+
+
 def _validate_pilot_scope(
     args: argparse.Namespace, requests: tuple[HistoricalRequest, ...]
 ) -> None:
@@ -165,6 +182,8 @@ def run(argv: list[str]) -> dict[str, object]:
     if argv and argv[0].startswith("--"):
         argv = ["dry-run", *argv]
     args = _parser().parse_args(argv)
+    if args.command in {"verify", "import"}:
+        _require_quality_inputs(args)
     requests = _requests(args)
     if args.command == "diagnose":
         if len(requests) != 1:

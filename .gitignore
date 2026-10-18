@@ -10,7 +10,11 @@ build/
 dist/
 work/
 outputs/
-data/
+data/*
+!data/config/
+data/config/*
+!data/config/calendar.json
+!data/config/registry.json
 .quarantine/
 benchmark-data/
 rust/target/

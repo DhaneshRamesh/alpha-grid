@@ -81,6 +81,23 @@ bytes and offline recovery command below.
 
 ## Verification and research boundary
 
+Before `verify` or `import`, supply existing, evidenced `--registry` and
+`--calendar` JSON files. A fresh checkout does not contain
+`data/config/registry.json` or `data/config/calendar.json`; `data/` is ignored.
+The CLI now checks for these files before reading the saved response.
+For this pilot, the local registry contains **no historical mapping**. It
+records only the Dhan master observation on October 18. The scoped calendar
+uses NSE's [December 12, 2025 capital-market holiday circular](https://nsearchives.nseindia.com/content/circulars/CMTR71775.pdf)
+and [published regular hours](https://www.nseindia.com/resources/exchange-communication-holidays).
+The circular lists no October 12–16 holiday. NSE's
+[closing auction rules](https://www.nseindia.com/static/products-services/closing-auction-session),
+updated August 12, 2026, end continuous trading at 15:15 for eligible cash
+stocks and run a separate auction until 15:35. The October 18 Dhan master
+contains RELIANCE October option contracts, but does not prove eligibility
+on October 12–16. The five 09:15–15:15 pilot sessions are therefore marked
+**provisional** and cause hard `CALENDAR_APPLICABILITY_UNVERIFIED` failures.
+Special-session amendments for the five dates also remain unverified.
+
 After an approved response, `verify` checks original bytes, SHA, request
 metadata, OHLCV array lengths, unique normalized timestamps and session/identity
 quality using an independently sourced `data/config/calendar.json` and
@@ -147,6 +164,18 @@ To recheck one saved response without credentials or a network call:
   --security-id 2885 --symbol RELIANCE \
   --start 2026-10-12 --end 2026-10-17 --interval 1
 ```
+
+The October 18 offline `verify` run reports 1,800 rows across five observed
+dates and keeps `import` blocked by unverified historical identity and
+provisional calendar applicability. Each date has 360 consecutive minute
+stamps from 09:15 to 15:14 IST: exactly the number of slots in a 09:15–15:15
+continuous session. The earlier 375-slot comparison used the generic close
+and must **not** be interpreted as 15 missing candles. Auction trades and
+closing prices are not established by this response. Dhan's bar timestamp
+semantics and whether its chart endpoint includes auction data remain
+unverified. The full ignored report is
+`data/historical/verification-2026-10-18.json`; no complete or
+research-eligible Parquet dataset has been produced.
 
 `import` preserves content-addressed original bytes and publishes
 Parquet/Zstd with lineage and quality sidecars. A second independent output

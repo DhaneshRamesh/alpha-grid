@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from datetime import date, time
+from pathlib import Path
 
 import pytest
 
-from quant.acquisition.calendar import NseCalendar, Session
+from quant.acquisition.calendar import NseCalendar, Session, load_calendar
 from quant.acquisition.contracts import CashInstrument, HistoricalBar
 from quant.acquisition.quality import audit_bars, reconcile_daily
 from quant.acquisition.registry import (
@@ -153,6 +155,7 @@ def test_intraday_missing_bars_only_with_verified_timestamp() -> None:
         interval_minutes=1,
     )
     assert report.missing_bars == 2
+    assert report.hard_failures == 1
     unknown = audit_bars(
         [replace(row, timestamp_semantics="UNVERIFIED")],
         calendar=calendar,
@@ -164,6 +167,65 @@ def test_intraday_missing_bars_only_with_verified_timestamp() -> None:
     )
     assert unknown.missing_bars == 0
     assert any(issue.code == "TIMESTAMP_SEMANTICS_UNKNOWN" for issue in unknown.issues)
+    assert any(
+        issue.code == "SESSION_COUNT_SHORTFALL"
+        and issue.detail.startswith("observed 1 of 3")
+        and issue.severity == "ERROR"
+        for issue in unknown.issues
+    )
+
+
+def test_provisional_session_is_a_hard_research_hold() -> None:
+    day = date(2025, 1, 2)
+    session = Session(day, time(9, 15), time(9, 16), "CAS_CTS", False)
+    row = replace(
+        daily(day),
+        interval_minutes=1,
+        source_timestamp_ns=session.start_ns(),
+        timestamp_semantics="UNVERIFIED",
+    )
+    report = audit_bars(
+        [row],
+        calendar=NseCalendar("provisional", special={day: session}),
+        registry=registry(),
+        universe=("100",),
+        start=day,
+        end=date(2025, 1, 3),
+        interval_minutes=1,
+    )
+    assert report.hard_failures == 1
+    assert any(
+        issue.code == "CALENDAR_APPLICABILITY_UNVERIFIED" for issue in report.issues
+    )
+
+
+def test_scoped_calendar_rejects_unsupported_dates(tmp_path: Path) -> None:
+    path = tmp_path / "calendar.json"
+    path.write_text(
+        json.dumps(
+            {
+                "version": "scoped",
+                "scope": {"start": "2025-01-02", "end": "2025-01-03"},
+                "normal_open": "09:15:00",
+                "normal_close": "15:30:00",
+                "holidays": [],
+                "special": [
+                    {
+                        "day": "2025-01-02",
+                        "opens": "09:15:00",
+                        "closes": "15:15:00",
+                        "kind": "CAS_CONTINUOUS_TRADING",
+                        "verified": False,
+                    }
+                ],
+            }
+        )
+    )
+    calendar = load_calendar(path)
+    session = calendar.session(date(2025, 1, 2))
+    assert session is not None and not session.verified
+    with pytest.raises(ValueError, match="outside evidenced calendar scope"):
+        calendar.session(date(2025, 1, 3))
 
 
 def test_invalid_ohlc_duplicates_regressions_overlap_and_gap() -> None:

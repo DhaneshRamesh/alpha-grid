@@ -18,6 +18,7 @@ class Session:
     opens: time
     closes: time
     kind: str = "REGULAR"
+    verified: bool = True
 
     def __post_init__(self) -> None:
         if self.closes <= self.opens:
@@ -49,14 +50,25 @@ class NseCalendar:
     # Weekday schedule is provisional until holidays/special sessions are supplied.
     normal_open: time = time(9, 15)
     normal_close: time = time(15, 30)
+    scope_start: date | None = None
+    scope_end: date | None = None
 
     def __post_init__(self) -> None:
+        if (self.scope_start is None) != (self.scope_end is None) or (
+            self.scope_start is not None
+            and self.scope_end is not None
+            and self.scope_start >= self.scope_end
+        ):
+            raise ValueError("calendar scope is invalid")
         if not self.version or any(
             day != session.day for day, session in self.special.items()
         ):
             raise ValueError("calendar version or special-session date invalid")
 
     def session(self, day: date) -> Session | None:
+        if self.scope_start is not None and self.scope_end is not None:
+            if not self.scope_start <= day < self.scope_end:
+                raise ValueError("date is outside evidenced calendar scope")
         if day in self.special:
             return self.special[day]
         if day.weekday() >= 5 or day in self.holidays:
@@ -82,12 +94,14 @@ def utc_date_from_ns(timestamp_ns: int) -> date:
 
 def load_calendar(path: Path) -> NseCalendar:
     data: dict[str, Any] = json.loads(path.read_text())
+    scope = data.get("scope")
     special = {
         date.fromisoformat(item["day"]): Session(
             date.fromisoformat(item["day"]),
             time.fromisoformat(item["opens"]),
             time.fromisoformat(item["closes"]),
             item.get("kind", "SPECIAL"),
+            item.get("verified", True),
         )
         for item in data.get("special", [])
     }
@@ -95,4 +109,8 @@ def load_calendar(path: Path) -> NseCalendar:
         data["version"],
         frozenset(date.fromisoformat(value) for value in data.get("holidays", [])),
         special,
+        time.fromisoformat(data.get("normal_open", "09:15:00")),
+        time.fromisoformat(data.get("normal_close", "15:30:00")),
+        date.fromisoformat(scope["start"]) if scope is not None else None,
+        date.fromisoformat(scope["end"]) if scope is not None else None,
     )

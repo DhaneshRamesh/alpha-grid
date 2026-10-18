@@ -1,0 +1,19 @@
+{
+  "version": "reliance-2026-10-12-16-unverified-v1",
+  "records": [],
+  "observations": [
+    {
+      "observed_at": "2026-10-18T14:51:50.061337+00:00",
+      "venue": "NSE",
+      "segment": "NSE_EQ",
+      "security_id": "2885",
+      "symbol": "RELIANCE",
+      "name": "RELIANCE INDUSTRIES LTD",
+      "source_url": "https://images.dhan.co/api-data/api-scrip-master.csv",
+      "source_sha256": "3fb7fb8db91ebe799c4f0715997e1f79bf0e68afa71b121cb77a29346017faf9",
+      "limitation": "Observation on October 18 only; no historical mapping asserted for October 12-16"
+    }
+  ],
+  "historical_identity_status": "UNVERIFIED",
+  "corporate_action_status": "UNVERIFIED"
+}

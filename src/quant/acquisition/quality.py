@@ -164,6 +164,16 @@ def audit_bars(
     for sid in universe:
         for session in calendar.sessions(start, end):
             day = session.day
+            if not session.verified:
+                issues.append(
+                    QualityIssue(
+                        "CALENDAR_APPLICABILITY_UNVERIFIED",
+                        sid,
+                        day,
+                        "session schedule is provisional",
+                        "ERROR",
+                    )
+                )
             try:
                 registry.by_security_id(sid, day)
             except ValueError:
@@ -172,7 +182,6 @@ def audit_bars(
                         "IDENTITY_UNVERIFIED", sid, day, "coverage unknown", "WARNING"
                     )
                 )
-                continue
             key = (sid, day)
             if key not in observed:
                 classification = (missing_evidence or {}).get(key, "UNKNOWN")
@@ -187,15 +196,28 @@ def audit_bars(
                 )
             elif interval_minutes is not None:
                 stamps = observed[key]
-                # Only compare where bar-start semantics have been externally verified.
-                if key not in unknown_semantics:
+                expected_count = len(session.expected_starts(interval_minutes))
+                # A count shortfall is observable even when exact bar-start
+                # timestamps are not independently verified.
+                if key in unknown_semantics and len(stamps) < expected_count:
+                    issues.append(
+                        QualityIssue(
+                            "SESSION_COUNT_SHORTFALL",
+                            sid,
+                            day,
+                            f"observed {len(stamps)} of {expected_count}; "
+                            "exact missing timestamps unknown",
+                            "ERROR",
+                        )
+                    )
+                elif key not in unknown_semantics:
                     expected = set(session.expected_starts(interval_minutes))
                     gap_count = len(expected - stamps)
                     missing += gap_count
                     if gap_count:
                         issues.append(
                             QualityIssue(
-                                "MISSING_BARS", sid, day, str(gap_count), "WARNING"
+                                "MISSING_BARS", sid, day, str(gap_count), "ERROR"
                             )
                         )
     # Instruments observed on one trading day are one independent session.

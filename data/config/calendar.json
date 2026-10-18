@@ -1,0 +1,73 @@
+{
+  "version": "nse-cm-reliance-2026-10-12-16-cas-provisional-v2",
+  "scope": {
+    "start": "2026-10-12",
+    "end": "2026-10-17"
+  },
+  "normal_open": "09:15:00",
+  "normal_close": "15:30:00",
+  "holidays": [],
+  "special": [
+    {
+      "day": "2026-10-12",
+      "opens": "09:15:00",
+      "closes": "15:15:00",
+      "kind": "CAS_CONTINUOUS_TRADING",
+      "verified": false
+    },
+    {
+      "day": "2026-10-13",
+      "opens": "09:15:00",
+      "closes": "15:15:00",
+      "kind": "CAS_CONTINUOUS_TRADING",
+      "verified": false
+    },
+    {
+      "day": "2026-10-14",
+      "opens": "09:15:00",
+      "closes": "15:15:00",
+      "kind": "CAS_CONTINUOUS_TRADING",
+      "verified": false
+    },
+    {
+      "day": "2026-10-15",
+      "opens": "09:15:00",
+      "closes": "15:15:00",
+      "kind": "CAS_CONTINUOUS_TRADING",
+      "verified": false
+    },
+    {
+      "day": "2026-10-16",
+      "opens": "09:15:00",
+      "closes": "15:15:00",
+      "kind": "CAS_CONTINUOUS_TRADING",
+      "verified": false
+    }
+  ],
+  "holiday_evidence": {
+    "source": "NSE capital-market circular NSE/CMTR/71775",
+    "dated": "2025-12-12",
+    "url": "https://nsearchives.nseindia.com/content/circulars/CMTR71775.pdf",
+    "finding": "No October 12-16 holiday listed; adjacent October holidays are October 2 and 20",
+    "amendment": {
+      "source": "NSE/CMTR/72260",
+      "dated": "2026-01-12",
+      "url": "https://nsearchives.nseindia.com/content/circulars/CMTR72260.pdf",
+      "finding": "Adds January 15 holiday; does not affect October 12-16"
+    }
+  },
+  "normal_hours_evidence": {
+    "source": "NSE Market Timings & Holidays",
+    "url": "https://www.nseindia.com/resources/exchange-communication-holidays",
+    "checked_on": "2026-10-18"
+  },
+  "special_session_status": "CAS_RULE_VERIFIED_RELIANCE_AS_OF_APPLICABILITY_UNVERIFIED",
+  "calendar_completeness": "PROVISIONAL_FOR_SCOPED_WINDOW",
+  "cas_evidence": {
+    "source": "NSE Closing Auction Session page, updated 2026-08-12",
+    "url": "https://www.nseindia.com/static/products-services/closing-auction-session",
+    "rule": "Phase 1 applies to cash stocks with derivative contracts; continuous session ends 15:15; separate auction operates until 15:35",
+    "reliance_as_of_eligibility": "UNVERIFIED_FOR_OCTOBER_12_16",
+    "supporting_later_observation": "Dhan master observed 2026-10-18 contains NSE RELIANCE October 2026 option contracts; this is not backdated evidence"
+  }
+}

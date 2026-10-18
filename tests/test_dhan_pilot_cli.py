@@ -110,6 +110,17 @@ def test_pilot_guard_and_no_network_dry_run(
             ]
         )
     assert not (tmp_path / "raw").exists()
+    with pytest.raises(ValueError, match="evidenced calendar and registry"):
+        run(
+            [
+                "verify",
+                *args,
+                "--calendar",
+                str(tmp_path / "calendar.json"),
+                "--registry",
+                str(tmp_path / "registry.json"),
+            ]
+        )
 
 
 def test_diagnose_saved_bytes_is_offline(
@@ -260,7 +271,20 @@ def test_mocked_saved_response_verify_and_import(tmp_path: Path) -> None:
     )
     calendar = tmp_path / "calendar.json"
     calendar.write_text(
-        json.dumps({"version": "fixture", "holidays": [], "special": []})
+        json.dumps(
+            {
+                "version": "fixture",
+                "holidays": [],
+                "special": [
+                    {
+                        "day": "2025-01-02",
+                        "opens": "09:15:00",
+                        "closes": "09:17:00",
+                        "kind": "FIXTURE",
+                    }
+                ],
+            }
+        )
     )
     common = [
         *arguments(master, manifest),
