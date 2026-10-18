@@ -103,10 +103,13 @@ performed. The existing depth sufficiency gate explicitly rejects an OHLCV
 modality. Neither imported historical candles nor this research dataset
 promotes a model or changes paper decisions.
 
-Run a no-auth dry-run:
+The active Dhan-only workflow is in [the pilot runbook](phase3b1-dhan-pilot.md).
+The local NSE importer remains available but is not being pursued.
+
+Run a no-auth dry-run with a current master-verified security ID:
 
 ```bash
-python -m quant.apps.acquisition --security-id 1333 --symbol RELIANCE --start 2025-01-01 --end 2025-04-01 --interval 1
+python -m quant.apps.acquisition dry-run --security-id '<VERIFIED-ID>' --symbol RELIANCE --start 2025-01-01 --end 2025-04-01 --interval 1
 ```
 
 No raw licensed data belongs in Git (`data/` is ignored). Source-specific

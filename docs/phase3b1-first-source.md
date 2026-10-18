@@ -1,5 +1,9 @@
 # First genuine market dataset checkpoint (DATA_ONLY)
 
+**Superseded for the active phase:** DhanHQ is now the sole acquisition
+provider. This NSE importer runbook is retained for reference; do not pursue
+its download/import steps. See [the Dhan pilot](phase3b1-dhan-pilot.md).
+
 Status on 2026-10-16: **WAITING_FOR_REAL_SOURCE**. No authorized NSE cash
 bhavcopy was present in the repository's ignored data directory or the
 operator's Downloads directory. Existing CSV fixtures and Utho synthetic

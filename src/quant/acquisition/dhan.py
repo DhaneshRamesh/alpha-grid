@@ -30,6 +30,10 @@ class HistoricalRequest:
     end: date  # exclusive
     interval_minutes: int | None
 
+    def __post_init__(self) -> None:
+        if not self.instrument.security_id.isdecimal():
+            raise ValueError("Dhan security ID must be numeric")
+
     @property
     def endpoint(self) -> str:
         return "https://api.dhan.co/v2/charts/" + (
@@ -91,6 +95,7 @@ def dry_run(
         "mode": "DRY_RUN_NO_NETWORK",
         "request_count": len(requests),
         "estimated_upper_bound_bars": estimated_bars,
+        "illustrative_raw_bytes_at_128_per_bar": estimated_bars * 128,
         "estimate_note": "calendar-day upper bound; not a measured download size",
         "output_dir": str(output_dir),
         "subscription": (
@@ -100,6 +105,47 @@ def dry_run(
             {"endpoint": req.endpoint, "payload": req.payload()} for req in requests
         ],
     }
+
+
+def response_path(request: HistoricalRequest, output_dir: Path) -> Path:
+    label = (
+        f"{request.instrument.security_id}-{request.interval_minutes or 'day'}-"
+        f"{request.start}-{request.end}"
+    )
+    return output_dir / f"{label}.json"
+
+
+@dataclass(frozen=True, slots=True)
+class SavedResponseAudit:
+    path: Path
+    sha256: str
+    retrieved_at: datetime | None
+    bars: tuple[HistoricalBar, ...]
+
+
+def verify_saved_response(request: HistoricalRequest, path: Path) -> SavedResponseAudit:
+    raw = path.read_bytes()
+    digest = sha256(raw).hexdigest()
+    if path.with_suffix(".sha256").read_text().strip() != digest:
+        raise ValueError("saved Dhan response checksum mismatch")
+    metadata_path = path.with_suffix(".meta.json")
+    retrieved_at = None
+    if metadata_path.exists():
+        metadata = json.loads(metadata_path.read_text())
+        if (
+            metadata.get("schema_version") != "dhan-chart-raw-v1"
+            or metadata.get("endpoint") != request.endpoint
+            or metadata.get("method") != "POST"
+            or metadata.get("request") != request.payload()
+            or metadata.get("sha256") != digest
+        ):
+            raise ValueError("saved Dhan response provenance mismatch")
+        retrieved_at = datetime.fromisoformat(metadata["received_at"])
+        if retrieved_at.tzinfo is None:
+            raise ValueError("saved Dhan retrieval time has no timezone")
+    return SavedResponseAudit(
+        path, digest, retrieved_at, tuple(parse_response(raw, request))
+    )
 
 
 class HistoricalTransport(Protocol):
@@ -141,11 +187,8 @@ def run_backfill(
     output_dir.mkdir(parents=True, exist_ok=True)
     paths = []
     for req in requests:
-        label = (
-            f"{req.instrument.security_id}-{req.interval_minutes or 'day'}-"
-            f"{req.start}-{req.end}"
-        )
-        path = output_dir / f"{label}.json"
+        path = response_path(req, output_dir)
+        label = path.stem
         if path.exists():
             raw_existing = path.read_bytes()
             parse_response(raw_existing, req)
@@ -165,6 +208,7 @@ def run_backfill(
         for attempt in range(max_retries + 1):
             try:
                 raw = client.post_json(req.endpoint, req.payload(), secret)
+                received_at = datetime.now(UTC).isoformat()
                 parse_response(raw, req)
                 temporary = output_dir / f".{label}.{uuid.uuid4().hex}.partial"
                 try:
@@ -180,6 +224,31 @@ def run_backfill(
                     stream.write(sha256(raw).hexdigest() + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
+                metadata_temp = output_dir / f".{label}.{uuid.uuid4().hex}.meta"
+                try:
+                    with metadata_temp.open("xb") as stream:
+                        stream.write(
+                            (
+                                json.dumps(
+                                    {
+                                        "schema_version": "dhan-chart-raw-v1",
+                                        "endpoint": req.endpoint,
+                                        "method": "POST",
+                                        "request": req.payload(),
+                                        "received_at": received_at,
+                                        "sha256": sha256(raw).hexdigest(),
+                                    },
+                                    sort_keys=True,
+                                    separators=(",", ":"),
+                                )
+                                + "\n"
+                            ).encode()
+                        )
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    os.replace(metadata_temp, path.with_suffix(".meta.json"))
+                finally:
+                    metadata_temp.unlink(missing_ok=True)
                 directory = os.open(output_dir, os.O_RDONLY)
                 try:
                     os.fsync(directory)

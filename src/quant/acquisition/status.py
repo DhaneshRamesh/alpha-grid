@@ -61,7 +61,12 @@ def acquisition_status(
         available = 0
         if raw_root is not None:
             for provenance in manifest.source_provenance:
-                raw = raw_root / f"NSE_{provenance.format_version}" / provenance.sha256
+                label = (
+                    "DHAN_HISTORICAL"
+                    if provenance.format_version == "DHAN_CHARTS_V2"
+                    else f"NSE_{provenance.format_version}"
+                )
+                raw = raw_root / label / provenance.sha256
                 if raw.is_file():
                     if file_sha256(raw) != provenance.sha256:
                         raise ValueError("original source checksum mismatch")

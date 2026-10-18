@@ -187,3 +187,5 @@ Phase 3B research contracts and validation limits are in [rust/docs/phase3b-rese
 Phase 3B-0 adds offline historical acquisition planning, local NSE archive
 import, point-in-time identity and session quality, a checksummed OHLCV lake,
 and separate candle research. See [docs/phase3b0-acquisition.md](docs/phase3b0-acquisition.md).
+The active Phase 3B-1 acquisition path is Dhan-only and subscription-gated:
+see [docs/phase3b1-dhan-pilot.md](docs/phase3b1-dhan-pilot.md).
