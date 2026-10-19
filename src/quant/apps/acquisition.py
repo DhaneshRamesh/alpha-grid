@@ -1,4 +1,4 @@
-"""Operator-controlled Dhan historical workflow; only pilot may use the network."""
+"""Operator-controlled Dhan historical workflow; network use requires opt-in."""
 
 from __future__ import annotations
 
@@ -14,10 +14,12 @@ from zoneinfo import ZoneInfo
 from quant.acquisition.calendar import load_calendar
 from quant.acquisition.contracts import CashInstrument, HistoricalBar
 from quant.acquisition.dhan import (
+    SUPPORTED_INTERVALS,
     HistoricalRequest,
     SavedResponseAudit,
     diagnose_response,
     dry_run,
+    iter_saved_backfill,
     plan_requests,
     recover_quarantined_response,
     response_path,
@@ -39,6 +41,7 @@ _COMMANDS = (
     "dry-run",
     "verify-config",
     "pilot",
+    "backfill",
     "verify",
     "import",
     "report",
@@ -60,6 +63,9 @@ def _parser() -> argparse.ArgumentParser:
         command.add_argument("--interval", type=int, default=1)
         command.add_argument("--daily", action="store_true")
         command.add_argument(
+            "--window", action="append", type=_parse_window, default=[]
+        )
+        command.add_argument(
             "--output-dir", type=Path, default=Path("data/historical/raw")
         )
         command.add_argument("--master", type=Path)
@@ -78,9 +84,22 @@ def _parser() -> argparse.ArgumentParser:
             command.add_argument("--subscription-confirmed", action="store_true")
             command.add_argument("--pilot-authorized", action="store_true")
             command.add_argument("--execute-read-only", action="store_true")
+        if name == "backfill":
+            command.add_argument("--subscription-confirmed", action="store_true")
+            command.add_argument("--backfill-authorized", action="store_true")
+            command.add_argument("--execute-read-only", action="store_true")
+            command.add_argument("--max-new-requests", type=int, required=True)
         if name in {"diagnose", "recover"}:
             command.add_argument("--response-file", type=Path, required=True)
     return parser
+
+
+def _parse_window(value: str) -> tuple[date, date]:
+    try:
+        start, end = (date.fromisoformat(part) for part in value.split(":"))
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("window must be START:END ISO dates") from exc
+    return start, end
 
 
 def _identity(args: argparse.Namespace) -> dict[str, object]:
@@ -123,9 +142,85 @@ def _requests(args: argparse.Namespace) -> tuple[HistoricalRequest, ...]:
             if instrument.symbol != symbol:
                 raise ValueError("as-of registry symbol mismatch")
             instruments.append(instrument)
-    return plan_requests(
-        tuple(instruments), args.start, args.end, None if args.daily else args.interval
+    interval = None if args.daily else args.interval
+    if interval is not None and interval not in SUPPORTED_INTERVALS:
+        raise ValueError("unsupported Dhan intraday interval")
+    if not args.window:
+        if args.command == "backfill":
+            raise ValueError("backfill requires explicit --window boundaries")
+        return plan_requests(tuple(instruments), args.start, args.end, interval)
+    windows: list[tuple[date, date]] = args.window
+    if (
+        windows[0][0] != args.start
+        or windows[-1][1] != args.end
+        or any(start >= end or (end - start).days > 90 for start, end in windows)
+        or any(
+            left[1] != right[0]
+            for left, right in zip(windows, windows[1:], strict=False)
+        )
+    ):
+        raise ValueError(
+            "windows must cover the range contiguously, at most 90 days each"
+        )
+    return tuple(
+        HistoricalRequest(instrument, start, end, interval)
+        for instrument in instruments
+        for start, end in windows
     )
+
+
+def _backfill_plan(
+    requests: tuple[HistoricalRequest, ...], output_dir: Path
+) -> dict[str, object]:
+    windows: list[dict[str, object]] = []
+    new_requests: list[dict[str, object]] = []
+    cached_bytes = 0
+    cached_rows = 0
+    new_days = 0
+    for request in requests:
+        path = response_path(request, output_dir)
+        item: dict[str, object] = {
+            "start": request.start.isoformat(),
+            "end_exclusive": request.end.isoformat(),
+            "days": (request.end - request.start).days,
+            "path": str(path),
+        }
+        if path.exists():
+            audit = verify_saved_response(request, path)
+            if audit.retrieved_at is None:
+                raise ValueError(f"cached response lacks retrieval provenance: {path}")
+            item.update(
+                status="VERIFIED_CACHE",
+                sha256=audit.sha256,
+                rows=len(audit.bars),
+                bytes=path.stat().st_size,
+                retrieved_at=audit.retrieved_at.isoformat(),
+            )
+            cached_bytes += path.stat().st_size
+            cached_rows += len(audit.bars)
+        else:
+            item["status"] = "NEW_REQUEST_REQUIRED"
+            new_requests.append(
+                {"endpoint": request.endpoint, "payload": request.payload()}
+            )
+            new_days += (request.end - request.start).days
+        windows.append(item)
+    bytes_per_bar = cached_bytes / cached_rows if cached_rows else None
+    return {
+        "windows": windows,
+        "verified_cached_count": len(requests) - len(new_requests),
+        "planned_new_request_count": len(new_requests),
+        "planned_new_requests": new_requests,
+        "potential_calendar_overlap_days": 0,
+        "measured_cached_bytes_per_bar": bytes_per_bar,
+        "illustrative_new_raw_bytes_at_375_slots_per_calendar_day": (
+            round(new_days * 375 * bytes_per_bar) if bytes_per_bar is not None else None
+        ),
+        "estimate_note": (
+            "Uses the saved response size per bar and 375 slots per calendar day; "
+            "not a limit or session-adjusted forecast"
+        ),
+    }
 
 
 def _saved(
@@ -210,6 +305,21 @@ def _validate_pilot_scope(
         raise ValueError("pilot must be one completed week of one-minute equity bars")
 
 
+def _validate_backfill_scope(
+    args: argparse.Namespace, requests: tuple[HistoricalRequest, ...]
+) -> None:
+    if (
+        len(args.security_id) != 1
+        or len(requests) > 12
+        or args.daily
+        or args.interval != 1
+        or args.end > datetime.now(_IST).date()
+    ):
+        raise ValueError(
+            "backfill requires one completed equity range of at most 12 windows"
+        )
+
+
 def run(argv: list[str]) -> dict[str, object]:
     """Expose a testable command path. Legacy options still mean dry-run."""
     if argv and argv[0].startswith("--"):
@@ -248,6 +358,8 @@ def run(argv: list[str]) -> dict[str, object]:
         )
         if args.master is not None or args.master_manifest is not None:
             result["instrument_evidence"] = _identity(args)
+        if args.window:
+            result["backfill_plan"] = _backfill_plan(requests, args.output_dir)
         return result
     if args.command == "verify-config":
         _validate_pilot_scope(args, requests)
@@ -288,6 +400,59 @@ def run(argv: list[str]) -> dict[str, object]:
             "retrieval_times_recorded": all(
                 audit.retrieved_at is not None for audit in audits
             ),
+            "orders": "DISABLED",
+        }
+    if args.command == "backfill":
+        _validate_backfill_scope(args, requests)
+        identity = _identity(args)
+        plan = _backfill_plan(requests, args.output_dir)
+        if not (
+            args.subscription_confirmed
+            and args.backfill_authorized
+            and args.execute_read_only
+        ):
+            raise PermissionError(
+                "backfill requires confirmed subscription, separate authorization "
+                "and read-only execution opt-in"
+            )
+        new_count = plan["planned_new_request_count"]
+        if (
+            not isinstance(new_count, int)
+            or args.max_new_requests < 0
+            or new_count > args.max_new_requests
+        ):
+            raise ValueError("planned new requests exceed explicit per-run cap")
+        if new_count:
+            token = os.environ.get("DHAN_ACCESS_TOKEN")
+            if not token:
+                raise ValueError("DHAN_ACCESS_TOKEN must be set locally")
+            paths = run_backfill(
+                requests,
+                output_dir=args.output_dir,
+                enabled=True,
+                token=token,
+                max_retries=0,
+            )
+        else:
+            paths = [response_path(request, args.output_dir) for request in requests]
+        audits = _saved(args, requests)
+        if any(audit.retrieved_at is None for audit in audits):
+            raise ValueError("all saved responses require retrieval provenance")
+        rows = sum(1 for _ in iter_saved_backfill(requests, paths))
+        return {
+            "mode": "READ_ONLY_HISTORICAL_BACKFILL",
+            "instrument_evidence": identity,
+            "saved_responses": [str(path) for path in paths],
+            "response_sha256": [audit.sha256 for audit in audits],
+            "planned_new_request_count": new_count,
+            "rows_after_boundary_reconciliation": rows,
+            "raw_integrity": "VERIFIED_FOR_SAVED_RESPONSES",
+            "historical_identity": "UNVERIFIED_FOR_FULL_RANGE",
+            "session_calendar": "UNVERIFIED_FOR_FULL_RANGE",
+            "timestamp_semantics": "UNVERIFIED",
+            "completed_candle_availability": "UNVERIFIED",
+            "adjustment_policy": "UNVERIFIED",
+            "research_eligibility": "BLOCKED_PENDING_SOURCE_QUALITY_REVIEW",
             "orders": "DISABLED",
         }
     if args.command == "report":

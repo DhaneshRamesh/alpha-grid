@@ -97,7 +97,10 @@ def dry_run(
         "request_count": len(requests),
         "estimated_upper_bound_bars": estimated_bars,
         "illustrative_raw_bytes_at_128_per_bar": estimated_bars * 128,
-        "estimate_note": "calendar-day upper bound; not a measured download size",
+        "estimate_note": (
+            "375 conventional continuous-session slots per calendar day; "
+            "special sessions and auction coverage can differ"
+        ),
         "output_dir": str(output_dir),
         "subscription": (
             "Dhan Data API entitlement and valid local access token required"
