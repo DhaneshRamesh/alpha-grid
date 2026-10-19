@@ -320,6 +320,31 @@ def test_mocked_saved_response_verify_and_import(tmp_path: Path) -> None:
     assert reported["independent_sessions"] == 1
     with pytest.raises(ValueError, match="immutable output"):
         run(["import", *common, "--code-commit", "fixture"])
+    registry.write_text(json.dumps({"version": "unverified", "records": []}))
+    calendar.write_text(
+        json.dumps(
+            {
+                "version": "provisional",
+                "special": [
+                    {
+                        "day": "2025-01-02",
+                        "opens": "09:15:00",
+                        "closes": "09:17:00",
+                        "verified": False,
+                    }
+                ],
+            }
+        )
+    )
+    blocked = run(["verify", *common])
+    groups = {item["code"]: item for item in blocked["quality_issue_summary"]}
+    assert blocked["hard_failures"] == 3
+    assert groups["IDENTITY_UNVERIFIED"]["issue_entries"] == 3
+    assert groups["IDENTITY_UNVERIFIED"]["records_in_affected_sessions"] == 2
+    assert groups["IDENTITY_UNVERIFIED"]["affected_sessions"] == [
+        {"security_id": "2885", "date": "2025-01-02"}
+    ]
+    assert groups["CALENDAR_APPLICABILITY_UNVERIFIED"]["issue_entries"] == 1
     paths[0].with_suffix(".sha256").write_text("bad")
     with pytest.raises(ValueError, match="checksum"):
         run(["verify", *common])

@@ -1,6 +1,25 @@
 {
-  "version": "reliance-2026-10-12-16-unverified-v1",
-  "records": [],
+  "version": "reliance-2026-10-12-16-partial-nse-daily-v2",
+  "records": [
+    {
+      "instrument": {"venue": "NSE", "segment": "NSE_EQ", "security_id": "2885", "symbol": "RELIANCE", "isin": null},
+      "name": "RELIANCE INDUSTRIES LTD",
+      "effective_from": "2026-10-15",
+      "effective_to": "2026-10-16",
+      "listing_status": "LISTED",
+      "source_manifest_version": "NSE_CM_security_15102026.csv.gz:d2e8741300b8e92fcadace6b81bc4f22da62bd94e720c88d2f15da60a0a9c454",
+      "evidence_scope": "October 15 daily NSE snapshot only; effective_from is audit validity start, not listing inception"
+    },
+    {
+      "instrument": {"venue": "NSE", "segment": "NSE_EQ", "security_id": "2885", "symbol": "RELIANCE", "isin": null},
+      "name": "RELIANCE INDUSTRIES LTD",
+      "effective_from": "2026-10-16",
+      "effective_to": "2026-10-17",
+      "listing_status": "LISTED",
+      "source_manifest_version": "NSE_CM_security_16102026.csv.gz:2aefcd225e2874e1c479f5565017e6133f83a08060f2531ef896cede0edc411c",
+      "evidence_scope": "October 16 daily NSE snapshot only; effective_from is audit validity start, not listing inception"
+    }
+  ],
   "observations": [
     {
       "observed_at": "2026-10-18T14:51:50.061337+00:00",
@@ -14,6 +33,27 @@
       "limitation": "Observation on October 18 only; no historical mapping asserted for October 12-16"
     }
   ],
-  "historical_identity_status": "UNVERIFIED",
-  "corporate_action_status": "UNVERIFIED"
+  "historical_identity_status": "NSE_ID_DIRECT_DHAN_MAPPING_INFERRED_OCTOBER_15_16_ONLY",
+  "corporate_action_status": "UNVERIFIED",
+  "corroboration": [
+    {
+      "source": "NSE Reliance Industries integrated filing",
+      "dated": "2026-07-17",
+      "url": "https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_175608_17072026195004_iXBRL_WEB.html",
+      "finding": "NSE symbol RELIANCE, equity, ISIN INE002A01018",
+      "limitation": "Does not identify Dhan security ID 2885 or establish unchanged mapping through October 16"
+    },
+    {
+      "source": "DhanHQ instrument-list documentation",
+      "url": "https://dhanhq.co/docs/v2/instruments/",
+      "finding": "Security ID is a field of Dhan's segment-specific instrument master",
+      "limitation": "Documentation is not a dated October 12-16 master"
+    },
+    {
+      "source": "Dhan open-source instrument reference",
+      "url": "https://github.com/dhan-oss/dhanhq-skills/blob/main/skills/dhanhq/references/instruments.md",
+      "finding": "Lists RELIANCE as NSE equity security ID 2885",
+      "limitation": "Current reference has no proven pilot-week effective date"
+    }
+  ]
 }

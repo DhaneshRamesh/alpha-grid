@@ -151,6 +151,39 @@ def _quality(args: argparse.Namespace, bars: list[HistoricalBar]) -> QualityRepo
     )
 
 
+def _issue_summary(
+    report: QualityReport, bars: list[HistoricalBar]
+) -> list[dict[str, object]]:
+    rows_by_session: dict[tuple[str, date], int] = {}
+    for bar in bars:
+        key = (bar.instrument.security_id, bar.trading_date)
+        rows_by_session[key] = rows_by_session.get(key, 0) + 1
+    counts: dict[str, int] = {}
+    sessions_by_code: dict[str, set[tuple[str, date]]] = {}
+    severities_by_code: dict[str, set[str]] = {}
+    for issue in report.issues:
+        counts[issue.code] = counts.get(issue.code, 0) + 1
+        sessions_by_code.setdefault(issue.code, set()).add(
+            (issue.security_id, issue.day)
+        )
+        severities_by_code.setdefault(issue.code, set()).add(issue.severity)
+    return [
+        {
+            "code": code,
+            "issue_entries": count,
+            "severities": sorted(severities_by_code[code]),
+            "affected_sessions": [
+                {"security_id": sid, "date": day.isoformat()}
+                for sid, day in sorted(sessions_by_code[code])
+            ],
+            "records_in_affected_sessions": sum(
+                rows_by_session.get(key, 0) for key in sessions_by_code[code]
+            ),
+        }
+        for code, count in sorted(counts.items())
+    ]
+
+
 def _require_quality_inputs(args: argparse.Namespace) -> None:
     missing = [
         str(path) if path is not None else f"--{name}"
@@ -303,6 +336,7 @@ def run(argv: list[str]) -> dict[str, object]:
         "rows": report.rows,
         "independent_sessions": report.independent_sessions,
         "hard_failures": report.hard_failures,
+        "quality_issue_summary": _issue_summary(report, bars),
         "quality_issues": [asdict(issue) for issue in report.issues],
         "timestamp_semantics": "UNVERIFIED",
         "calendar_completeness": "UNVERIFIED",

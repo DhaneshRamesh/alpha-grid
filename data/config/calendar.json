@@ -1,5 +1,5 @@
 {
-  "version": "nse-cm-reliance-2026-10-12-16-cas-provisional-v2",
+  "version": "nse-cm-reliance-2026-10-12-16-cas-partial-v3",
   "scope": {
     "start": "2026-10-12",
     "end": "2026-10-17"
@@ -34,14 +34,14 @@
       "opens": "09:15:00",
       "closes": "15:15:00",
       "kind": "CAS_CONTINUOUS_TRADING",
-      "verified": false
+      "verified": true
     },
     {
       "day": "2026-10-16",
       "opens": "09:15:00",
       "closes": "15:15:00",
       "kind": "CAS_CONTINUOUS_TRADING",
-      "verified": false
+      "verified": true
     }
   ],
   "holiday_evidence": {
@@ -61,13 +61,36 @@
     "url": "https://www.nseindia.com/resources/exchange-communication-holidays",
     "checked_on": "2026-10-18"
   },
-  "special_session_status": "CAS_RULE_VERIFIED_RELIANCE_AS_OF_APPLICABILITY_UNVERIFIED",
+  "special_session_status": "NSE_CAS_FLAG_VERIFIED_OCTOBER_15_16_ONLY",
   "calendar_completeness": "PROVISIONAL_FOR_SCOPED_WINDOW",
   "cas_evidence": {
     "source": "NSE Closing Auction Session page, updated 2026-08-12",
     "url": "https://www.nseindia.com/static/products-services/closing-auction-session",
     "rule": "Phase 1 applies to cash stocks with derivative contracts; continuous session ends 15:15; separate auction operates until 15:35",
-    "reliance_as_of_eligibility": "UNVERIFIED_FOR_OCTOBER_12_16",
+    "reliance_as_of_eligibility": "VERIFIED_OCTOBER_15_16_ONLY",
+    "dated_nse_security_master": [
+      {
+        "as_of": "2026-10-15",
+        "file": "data/instruments/nse-security/NSE_CM_security_15102026.csv.gz",
+        "sha256": "d2e8741300b8e92fcadace6b81bc4f22da62bd94e720c88d2f15da60a0a9c454",
+        "source_page": "https://www.nseindia.com/all-reports",
+        "row": "FinInstrmId=2885; TckrSymb=RELIANCE; SctySrs=EQ; ISIN=INE002A01018; ElgbltyNrmlMkt=1; ElgbltyClsgAuctnSsn=1"
+      },
+      {
+        "as_of": "2026-10-16",
+        "file": "data/instruments/nse-security/NSE_CM_security_16102026.csv.gz",
+        "sha256": "2aefcd225e2874e1c479f5565017e6133f83a08060f2531ef896cede0edc411c",
+        "source_page": "https://www.nseindia.com/all-reports",
+        "row": "FinInstrmId=2885; TckrSymb=RELIANCE; SctySrs=EQ; ISIN=INE002A01018; ElgbltyNrmlMkt=1; ElgbltyClsgAuctnSsn=1"
+      }
+    ],
+    "dated_reliance_derivative_evidence": {
+      "source": "Dhan RELIANCE futures overview",
+      "as_of": "2026-10-16T15:59:00+05:30",
+      "url": "https://dhan.co/futures/reliance-industries-ltd-futures-overview/",
+      "finding": "Shows RELIANCE OCT FUT with volume and open interest on October 16",
+      "limitation": "Broker display, not the NSE daily CAS eligibility flag for every pilot date"
+    },
     "supporting_later_observation": "Dhan master observed 2026-10-18 contains NSE RELIANCE October 2026 option contracts; this is not backdated evidence"
   }
 }

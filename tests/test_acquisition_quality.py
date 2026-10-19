@@ -15,10 +15,34 @@ from quant.acquisition.registry import (
     InstrumentRegistry,
     MappingRecord,
     UniverseVersion,
+    load_registry,
 )
 
 OLD = CashInstrument("NSE", "NSE_EQ", "100", "OLD", "INE000A01001")
 NEW = CashInstrument("NSE", "NSE_EQ", "100", "NEW", "INE000A01001")
+
+
+def test_pilot_evidence_is_scoped_to_dated_nse_files() -> None:
+    root = Path(__file__).resolve().parents[1] / "data/config"
+    mapping = load_registry(root / "registry.json")
+    calendar = load_calendar(root / "calendar.json")
+    assert [record.effective_from for record in mapping.records] == [
+        date(2026, 10, 15),
+        date(2026, 10, 16),
+    ]
+    for day in range(12, 17):
+        current = date(2026, 10, day)
+        session = calendar.session(current)
+        assert session is not None
+        assert session.closes == time(15, 15)
+        assert session.verified == (day >= 15)
+        if day >= 15:
+            assert (
+                mapping.by_security_id("2885", current).instrument.symbol == "RELIANCE"
+            )
+        else:
+            with pytest.raises(ValueError, match="historical security ID missing"):
+                mapping.by_security_id("2885", current)
 
 
 def registry() -> InstrumentRegistry:
