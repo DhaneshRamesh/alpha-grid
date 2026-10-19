@@ -207,6 +207,64 @@ acquisition milestone is the NSE daily CM-MII security files for October
 12–14, then independent confirmation of Dhan bar timestamp and adjustment
 semantics. No repeat chart request is needed.
 
+## Source-contract review (2026-10-19)
+
+NSE's [All Reports archive](https://www.nseindia.com/all-reports) was set to
+October 12, 13 and 14 in turn, and the same **CM - MII - Security File (.gz)
+(NSE Listed securities)** entry used for October 15–16 was selected each
+time. No download appeared for any of the three dates. Direct retrieval of
+`NSE_CM_security_12102026.csv.gz`,
+`NSE_CM_security_13102026.csv.gz` and
+`NSE_CM_security_14102026.csv.gz` under the official
+`nsearchives.nseindia.com/content/cm/` path
+also failed in this environment (connection timeout/DNS error); the known
+October 15 URL likewise failed here. This is an access failure, **not**
+evidence that NSE never published those files. No locally acquired original
+file or SHA-256 exists for October 12–14, so the registry and calendar remain
+provisional for those dates. The locally retained October 15 and 16 originals still hash
+to `d2e8741300b8e92fcadace6b81bc4f22da62bd94e720c88d2f15da60a0a9c454`
+and `2aefcd225e2874e1c479f5565017e6133f83a08060f2531ef896cede0edc411c`.
+No NSE price archive was requested.
+
+The [current intraday endpoint reference](https://docs.dhanhq.co/api/v2/historical-data/get-intraday-historical)
+documents one-minute OHLCV, an epoch timestamp, an exchange-standard
+`securityId`, `NSE_EQ`, and at most 90 days per request. It does **not** say
+whether the timestamp marks bar start or end, whether the final minute is
+complete, or whether closing-auction prints enter the response. The local
+[official `dhanhq` SDK](https://github.com/dhan-oss/dhanhq-py), locked at
+2.3.0, forwards `HistoricalData.intraday_minute_data` requests to
+`/charts/intraday` and returns the provider response without
+interpreting timestamps or locally adjusting bars. Dhan's
+[corporate-action answer](https://dhan.co/support/platforms/dhanhq-api/is-the-historical-data-from-dhan-s-data-api-adjusted-for-corporate-actions-like-bonuses-and-splits/)
+explicitly covers **daily** historical data; intraday split/bonus adjustment
+is undocumented there. Matching NSE and Dhan ID `2885` on October 15–16 is
+strong corroboration of the historical endpoint mapping, but the saved chart
+body has no echoed identity and October 12–14 remain without dated mapping.
+The 09:15–15:14 sequence is consistent with bar-start labeling; that is an
+inference, not a source contract. No timestamps or prices were relabeled.
+
+Offline `verify` was rerun on the saved response: 1,800 rows, five sessions,
+and 1,083 hard failures. The 1,080 row-level identity errors and three
+calendar errors all concern October 12–14; five timestamp-semantics warnings
+span the full week. No malformed candles, conflicting timestamps or internal
+one-minute gaps were detected. The ignored raw audit is
+`data/historical/verification-2026-10-19.json`. Original response integrity
+is intact; research-eligible Parquet import remains blocked. Exploratory work
+may read the existing raw checkpoint in an explicitly provisional local
+workspace, keeping its hash and assumptions alongside any derived output;
+do not publish that output into the research-eligible Parquet location.
+
+For the proposed 6–12-month acquisition, freeze the symbol/ID universe and
+date range first, plan windows of at most 90 days with explicit boundary
+reconciliation, and capture each Dhan response as original bytes with
+SHA-256 and request metadata.
+Collect dated NSE reference files, session calendars and corporate-action
+evidence for the acquired period. Resolve the intraday timestamp, completed
+bar, auction and adjustment questions through official documentation or an
+operator-approved Dhan clarification before causal features or backtests use
+the bars. The raw acquisition can proceed while those semantics are marked
+unknown; the existing verification/import gates still apply per window.
+
 `import` preserves content-addressed original bytes and publishes
 Parquet/Zstd with lineage and quality sidecars. A second independent output
 directory can reproduce canonical hashes and normalized rows. Only completed
