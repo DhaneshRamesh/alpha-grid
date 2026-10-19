@@ -79,3 +79,19 @@ def test_later_session_cannot_change_prior_volume_features() -> None:
     predictions = _predict(x, _fit_logistic(x, y))
     assert np.isfinite(predictions).all()
     assert 0 < predictions[0] < predictions[-1] < 1
+
+
+def test_fifteen_minute_target_keeps_causal_features_and_common_close() -> None:
+    bars = _synthetic_sessions(11)
+    five = _examples(bars, through_august=False)
+    fifteen = _examples(bars, through_august=False, target_end=18)
+    assert len(fifteen) == 312
+    assert [row.raw for row in fifteen] == [row.raw for row in five[:312]]
+    assert all(
+        row.available_ns - row.stamp_ns == 120_000_000_000
+        and row.label_start_ns - row.stamp_ns == 180_000_000_000
+        and row.label_end_ns - row.stamp_ns == 1_080_000_000_000
+        and row.available_ns < row.label_start_ns
+        for row in fifteen
+    )
+    assert fifteen[-1].label_end_ns == bars[-1].source_timestamp_ns

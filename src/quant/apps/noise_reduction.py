@@ -85,7 +85,11 @@ def _load(raw_root: Path) -> tuple[list[HistoricalBar], dict[str, str]]:
     }
 
 
-def _examples(bars: list[HistoricalBar], *, through_august: bool) -> list[Example]:
+def _examples(
+    bars: list[HistoricalBar], *, through_august: bool, target_end: int = 8
+) -> list[Example]:
+    if not TARGET_REFERENCE_START < target_end < 360:
+        raise ValueError("target end must follow the reference start within a session")
     sessions: dict[date, list[HistoricalBar]] = defaultdict(list)
     for bar in bars:
         if through_august and bar.trading_date >= date(2026, 9, 1):
@@ -132,7 +136,7 @@ def _examples(bars: list[HistoricalBar], *, through_august: bool) -> list[Exampl
             else None
         )
         if baseline is not None and prior_sessions >= MIN_VOLUME_BASELINE_SESSIONS:
-            for index in range(VOLATILITY_LOOKBACK, 360 - TARGET_REFERENCE_END):
+            for index in range(VOLATILITY_LOOKBACK, 360 - target_end):
                 sigma = max(
                     float(np.sqrt(np.mean(returns[index - 29 : index + 1] ** 2))),
                     1e-6,
@@ -147,11 +151,14 @@ def _examples(bars: list[HistoricalBar], *, through_august: bool) -> list[Exampl
                 smoothed_r1 = float(filtered[index] / sigma)
                 stamped = _stamp(market[index])
                 start = _stamp(market[index + TARGET_REFERENCE_START])
-                end = _stamp(market[index + TARGET_REFERENCE_END])
+                end = _stamp(market[index + target_end])
                 available = stamped + 2 * minute_ns
                 if not available < start < end:
                     raise ValueError("feature availability reaches future outcome")
-                forward_return = float(closes[index + 8] / closes[index + 3] - 1)
+                forward_return = float(
+                    closes[index + target_end] / closes[index + TARGET_REFERENCE_START]
+                    - 1
+                )
                 result.append(
                     Example(
                         day.isoformat(),
