@@ -1368,6 +1368,42 @@ Application suites were not run because their toolchains are absent here.
   Tests use fixtures only, with no market evidence. This sandbox still blocks
   `repo-context.ps1` under Restricted PowerShell execution policy.
 
+### Verified-archive descriptive replay, 2026-10-28 IST
+
+- The only private Dhan historical market response in the inspected archive is
+  the pinned NSE_EQ RELIANCE/2885 one-minute response retrieved 2026-10-26.
+  Existing original-byte, metadata, SHA-256 and parser checks pass for 720
+  rows: 360 each on October 15 and 16, with zero internal source-minute gaps.
+  The source timestamp's completion meaning, dated historical identity and
+  dated CAS classification remain unverified; source integrity is not causal
+  eligibility. No new Dhan historical request was needed or made.
+- `cockpit_cache.py` now replays those verified rows in strictly increasing
+  source order, checks the 09:15-15:15 observation boundary and minute cadence,
+  resets prior-window descriptions at session boundaries or gaps, and emits a
+  hash-bound summary. The retrospective 5-minute price and prior-20-minute
+  volume baseline is DESCRIPTIVE_ONLY. All 720 eligibility evaluations are
+  NO_TRADE; outcomes and net edge are withheld, paper orders/fills and QP01
+  decision writes remain zero. Historical candles are never fed into the quote
+  decoder or used as attainable fills. The existing paper/risk path remains
+  independently gated and unchanged.
+- The existing authenticated Rust historical route served the summary from
+  an isolated DATA_ONLY localhost gateway: HTTP 200, archive/replay hashes
+  matched, 720/720 rows processed, 720 NO_TRADE, zero QP01 writes and zero
+  paper orders. Backend HTTP fetch took 268.3 ms; browser publication latency
+  was not measured. Existing 8765 cockpit process has not been restarted with
+  this Python change. Focused Python tests passed 2/2, App UI tests 5/5,
+  Ruff, focused mypy and TypeScript passed. The existing quant-paper test
+  build was blocked by Windows Application Control error 4551; no policy was
+  changed. No genuine live WebSocket frame exists; earlier zero-frame cause
+  remains unknown.
+- After the final source change, two isolated native DATA_ONLY gateway starts
+  each returned authenticated HTTP 200 with the same pinned archive/replay hash,
+  720 processed rows, 720 NO_TRADE, zero paper orders and broker orders
+  DISABLED. The reused test QP01 approval ledger remained 0 bytes on both
+  starts. Backend HTTP timings were 202.2 and 188.4 ms; this does not measure
+  actual browser publication. The ordinary running cockpit gateway still needs
+  a normal restart to load the updated Python cache output.
+
 ### October 29 Quote-17 preparation, checked 2026-10-28 22:58 IST
 
 - Official NSE cash holiday circular NSE/CMTR/71775 lists no October 29

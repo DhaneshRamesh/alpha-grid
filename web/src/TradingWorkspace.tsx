@@ -72,6 +72,32 @@ export type HistoricalCache = {
   bar_timestamp_semantics?: string;
   causal_eligibility: "BLOCKED";
   daily_status?: string;
+  replay?: {
+    mode: "HISTORICAL_REPLAY";
+    status: "COMPLETE_NO_TRADE";
+    source_sha256: string;
+    processed_bars: number;
+    total_bars: number;
+    latest_session: string;
+    latest_source_timestamp_ns: string;
+    missing_source_minutes: number;
+    retrospective_baseline_samples: number;
+    latest_retrospective_baseline: {
+      source_timestamp_ns: string;
+      prior_only_5m_close_change_bps: string;
+      volume_vs_prior_20m_median: string;
+    } | null;
+    baseline_eligibility: "DESCRIPTIVE_ONLY";
+    outcomes: "WITHHELD_UNVERIFIED_COMPLETION";
+    decision: "NO_TRADE";
+    no_trade_evaluations: number;
+    reasons: string[];
+    paper_eligible: 0;
+    paper_orders: 0;
+    paper_fills: 0;
+    qp01_records_written: 0;
+    broker_orders: "DISABLED";
+  };
   bars: {
     timestamp_ns: string;
     open_nanos: string;
@@ -257,6 +283,25 @@ export function TradeDesk({
           <span className="trade-card-state">
             DAILY UNAVAILABLE · CAUSAL RESEARCH BLOCKED
           </span>
+          {historical?.status === "AVAILABLE" && historical.replay && (
+            <div>
+              <p>
+                HISTORICAL REPLAY · {historical.replay.processed_bars} / {historical.replay.total_bars}
+                {" "}source-integrity-verified archive rows processed. Latest archived session {historical.replay.latest_session};
+                {" "}last source timestamp {dateTime(historical.replay.latest_source_timestamp_ns)}.
+              </p>
+              <p>
+                {historical.replay.no_trade_evaluations} NO TRADE evaluations ·
+                {" "}paper orders {historical.replay.paper_orders} · fills {historical.replay.paper_fills}.
+                {" "}Reasons: {historical.replay.reasons.join(", ")}.
+              </p>
+              <p>
+                Retrospective price/volume baseline: {historical.replay.retrospective_baseline_samples}
+                {" "}rows. Outcomes withheld; net edge and executable costs unavailable.
+                {" "}Historical candles are not live quotes or attainable fills.
+              </p>
+            </div>
+          )}
         </section>
         <section className="trade-card">
           <span className="eyebrow">DHAN ACCOUNT</span>

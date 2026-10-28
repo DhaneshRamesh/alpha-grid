@@ -34,7 +34,10 @@ Historical synthetic benchmark artifacts remain labelled, isolated fixtures.
 An authentic October 15–16 RELIANCE Dhan minute-chart response was saved on
 2026-10-26 (720 bars); its raw integrity and scoped calendar audit passed,
 while historical Dhan identity linkage and candle timing remain unverified.
-It is not connected to the cockpit or a causal research dataset.
+The cockpit loads it through the existing verified cache. A bounded retrospective
+replay computes past-window price/volume descriptions and explicit NO TRADE
+counts; it does not publish quotes, outcomes, paper fills or QP01 decisions.
+It remains outside the causal research dataset.
 
 ## Data flow
 
