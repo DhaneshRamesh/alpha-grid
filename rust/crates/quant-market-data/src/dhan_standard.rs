@@ -59,6 +59,7 @@ pub enum DecodedPacket {
     Price(PriceObservation),
     Quote(Box<QuoteObservation>),
     Session(MarketSessionEvent),
+    AuxiliaryOpenInterest { instrument: Instrument, value: u64 },
     Unsupported { code: u8, declared_length: u16 },
 }
 
@@ -269,6 +270,7 @@ pub fn decode_frame(
         let code = packet[0];
         let expected = match code {
             2 | 6 => Some(16),
+            5 => Some(12),
             4 => Some(50),
             8 => Some(162),
             7 => Some(8),
@@ -317,6 +319,10 @@ pub fn decode_frame(
                 );
                 DecodedPacket::Quote(Box::new(quote(packet, offset, inst, meta, code == 8)?))
             }
+            5 => DecodedPacket::AuxiliaryOpenInterest {
+                instrument: instrument(packet, offset)?,
+                value: nonnegative_i32(packet, 8, offset)?,
+            },
             6 => {
                 let inst = instrument(packet, offset)?;
                 let meta = metadata(
@@ -523,6 +529,12 @@ mod tests {
         );
         p = header(7, 8, 0);
         assert!(matches!(parse(&p).unwrap()[0], DecodedPacket::Session(_)));
+        let mut oi = header(5, 12, 2885);
+        oi.extend_from_slice(&0_i32.to_le_bytes());
+        assert!(matches!(
+            parse(&oi).unwrap()[0],
+            DecodedPacket::AuxiliaryOpenInterest { value: 0, .. }
+        ));
     }
     #[test]
     fn disconnect_and_arbitrary_input() {

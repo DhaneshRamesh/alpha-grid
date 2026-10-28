@@ -151,7 +151,9 @@ impl MarketEngine {
             // Individual depth sides are retained in the journal; only paired
             // derived Depth events update book features. Legacy Trade records
             // remain readable and are not reinterpreted as standard-feed quotes.
-            MarketEvent::DepthSide(_) | MarketEvent::Trade(_) => {}
+            MarketEvent::DepthSide(_)
+            | MarketEvent::Trade(_)
+            | MarketEvent::RawStandardFrame(_) => {}
         }
         Ok(output)
     }

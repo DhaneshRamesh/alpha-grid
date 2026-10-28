@@ -1,5 +1,6 @@
 //! Append-only framed journal. Only `sync` (or `EveryEvent`) acknowledges durability.
-use quant_core::MarketEvent;
+use quant_core::{MarketEvent, RawStandardFrame};
+use ring::digest::{SHA256, digest};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
@@ -16,6 +17,54 @@ const MAX_RECORD: usize = 1024 * 1024;
 pub struct JournalRecord {
     pub session_id: String,
     pub event: MarketEvent,
+}
+
+pub fn raw_standard_record(
+    session_id: &str,
+    frame_id: u64,
+    receive_timestamp_ns: i64,
+    bytes: &[u8],
+) -> io::Result<JournalRecord> {
+    if session_id.is_empty() || frame_id == 0 || receive_timestamp_ns <= 0 || bytes.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "invalid raw frame metadata",
+        ));
+    }
+    let sha256: [u8; 32] = digest(&SHA256, bytes)
+        .as_ref()
+        .try_into()
+        .expect("SHA-256 length");
+    let record = JournalRecord {
+        session_id: session_id.into(),
+        event: MarketEvent::RawStandardFrame(Box::new(RawStandardFrame {
+            feed_session_id: session_id.into(),
+            frame_id,
+            receive_timestamp_ns,
+            sha256,
+            bytes: bytes.to_vec(),
+        })),
+    };
+    encoded_record_bytes(&record)?;
+    Ok(record)
+}
+
+fn verify_raw_frame(record: &JournalRecord) -> io::Result<()> {
+    if let MarketEvent::RawStandardFrame(raw) = &record.event {
+        if raw.feed_session_id != record.session_id
+            || raw.feed_session_id.is_empty()
+            || raw.frame_id == 0
+            || raw.receive_timestamp_ns <= 0
+            || raw.bytes.is_empty()
+            || digest(&SHA256, &raw.bytes).as_ref() != raw.sha256
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "raw frame provenance mismatch",
+            ));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -105,6 +154,7 @@ impl JournalWriter {
         if self.poisoned {
             return Err(io::Error::other("journal poisoned after storage error"));
         }
+        verify_raw_frame(record)?;
         let payload = postcard::to_stdvec(record).map_err(io::Error::other)?;
         if payload.len() > MAX_RECORD {
             return Err(io::Error::new(
@@ -262,9 +312,9 @@ impl JournalReader {
         let Some(payload) = read_frame(&mut self.file)? else {
             return Ok(None);
         };
-        postcard::from_bytes(&payload)
-            .map(Some)
-            .map_err(io::Error::other)
+        let record: JournalRecord = postcard::from_bytes(&payload).map_err(io::Error::other)?;
+        verify_raw_frame(&record)?;
+        Ok(Some(record))
     }
 }
 
@@ -343,7 +393,8 @@ pub fn recover(file: &mut File) -> io::Result<u64> {
             file.sync_data()?;
             break;
         }
-        if postcard::from_bytes::<JournalRecord>(&payload).is_err() {
+        let parsed = postcard::from_bytes::<JournalRecord>(&payload);
+        if parsed.is_err() {
             if next != size {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
@@ -354,6 +405,7 @@ pub fn recover(file: &mut File) -> io::Result<u64> {
             file.sync_data()?;
             break;
         }
+        verify_raw_frame(&parsed.expect("checked above"))?;
         good = next;
     }
     Ok(good)
@@ -378,6 +430,42 @@ mod tests {
     use quant_core::MarketEvent;
     use quant_market_data::{normalize, synthetic_packet};
     use std::process::{Command, exit};
+
+    #[test]
+    fn raw_frame_roundtrip_and_sha256_rejects_crc_valid_tampering() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = std::env::var_os("ALPHA_QJ01_PRIVATE_TEST_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| dir.path().into())
+            .join("raw.qj");
+        let bytes = [4_u8, 50, 0, 1, 0, 0, 0, 0];
+        let record = raw_standard_record("feed-one", 1, 123, &bytes).unwrap();
+        let mut writer = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        assert_eq!(writer.append(&record).unwrap().unwrap().events, 1);
+        writer.close().unwrap();
+        let mut reader = JournalReader::open(&path).unwrap();
+        assert_eq!(reader.next_record().unwrap(), Some(record.clone()));
+        assert!(reader.next_record().unwrap().is_none());
+
+        let mut altered = record;
+        let MarketEvent::RawStandardFrame(raw) = &mut altered.event else {
+            unreachable!()
+        };
+        raw.bytes[0] ^= 1;
+        let payload = postcard::to_stdvec(&altered).unwrap();
+        let mut file = File::create(&path).unwrap();
+        file.write_all(&MAGIC).unwrap();
+        file.write_all(&(payload.len() as u32).to_le_bytes())
+            .unwrap();
+        file.write_all(&crc32fast::hash(&payload).to_le_bytes())
+            .unwrap();
+        file.write_all(&payload).unwrap();
+        file.sync_all().unwrap();
+        assert_eq!(
+            JournalReader::open(&path).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
 
     #[test]
     fn qj01_legacy_depth_and_trade_variants_remain_readable() {

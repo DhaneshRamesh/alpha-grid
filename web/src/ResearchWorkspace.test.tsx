@@ -5,7 +5,7 @@ import ResearchWorkspace from "./ResearchWorkspace";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("offline research status", () => {
-  it("shows verified checksums and blocked models from read-only acquisition status", async () => {
+  it("does not display non-Dhan acquisition metrics", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockImplementation((url: string) =>
@@ -54,14 +54,11 @@ describe("offline research status", () => {
       ),
     );
     render(<ResearchWorkspace />);
-    expect(await screen.findByText("5 instruments")).toBeTruthy();
-    expect(screen.getByText(/checksum verified/)).toBeTruthy();
-    expect(screen.getByText(/SOURCE_AUDIT_REQUIRED/)).toBeTruthy();
-    expect(screen.getByText(/Confirmed genuine 0/)).toBeTruthy();
-    expect(screen.getByText(/Blocked DEPTH, HAWKES/)).toBeTruthy();
+    expect(await screen.findByText(/DATA UNAVAILABLE \/ NO TRADE/)).toBeTruthy();
+    expect(screen.queryByText("5 instruments")).toBeNull();
   });
 
-  it("labels a synthetic one-session fixture as unvalidated", async () => {
+  it("does not display synthetic research metrics or curves", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue({
@@ -85,8 +82,8 @@ describe("offline research status", () => {
       }),
     );
     render(<ResearchWorkspace />);
-    expect(await screen.findByText(/TEST FIXTURE \/ UNVALIDATED/)).toBeTruthy();
-    expect(screen.getByText("insufficient independent sessions")).toBeTruthy();
+    expect(await screen.findByText(/Verified Dhan research evidence is/)).toBeTruthy();
+    expect(screen.queryByText("insufficient independent sessions")).toBeNull();
     expect(screen.getAllByText(/N\/A/).length).toBeGreaterThan(1);
     expect(screen.queryByRole("img", { name: "Calibration curve" })).toBeNull();
   });

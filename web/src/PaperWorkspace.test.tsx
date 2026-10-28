@@ -1,11 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import PaperWorkspace from "./PaperWorkspace";
 import type { WireEngineSnapshot } from "./generated/engine-snapshot";
 
 const snapshot = {
   journal_blocked: false,
   latest_data_timestamp_ns: "1700000001000000000",
+  approved_security_ids: [],
+  instruments: [],
   paper: {
     schema_version: 1,
     mode: "PAPER_REPLAY",
@@ -91,7 +93,7 @@ describe("paper workspace", () => {
         instrumentKey="NSE:NSE_EQ:1333"
       />,
     );
-    expect(screen.getByText("PAPER / SYNTHETIC / REPLAY")).toBeTruthy();
+    expect(screen.getByText("PAPER RESEARCH / SIMULATED FILLS")).toBeTruthy();
     expect(screen.getAllByText("N/A").length).toBeGreaterThan(1);
     expect(screen.getAllByText("₹0.00").length).toBeGreaterThan(0);
     expect(screen.getAllByText("MODEL NOT TRAINED").length).toBeGreaterThan(0);
@@ -106,5 +108,91 @@ describe("paper workspace", () => {
       />,
     );
     expect(screen.getByText(/Paper engine not active/)).toBeTruthy();
+  });
+  it("allows an authenticated ledger approval without inventing a paper position", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    vi.stubGlobal("fetch", post);
+    render(
+      <PaperWorkspace
+        snapshot={
+          {
+            ...snapshot,
+            paper: null,
+            instruments: [
+              {
+                instrument: {
+                  key: "NSE:NSE_EQ:2885",
+                  security_id: "2885",
+                  symbol: null,
+                },
+              },
+            ],
+          } as WireEngineSnapshot
+        }
+        connection="CONNECTED"
+        instrumentKey={null}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Approve stock" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/api/paper/approval",
+        expect.objectContaining({ method: "POST", credentials: "same-origin" }),
+      ),
+    );
+    expect(JSON.parse(post.mock.calls[0][1].body)).toEqual({
+      security_id: "2885",
+      approved: true,
+    });
+    expect(screen.getByText(/no validated stock candidates/i)).toBeTruthy();
+    vi.unstubAllGlobals();
+  });
+  it("shows three abstaining horizons and queues paper-only approval", async () => {
+    const post = vi.fn().mockResolvedValue({ ok: true, status: 204 });
+    vi.stubGlobal("fetch", post);
+    const assessment = {
+      instrument: snapshot.paper!.recent_decisions[0].instrument,
+      approved: false,
+      source_receive_timestamp_ns: "1700000001000000000",
+      model_version: "untrained-v1",
+      model_status: "NotTrained",
+      expected_gross_edge_nanos: null,
+      expected_cost_nanos: null,
+      adverse_cost_nanos: null,
+      uncertainty_nanos: null,
+      robust_net_edge_nanos: null,
+      reason: "ApprovalRequired",
+      horizon_ns: null,
+    };
+    const paper = {
+      ...snapshot.paper!,
+      mode: "PAPER_REPLAY_APPROVED_RESEARCH",
+      approved_security_ids: [],
+      scanner: ["30m", "60m", "intraday"].map((horizon) => ({
+        ...assessment,
+        horizon,
+      })),
+    };
+    render(
+      <PaperWorkspace
+        snapshot={{ ...snapshot, paper } as WireEngineSnapshot}
+        connection="CONNECTED"
+        instrumentKey={null}
+      />,
+    );
+    expect(screen.getAllByText(/NO TRADE · ApprovalRequired/)).toHaveLength(3);
+    expect(screen.getByText("intraday")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Approve stock" }));
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledWith(
+        "/api/paper/approval",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(screen.getByRole("status").textContent).toMatch(/QP01 paper ledger/);
+    fireEvent.click(screen.getByRole("button", { name: "Halt paper entries" }));
+    await waitFor(() => expect(post).toHaveBeenCalledTimes(2));
+    expect(JSON.parse(post.mock.calls[1][1].body).action).toBe("halt_paper");
+    vi.unstubAllGlobals();
   });
 });

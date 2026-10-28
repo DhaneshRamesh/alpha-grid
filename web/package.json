@@ -10,6 +10,7 @@
     "lint": "eslint src",
     "format:check": "prettier --check src vite.config.ts eslint.config.js",
     "test": "vitest run",
+    "test:trading-service": "node --test server/*.test.mjs",
     "schema:generate": "json2ts -i schemas/engine-snapshot.schema.json -o src/generated/engine-snapshot.d.ts && json2ts -i schemas/engine-update.schema.json -o src/generated/engine-update.d.ts && json2ts -i schemas/envelope.schema.json -o src/generated/envelope.d.ts"
   },
   "dependencies": {

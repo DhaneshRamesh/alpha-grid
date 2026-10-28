@@ -3,6 +3,7 @@
 use crate::contracts::*;
 use crate::fees::FeeSchedule;
 use crate::ledger::{LedgerEvent, LedgerRecord, PaperLedgerReader, PaperLedgerWriter};
+use crate::policy::{HorizonAssessment, evaluate_horizons};
 use crate::policy::{PolicyConfig, PolicyMode};
 use crate::risk::{RiskConfig, RiskInput};
 use quant_core::{DepthEvent, MarketEvent};
@@ -57,6 +58,14 @@ pub struct PaperSnapshot {
     pub risk_rules_version: String,
     pub policy_version: String,
     pub risk_limits: RiskConfig,
+    pub approved_security_ids: Vec<String>,
+    pub scanner: Vec<PaperScannerRow>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PaperScannerRow {
+    pub instrument: quant_core::Instrument,
+    pub assessment: HorizonAssessment,
 }
 
 fn key(instrument: &quant_core::Instrument) -> String {
@@ -110,6 +119,12 @@ pub struct PaperEngine {
     ledger_healthy: bool,
     last_timing: PaperTiming,
     last_journal_writes_ns: Vec<u64>,
+    approved_security_ids: BTreeSet<String>,
+    scanner: BTreeMap<String, (quant_core::Instrument, Vec<HorizonAssessment>)>,
+    verified_session_close_ns: Option<i64>,
+    model: Box<dyn OpportunityModel>,
+    entry_deadline_by_decision: BTreeMap<String, i64>,
+    position_deadline: BTreeMap<String, i64>,
 }
 
 impl PaperEngine {
@@ -151,7 +166,7 @@ impl PaperEngine {
             halt_reason: None,
             updated_at_ns: None,
         };
-        Ok(Self {
+        let mut engine = Self {
             policy,
             risk,
             fees,
@@ -177,7 +192,27 @@ impl PaperEngine {
             ledger_healthy: true,
             last_timing: PaperTiming::default(),
             last_journal_writes_ns: Vec::new(),
-        })
+            approved_security_ids: BTreeSet::new(),
+            scanner: BTreeMap::new(),
+            verified_session_close_ns: None,
+            model: Box::new(UntrainedModel),
+            entry_deadline_by_decision: BTreeMap::new(),
+            position_deadline: BTreeMap::new(),
+        };
+        while engine
+            .next_recovered
+            .as_ref()
+            .is_some_and(|record| record.source_record_index == 0)
+        {
+            let record = engine.next_recovered.take().expect("checked");
+            engine.apply(&record)?;
+            engine.next_recovered = engine
+                .recovery
+                .as_mut()
+                .expect("recovery reader")
+                .next_record()?;
+        }
+        Ok(engine)
     }
 
     pub fn last_timing(&self) -> PaperTiming {
@@ -213,7 +248,12 @@ impl PaperEngine {
         );
         PaperSnapshot {
             schema_version: PAPER_SCHEMA_VERSION,
-            mode: "PAPER_REPLAY".into(),
+            mode: if self.mode == PolicyMode::ApprovedMultiHorizon {
+                "PAPER_REPLAY_APPROVED_RESEARCH"
+            } else {
+                "PAPER_REPLAY"
+            }
+            .into(),
             portfolio: self.portfolio.clone(),
             recent_decisions: self.recent_decisions.iter().cloned().collect(),
             orders,
@@ -226,7 +266,68 @@ impl PaperEngine {
             risk_rules_version: self.risk.version.clone(),
             policy_version: self.policy.version.clone(),
             risk_limits: self.risk.clone(),
+            approved_security_ids: self.approved_security_ids.iter().cloned().collect(),
+            scanner: self
+                .scanner
+                .values()
+                .flat_map(|(instrument, values)| {
+                    values.iter().cloned().map(|assessment| PaperScannerRow {
+                        instrument: instrument.clone(),
+                        assessment,
+                    })
+                })
+                .collect(),
         }
+    }
+
+    /// Approval is a separate QP01 event. It never authorizes a broker order.
+    pub fn set_stock_approval(
+        &mut self,
+        security_id: &str,
+        approved: bool,
+        at_ns: i64,
+    ) -> io::Result<()> {
+        if self.last_source_index < self.recovered_max_index {
+            return Err(io::Error::other(
+                "approval change waits for ledger recovery",
+            ));
+        }
+        if security_id.is_empty() || !security_id.chars().all(|c| c.is_ascii_digit()) {
+            return Err(io::Error::other("invalid security ID"));
+        }
+        if approved
+            && !self.approved_security_ids.contains(security_id)
+            && self.approved_security_ids.len() >= RECENT_LIMIT
+        {
+            return Err(io::Error::other("paper approval limit reached"));
+        }
+        self.persist(
+            self.last_source_index,
+            LedgerEvent::StockApproval {
+                security_id: security_id.into(),
+                approved,
+                timestamp_ns: at_ns,
+            },
+        )
+    }
+
+    pub fn approval_changes_allowed(&self) -> bool {
+        self.last_source_index >= self.recovered_max_index
+    }
+
+    /// Caller must supply independently verified dated session-close evidence.
+    /// Absent evidence leaves every entry horizon censored.
+    pub fn set_verified_session_close(&mut self, close_ns: Option<i64>) {
+        self.verified_session_close_ns = close_ns;
+    }
+
+    /// Only configurable before replay; model version and estimates appear in QP01 decisions.
+    pub fn set_research_model(&mut self, model: Box<dyn OpportunityModel>) -> io::Result<()> {
+        if self.last_source_index != 0 || !self.recent_decisions.is_empty() {
+            return Err(io::Error::other("cannot change model during paper replay"));
+        }
+        self.model = model;
+        Ok(())
     }
 
     fn persist(&mut self, index: u64, event: LedgerEvent) -> io::Result<()> {
@@ -257,6 +358,12 @@ impl PaperEngine {
     fn apply(&mut self, record: &LedgerRecord) -> io::Result<()> {
         match &record.event {
             LedgerEvent::Decision(decision) => {
+                if decision.action == DecisionAction::Buy {
+                    self.entry_deadline_by_decision.insert(
+                        decision.decision_id.clone(),
+                        decision.candidate.expires_at_ns,
+                    );
+                }
                 self.recent_decisions.push_back((**decision).clone());
                 while self.recent_decisions.len() > DECISION_LIMIT {
                     self.recent_decisions.pop_front();
@@ -307,6 +414,10 @@ impl PaperEngine {
                     state.view.last_transition_ns = event.timestamp_ns;
                     if is_terminal(event.status) {
                         let finished = self.orders.remove(&event.order_id).expect("order exists");
+                        if finished.view.intent.side == OrderSide::Buy {
+                            self.entry_deadline_by_decision
+                                .remove(&finished.view.intent.decision_id);
+                        }
                         push_bounded(&mut self.recent_orders, finished.view);
                     }
                 }
@@ -329,6 +440,17 @@ impl PaperEngine {
             LedgerEvent::Resume { .. } => {
                 self.portfolio.halted = false;
                 self.portfolio.halt_reason = None;
+            }
+            LedgerEvent::StockApproval {
+                security_id,
+                approved,
+                ..
+            } => {
+                if *approved {
+                    self.approved_security_ids.insert(security_id.clone());
+                } else {
+                    self.approved_security_ids.remove(security_id);
+                }
             }
         }
         self.recompute_reserve();
@@ -393,13 +515,17 @@ impl PaperEngine {
             position.quantity += fill.quantity;
             position.cost_basis_nanos += notional + fill.fees_nanos;
             self.position_excursions
-                .entry(instrument_key)
+                .entry(instrument_key.clone())
                 .or_insert(PositionTrace {
                     max_favorable_nanos: 0,
                     max_adverse_nanos: 0,
                     realized_before_nanos: self.portfolio.realized_pnl_nanos,
                     opened_at_ns: fill.filled_at_ns,
                 });
+            if let Some(deadline) = self.entry_deadline_by_decision.get(&fill.decision_id) {
+                self.position_deadline
+                    .insert(instrument_key.clone(), *deadline);
+            }
         } else {
             let position = self
                 .portfolio
@@ -421,6 +547,7 @@ impl PaperEngine {
             self.portfolio.realized_pnl_nanos += notional - fill.fees_nanos - allocated_basis;
             if position.quantity == 0 {
                 self.portfolio.positions.remove(&instrument_key);
+                self.position_deadline.remove(&instrument_key);
             }
         }
         self.portfolio.updated_at_ns = Some(fill.filled_at_ns);
@@ -570,6 +697,17 @@ impl PaperEngine {
         for id in ids {
             let state = self.orders.get(&id).expect("collected order");
             let intent = state.view.intent.clone();
+            if self.portfolio.halted && intent.side == OrderSide::Buy {
+                self.order_event(
+                    (index, depth.receive_timestamp_ns),
+                    &id,
+                    PaperOrderStatus::Cancelled,
+                    state.view.remaining_quantity,
+                    Some(DecisionReason::Halted),
+                    None,
+                )?;
+                continue;
+            }
             if depth.receive_timestamp_ns >= intent.expires_at_ns {
                 let remaining = state.view.remaining_quantity;
                 self.order_event(
@@ -687,7 +825,9 @@ impl PaperEngine {
             max_adverse_excursion_nanos: trace.as_ref().map(|v| v.max_adverse_nanos),
             holding_time_ns: trace.as_ref().map(|v| now.saturating_sub(v.opened_at_ns)), prediction_error_nanos: None,
             execution_cost_error_nanos: None, risk_model_error_nanos: None,
-            exit_reason: Some(DecisionReason::ExitSignal),
+            exit_reason: self.recent_decisions.iter().rev()
+                .find(|decision| decision.decision_id == intent.decision_id)
+                .map(|decision| decision.reason),
             explanation: "Paper fill result after configured costs; profitability cannot be attributed to the hypothesis from one synthetic path".into() };
         let decision_id = intent
             .entry_order_id
@@ -732,13 +872,69 @@ impl PaperEngine {
             feed_connected: self.feed_connected,
         };
         let candidate_started = Instant::now();
-        let (mut candidate, mut reason) = self.policy.candidate(
+        let mut exit_policy = self.policy.clone();
+        if self.mode == PolicyMode::ApprovedMultiHorizon
+            && let Some(held) = &position
+            && let Some(deadline) = self.position_deadline.get(&instrument_key)
+        {
+            exit_policy.max_hold_ns = deadline.saturating_sub(held.opened_at_ns).max(1);
+        }
+        let (mut candidate, mut reason) = exit_policy.candidate(
             &context,
             position.as_ref().map_or(0, |p| p.quantity),
             position.as_ref().map(|p| p.opened_at_ns),
             self.mode,
         );
-        let model = UntrainedModel.estimate(&context, self.policy.horizon_ns);
+        let mut model = self.model.estimate(&context, self.policy.horizon_ns);
+        let mut selected_cost = None;
+        if self.mode == PolicyMode::ApprovedMultiHorizon && position.is_none() {
+            let (assessments, selected) = evaluate_horizons(
+                &self.policy,
+                &context,
+                self.approved_security_ids
+                    .contains(&depth.instrument.security_id),
+                self.verified_session_close_ns,
+                self.policy.quantity,
+                &self.fees,
+                &*self.model,
+            );
+            if let Some((chosen, estimate, cost)) = selected {
+                candidate = chosen;
+                model = estimate;
+                selected_cost = Some(cost);
+                reason = DecisionReason::HypothesisSignal;
+            } else {
+                reason = assessments
+                    .first()
+                    .map_or(DecisionReason::NoSignal, |a| a.reason);
+                candidate.action = DecisionAction::NoTrade;
+                candidate.evidence.extend(assessments.iter().map(|a| {
+                    format!(
+                        "{}: {:?}; robust net edge {:?} INR nanounits",
+                        a.horizon, a.reason, a.robust_net_edge_nanos
+                    )
+                }));
+            }
+            if !self.scanner.contains_key(&instrument_key) && self.scanner.len() >= RECENT_LIMIT {
+                self.scanner.pop_first();
+            }
+            self.scanner.insert(
+                instrument_key.clone(),
+                (depth.instrument.clone(), assessments),
+            );
+        }
+        if self.mode == PolicyMode::ApprovedMultiHorizon
+            && position.is_none()
+            && self.recent_fills.back().is_some_and(|fill| {
+                fill.source_record_index == index && fill.side == OrderSide::Sell
+            })
+        {
+            candidate.action = DecisionAction::NoTrade;
+            reason = DecisionReason::Duplicate;
+            candidate
+                .evidence
+                .push("No same-event re-entry after a paper exit fill".into());
+        }
         let quantity = match candidate.action {
             DecisionAction::Buy => self.policy.quantity,
             DecisionAction::SellExit => position.as_ref().map_or(0, |p| p.quantity),
@@ -751,15 +947,17 @@ impl PaperEngine {
         };
         let notional = i128::from(reference_price) * i128::from(quantity);
         let half_spread = (depth.asks[0].price_nanos - depth.bids[0].price_nanos).max(0) / 2;
-        let costs = (quantity > 0 && reference_price > 0).then(|| {
-            self.fees.estimate_round_trip(
-                reference_price,
-                quantity,
-                half_spread,
-                5,
-                2,
-                model.expected_gross_edge_nanos,
-            )
+        let costs = selected_cost.or_else(|| {
+            (quantity > 0 && reference_price > 0).then(|| {
+                self.fees.estimate_round_trip(
+                    reference_price,
+                    quantity,
+                    half_spread,
+                    5,
+                    2,
+                    model.expected_gross_edge_nanos,
+                )
+            })
         });
         if self.mode == PolicyMode::CostAwareSignal
             && costs
@@ -873,11 +1071,21 @@ impl PaperEngine {
                 None,
                 Some(intent),
             )?;
-            for status in [
-                PaperOrderStatus::RiskApproved,
-                PaperOrderStatus::PaperSubmitted,
-                PaperOrderStatus::PaperWorking,
-            ] {
+            let statuses = if self.mode == PolicyMode::ApprovedMultiHorizon {
+                vec![
+                    PaperOrderStatus::RiskApproved,
+                    PaperOrderStatus::PaperSubmitted,
+                    PaperOrderStatus::PaperAcknowledged,
+                    PaperOrderStatus::PaperWorking,
+                ]
+            } else {
+                vec![
+                    PaperOrderStatus::RiskApproved,
+                    PaperOrderStatus::PaperSubmitted,
+                    PaperOrderStatus::PaperWorking,
+                ]
+            };
+            for status in statuses {
                 self.order_event(
                     (index, depth.receive_timestamp_ns),
                     &order_id,
@@ -908,6 +1116,22 @@ impl PaperEngine {
         )
     }
     pub fn halt(&mut self, index: u64, reason: DecisionReason, at_ns: i64) -> io::Result<()> {
+        let buy_orders: Vec<_> = self
+            .orders
+            .iter()
+            .filter(|(_, order)| order.view.intent.side == OrderSide::Buy)
+            .map(|(id, order)| (id.clone(), order.view.remaining_quantity))
+            .collect();
+        for (id, remaining) in buy_orders {
+            self.order_event(
+                (index, at_ns),
+                &id,
+                PaperOrderStatus::Cancelled,
+                remaining,
+                Some(reason),
+                None,
+            )?;
+        }
         self.persist(
             index,
             LedgerEvent::Halt {
@@ -966,7 +1190,8 @@ fn valid_transition(from: PaperOrderStatus, to: PaperOrderStatus) -> bool {
         (from, to),
         (Created, RiskApproved | Rejected)
             | (RiskApproved, PaperSubmitted | Rejected)
-            | (PaperSubmitted, PaperWorking | Rejected)
+            | (PaperSubmitted, PaperWorking | PaperAcknowledged | Rejected)
+            | (PaperAcknowledged, PaperWorking | Rejected)
             | (
                 PaperWorking,
                 PartiallyFilled | Filled | Cancelled | Expired | UnknownUnresolved
@@ -1185,6 +1410,323 @@ mod tests {
             PolicyMode::RiskFilteredSignal,
         )
         .unwrap()
+    }
+
+    struct SyntheticModel;
+    impl OpportunityModel for SyntheticModel {
+        fn estimate(&self, _: &DecisionContext, horizon_ns: i64) -> ModelEstimate {
+            ModelEstimate {
+                schema_version: PAPER_SCHEMA_VERSION,
+                model_version: "synthetic-test-only".into(),
+                status: EstimateStatus::Calibrated,
+                expected_gross_edge_nanos: Some(1_000_000_000_000),
+                forecast_uncertainty_nanos: Some(10_000_000_000),
+                evaluation_horizon_ns: horizon_ns,
+            }
+        }
+    }
+
+    struct SyntheticLowEdge;
+    impl OpportunityModel for SyntheticLowEdge {
+        fn estimate(&self, _: &DecisionContext, horizon_ns: i64) -> ModelEstimate {
+            ModelEstimate {
+                schema_version: PAPER_SCHEMA_VERSION,
+                model_version: "synthetic-low-edge".into(),
+                status: EstimateStatus::Calibrated,
+                expected_gross_edge_nanos: Some(1),
+                forecast_uncertainty_nanos: Some(0),
+                evaluation_horizon_ns: horizon_ns,
+            }
+        }
+    }
+
+    fn approved_sample(index: u64, seconds: i64) -> (JournalRecord, EngineOutput) {
+        let (record, mut output) = sample(index, seconds, 100_000_000_000, 5, true);
+        let features = output.features.as_mut().expect("synthetic features");
+        features.market.quality.source_time_unverified = false;
+        features.features.quality.source_time_unverified = false;
+        (record, output)
+    }
+
+    #[test]
+    fn approved_horizons_abstain_then_paper_fill_and_expire() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("approved.qp");
+        let mut paper = PaperEngine::open(
+            &path,
+            PolicyConfig::default(),
+            RiskConfig::default(),
+            FeeSchedule::dhan_delivery_research(),
+            PolicyMode::ApprovedMultiHorizon,
+        )
+        .unwrap();
+        let base = 1_700_000_000_000_000_000_i64;
+        paper.set_research_model(Box::new(SyntheticModel)).unwrap();
+        paper.set_verified_session_close(Some(base + 4 * 3_600_000_000_000));
+        let mut first = approved_sample(1, 1);
+        first
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .market
+            .quality
+            .cross_feed_uncertain = false;
+        first
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .features
+            .quality
+            .cross_feed_uncertain = false;
+        let MarketEvent::Depth(depth) = &first.0.event else {
+            panic!("depth")
+        };
+        let features = first.1.features.as_ref().unwrap();
+        let context = DecisionContext {
+            schema_version: PAPER_SCHEMA_VERSION,
+            source_record_index: 1,
+            source_event_id: "synthetic:1".into(),
+            instrument: depth.instrument.clone(),
+            session_id: first.0.session_id.clone(),
+            source_receive_timestamp_ns: depth.receive_timestamp_ns,
+            evaluated_at_ns: depth.receive_timestamp_ns,
+            market: features.market.clone(),
+            features: features.features.clone(),
+            health: features.health.clone(),
+            depth: Some((**depth).clone()),
+            journal_healthy: true,
+            feed_connected: true,
+        };
+        let (censored, selected) = evaluate_horizons(
+            &paper.policy,
+            &context,
+            true,
+            None,
+            paper.policy.quantity,
+            &paper.fees,
+            &SyntheticModel,
+        );
+        assert!(selected.is_none());
+        assert!(
+            censored
+                .iter()
+                .all(|row| row.reason == DecisionReason::SessionCloseUnverified)
+        );
+        let (low_edge, selected) = evaluate_horizons(
+            &paper.policy,
+            &context,
+            true,
+            paper.verified_session_close_ns,
+            paper.policy.quantity,
+            &paper.fees,
+            &SyntheticLowEdge,
+        );
+        assert!(selected.is_none());
+        assert!(
+            low_edge
+                .iter()
+                .all(|row| row.reason == DecisionReason::CostExceedsEdge)
+        );
+        let mut unverified = context.clone();
+        unverified.market.quality.source_time_unverified = true;
+        let (blocked, selected) = evaluate_horizons(
+            &paper.policy,
+            &unverified,
+            true,
+            paper.verified_session_close_ns,
+            paper.policy.quantity,
+            &paper.fees,
+            &SyntheticModel,
+        );
+        assert!(selected.is_none());
+        assert!(
+            blocked
+                .iter()
+                .all(|row| row.reason == DecisionReason::DataQuality)
+        );
+        let no_approval = paper.on_market_record(1, &first.0, &first.1).unwrap();
+        assert_eq!(
+            no_approval.recent_decisions[0].reason,
+            DecisionReason::ApprovalRequired
+        );
+        assert!(no_approval.orders.is_empty());
+        assert_eq!(no_approval.scanner.len(), 3);
+        paper
+            .set_stock_approval("1333", true, base + 1_000_000_000)
+            .unwrap();
+        let mut second = approved_sample(2, 2);
+        second
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .market
+            .quality
+            .cross_feed_uncertain = false;
+        second
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .features
+            .quality
+            .cross_feed_uncertain = false;
+        let entered = paper.on_market_record(2, &second.0, &second.1).unwrap();
+        assert_eq!(entered.recent_decisions[1].action, DecisionAction::Buy);
+        assert_eq!(
+            entered.recent_decisions[1].candidate.horizon_ns,
+            1_800_000_000_000
+        );
+        assert_eq!(entered.orders[0].status, PaperOrderStatus::PaperWorking);
+        let mut third = approved_sample(3, 3);
+        third
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .market
+            .quality
+            .cross_feed_uncertain = false;
+        third
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .features
+            .quality
+            .cross_feed_uncertain = false;
+        let filled = paper.on_market_record(3, &third.0, &third.1).unwrap();
+        assert_eq!(filled.recent_fills[0].side, OrderSide::Buy);
+        assert_eq!(
+            filled.portfolio.positions.values().next().unwrap().quantity,
+            1
+        );
+        let mut fourth = approved_sample(4, 1_805);
+        fourth
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .market
+            .quality
+            .cross_feed_uncertain = false;
+        fourth
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .features
+            .quality
+            .cross_feed_uncertain = false;
+        let exit = paper.on_market_record(4, &fourth.0, &fourth.1).unwrap();
+        assert_eq!(
+            exit.recent_decisions.last().unwrap().reason,
+            DecisionReason::HorizonExpired
+        );
+        assert_eq!(
+            exit.recent_decisions.last().unwrap().action,
+            DecisionAction::SellExit
+        );
+        let mut fifth = approved_sample(5, 1_806);
+        fifth
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .market
+            .quality
+            .cross_feed_uncertain = false;
+        fifth
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .features
+            .quality
+            .cross_feed_uncertain = false;
+        let closed = paper.on_market_record(5, &fifth.0, &fifth.1).unwrap();
+        assert!(closed.portfolio.positions.is_empty());
+        assert_eq!(closed.recent_fills.last().unwrap().side, OrderSide::Sell);
+        assert_eq!(
+            closed.recent_outcomes[0].1.exit_reason,
+            Some(DecisionReason::HorizonExpired)
+        );
+        paper
+            .halt(5, DecisionReason::Halted, base + 1_806_000_000_000)
+            .unwrap();
+        let mut sixth = approved_sample(6, 1_807);
+        sixth
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .market
+            .quality
+            .cross_feed_uncertain = false;
+        sixth
+            .1
+            .features
+            .as_mut()
+            .unwrap()
+            .features
+            .quality
+            .cross_feed_uncertain = false;
+        let halted = paper.on_market_record(6, &sixth.0, &sixth.1).unwrap();
+        assert_eq!(
+            halted.recent_decisions.last().unwrap().action,
+            DecisionAction::NoTrade
+        );
+        assert_eq!(
+            halted.recent_decisions.last().unwrap().reason,
+            DecisionReason::Halted,
+            "{:?}",
+            halted.scanner,
+        );
+        paper.close().unwrap();
+        let mut ledger = PaperLedgerReader::open(&path).unwrap();
+        let mut order_statuses = Vec::new();
+        let mut saw_fill = false;
+        while let Some(record) = ledger.next_record().unwrap() {
+            match record.event {
+                LedgerEvent::Order(event) if event.source_record_index == 2 => {
+                    order_statuses.push(event.status);
+                }
+                LedgerEvent::Fill(_) => saw_fill = true,
+                _ => {}
+            }
+        }
+        assert_eq!(
+            order_statuses,
+            vec![
+                PaperOrderStatus::Created,
+                PaperOrderStatus::RiskApproved,
+                PaperOrderStatus::PaperSubmitted,
+                PaperOrderStatus::PaperAcknowledged,
+                PaperOrderStatus::PaperWorking,
+            ]
+        );
+        assert!(saw_fill);
+        let mut replayed = PaperEngine::open(
+            &path,
+            PolicyConfig::default(),
+            RiskConfig::default(),
+            FeeSchedule::dhan_delivery_research(),
+            PolicyMode::ApprovedMultiHorizon,
+        )
+        .unwrap();
+        for index in 1..=6 {
+            let (record, output) = sample(index, index as i64, 100_000_000_000, 5, true);
+            replayed.on_market_record(index, &record, &output).unwrap();
+        }
+        assert!(
+            replayed
+                .snapshot()
+                .approved_security_ids
+                .contains(&"1333".to_string())
+        );
+        assert_eq!(replayed.snapshot().portfolio, halted.portfolio);
     }
 
     #[test]

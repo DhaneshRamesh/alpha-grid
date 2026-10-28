@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -85,3 +86,36 @@ def test_failed_publish_does_not_leave_partial_dataset(tmp_path: Path) -> None:
         write(rows, tmp_path / "bad")
     assert not (tmp_path / "bad").exists()
     assert not list(tmp_path.glob(".bad.*.partial"))
+
+
+def test_interrupted_publication_retries_from_original_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    raw = tmp_path / "synthetic.raw"
+    raw.write_bytes(b"synthetic archive\n\x00original bytes")
+    raw_root = tmp_path / "raw"
+    with monkeypatch.context() as fault:
+
+        def interrupted_link(*_: object) -> None:
+            raise OSError("interrupted raw publication")
+
+        fault.setattr(os, "link", interrupted_link)
+        with pytest.raises(OSError, match="interrupted raw publication"):
+            stage_raw_file(raw, raw_root, "NSE_UDIFF_CM")
+    assert not list(raw_root.rglob("*.partial"))
+    staged = stage_raw_file(raw, raw_root, "NSE_UDIFF_CM")
+    assert staged.read_bytes() == raw.read_bytes()
+
+    output = tmp_path / "published"
+    with monkeypatch.context() as fault:
+
+        def interrupted_replace(*_: object) -> None:
+            raise OSError("interrupted dataset publication")
+
+        fault.setattr(os, "replace", interrupted_replace)
+        with pytest.raises(OSError, match="interrupted dataset publication"):
+            write([bar(date(2025, 1, 2))], output)
+    assert not output.exists()
+    assert not list(tmp_path.glob(".published.*.partial"))
+    manifest = write([bar(date(2025, 1, 2))], output)
+    assert verify_dataset(output) == manifest

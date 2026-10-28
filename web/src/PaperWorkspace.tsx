@@ -1,4 +1,5 @@
-import { amount, latency, price, time } from "./format";
+import { useState } from "react";
+import { amount, dateTime, latency, price, time } from "./format";
 import type {
   WireEngineSnapshot,
   WirePaperDecision,
@@ -119,7 +120,31 @@ export default function PaperWorkspace({
   connection: Connection;
   instrumentKey: string | null;
 }) {
+  const [approvalFeedback, setApprovalFeedback] = useState("");
+  const [busyId, setBusyId] = useState<string | null>(null);
   const paper: WirePaperSnapshot | null | undefined = snapshot?.paper;
+  async function changeApproval(securityId: string, approved: boolean) {
+    setBusyId(securityId);
+    try {
+      const response = await fetch("/api/paper/approval", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ security_id: securityId, approved }),
+      });
+      setApprovalFeedback(
+        response.ok
+          ? "Approval recorded in the QP01 paper ledger. Live trading remains disabled."
+          : `Approval was not accepted (${response.status}).`,
+      );
+    } catch {
+      setApprovalFeedback(
+        "Approval service unavailable; no change was recorded.",
+      );
+    } finally {
+      setBusyId(null);
+    }
+  }
   if (!paper)
     return (
       <>
@@ -130,15 +155,43 @@ export default function PaperWorkspace({
               Paper research<span className="heading-dot">.</span>
             </h1>
             <p>
-              Start the local paper replay to see simulated decisions and
-              accounting. There is no broker connection.
+              Decisions and simulated accounting appear only after verified Dhan
+              observations and an eligible research policy are available.
             </p>
           </div>
         </div>
         <div className="panel">
           <div className="empty">
-            Paper engine not active. The DATA_ONLY cockpit remains available.
+            Paper engine not active. DATA UNAVAILABLE / NO TRADE; no validated
+            stock candidates or decision records are available.
           </div>
+          {snapshot?.instruments.map(({ instrument }) => {
+            const approved = snapshot.approved_security_ids.includes(
+              instrument.security_id,
+            );
+            return (
+              <div className="paper-decision" key={instrument.key}>
+                <strong>{instrument.symbol ?? instrument.security_id}</strong>{" "}
+                <span>
+                  {approved
+                    ? "Approved for future paper research"
+                    : "Not approved"}
+                </span>{" "}
+                <button
+                  disabled={
+                    connection !== "CONNECTED" ||
+                    busyId === instrument.security_id
+                  }
+                  onClick={() =>
+                    void changeApproval(instrument.security_id, !approved)
+                  }
+                >
+                  {approved ? "Revoke approval" : "Approve stock"}
+                </button>
+              </div>
+            );
+          })}
+          {approvalFeedback && <p role="status">{approvalFeedback}</p>}
         </div>
       </>
     );
@@ -146,12 +199,6 @@ export default function PaperWorkspace({
   const selected = paper.recent_decisions.filter(
     (d) => !instrumentKey || d.instrument.key === instrumentKey,
   );
-  const actionable = selected
-    .filter(
-      (d) => d.candidate_action === "Buy" || d.candidate_action === "SellExit",
-    )
-    .slice(-8)
-    .reverse();
   const latest = selected.at(-1);
   const noTradeCount = selected.filter((d) => d.action === "NoTrade").length;
   const unrealized = p.positions.every((v) => v.unrealized_pnl_nanos != null)
@@ -169,11 +216,59 @@ export default function PaperWorkspace({
         "UnknownUnresolved",
       ].includes(o.status),
   );
+  const scanner = paper.scanner ?? [];
+  const grouped = [
+    ...new Map(
+      scanner.map((row) => [row.instrument.key, row.instrument]),
+    ).values(),
+  ];
+  const bestEdge = (key: string) =>
+    scanner
+      .filter(
+        (row) =>
+          row.instrument.key === key && row.reason === "HypothesisSignal",
+      )
+      .reduce<bigint | null>((best, row) => {
+        const edge =
+          row.robust_net_edge_nanos == null
+            ? null
+            : BigInt(row.robust_net_edge_nanos);
+        return edge == null ? best : best == null || edge > best ? edge : best;
+      }, null);
+  grouped.sort((a, b) => {
+    const left = bestEdge(a.key);
+    const right = bestEdge(b.key);
+    if (left == null || right == null)
+      return left == null
+        ? right == null
+          ? a.key.localeCompare(b.key)
+          : 1
+        : -1;
+    return left === right ? a.key.localeCompare(b.key) : left > right ? -1 : 1;
+  });
+  async function haltPaper() {
+    try {
+      const response = await fetch("/api/demo/control", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "halt_paper" }),
+      });
+      setApprovalFeedback(
+        response.ok
+          ? "Paper halt queued for the QP01 ledger; await HALTED status before relying on it."
+          : `Paper halt was not accepted (${response.status}).`,
+      );
+    } catch {
+      setApprovalFeedback(
+        "Paper halt service unavailable; status is unchanged.",
+      );
+    }
+  }
   return (
     <>
       <div className="page-heading paper-heading">
         <div>
-          <div className="eyebrow">PAPER / SYNTHETIC / REPLAY</div>
+          <div className="eyebrow">PAPER RESEARCH / SIMULATED FILLS</div>
           <h1>
             Decision &amp; experience<span className="heading-dot">.</span>
           </h1>
@@ -190,12 +285,97 @@ export default function PaperWorkspace({
               ? "Paper ledger durable"
               : "Paper ledger failure"}
           </small>
+          {paper.mode === "PAPER_REPLAY_APPROVED_RESEARCH" && !p.halted && (
+            <button onClick={() => void haltPaper()}>Halt paper entries</button>
+          )}
         </div>
       </div>
       <div className="paper-warning">
-        SYNTHETIC REPLAY · UNCALIBRATED SIGNAL · PROVISIONAL FEES · REAL
-        PROFITABILITY UNKNOWN
+        PAPER FILLS SIMULATED · MODEL ELIGIBILITY UNVERIFIED · PROVISIONAL FEES
+        · REAL PROFITABILITY UNKNOWN
       </div>
+      <Block
+        kicker="STOCK SCANNER / APPROVAL"
+        title="Approved research candidates"
+      >
+        <div className="paper-foot">
+          {paper.mode}. Ranked only when a calibrated, cost-adjusted horizon has
+          positive robust edge. Source times come from QJ01 receive timestamps;
+          model as-of time is unavailable. Candle prices are never treated as
+          attainable fills.
+        </div>
+        {grouped.length ? (
+          grouped.map((instrument) => {
+            const approved =
+              snapshot?.approved_security_ids.includes(
+                instrument.security_id,
+              ) ?? false;
+            return (
+              <div className="paper-decision" key={instrument.key}>
+                <div className="paper-decision-top">
+                  <strong>{instrument.symbol ?? instrument.security_id}</strong>
+                  <span>
+                    {approved
+                      ? "APPROVED FOR PAPER EVALUATION"
+                      : "APPROVAL REQUIRED"}
+                  </span>
+                  {paper.mode === "PAPER_REPLAY_APPROVED_RESEARCH" && (
+                    <button
+                      disabled={busyId === instrument.security_id}
+                      onClick={() =>
+                        void changeApproval(instrument.security_id, !approved)
+                      }
+                    >
+                      {approved ? "Revoke approval" : "Approve stock"}
+                    </button>
+                  )}
+                </div>
+                <div className="paper-table-wrap">
+                  <table className="paper-table">
+                    <thead>
+                      <tr>
+                        <th>Horizon</th>
+                        <th>Decision</th>
+                        <th>Robust net edge</th>
+                        <th>Adverse cost</th>
+                        <th>Uncertainty</th>
+                        <th>Source time</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scanner
+                        .filter((row) => row.instrument.key === instrument.key)
+                        .map((row) => (
+                          <tr key={row.horizon}>
+                            <td>{row.horizon}</td>
+                            <td>
+                              {row.reason === "HypothesisSignal"
+                                ? "PRE-RISK PAPER CANDIDATE"
+                                : `NO TRADE · ${row.reason}`}
+                            </td>
+                            <td>{price(row.robust_net_edge_nanos)}</td>
+                            <td>{price(row.adverse_cost_nanos)}</td>
+                            <td>{price(row.uncertainty_nanos)}</td>
+                            <td>{dateTime(row.source_receive_timestamp_ns)}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            );
+          })
+        ) : (
+          <div className="empty">
+            No validated scanner observations yet. NO TRADE is the default.
+          </div>
+        )}
+        {approvalFeedback && (
+          <div className="paper-foot" role="status">
+            {approvalFeedback}
+          </div>
+        )}
+      </Block>
       <div className="metric-grid paper-metrics">
         <Card
           label="STARTING CAPITAL"
@@ -225,13 +405,18 @@ export default function PaperWorkspace({
           note={`${p.positions.length} open positions`}
         />
         <Card
+          label="RISK UTILIZATION"
+          value={`${Number((BigInt(p.exposure_nanos) * 10_000n) / BigInt(paper.risk_limits.max_deployed_nanos)) / 100}%`}
+          note="Of existing maximum deployed capital"
+        />
+        <Card
           label="FEES / MAX DRAWDOWN"
           value={`${price(p.fees_paid_nanos)} / ${price(p.max_drawdown_nanos)}`}
           note="Modelled / marked equity"
         />
       </div>
       <div className="paper-grid">
-        <Block kicker="PORTFOLIO / 01" title="Open paper positions">
+        <Block kicker="TRADES & POSITIONS / 01" title="Open paper positions">
           {p.positions.length ? (
             <div className="paper-table-wrap">
               <table className="paper-table">
@@ -353,6 +538,37 @@ export default function PaperWorkspace({
             most 10% of the current top-level quantity. Queue position is
             unknown.
           </div>
+          {paper.recent_fills.length > 0 && (
+            <div className="paper-table-wrap">
+              <table className="paper-table">
+                <thead>
+                  <tr>
+                    <th>Simulated paper fill</th>
+                    <th>Price</th>
+                    <th>Actual modelled fee</th>
+                    <th>Assumptions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paper.recent_fills
+                    .slice(-10)
+                    .reverse()
+                    .map((fill) => (
+                      <tr key={fill.fill_id}>
+                        <td>
+                          {fill.side}{" "}
+                          {fill.instrument.symbol ??
+                            fill.instrument.security_id}
+                        </td>
+                        <td>{price(fill.price_nanos)}</td>
+                        <td>{price(fill.fees_nanos)}</td>
+                        <td>{fill.assumptions.join("; ")}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </Block>
         <Block kicker="RISK CONTROL / 04" title="Hard limits">
           <div className="paper-risk">
@@ -407,18 +623,20 @@ export default function PaperWorkspace({
         </Block>
       </div>
       <div className="paper-grid">
-        <Block kicker="EXPERIENCE MEMORY / 05" title="Decisions & outcomes">
+        <Block kicker="EVIDENCE / AUDIT / 05" title="Decisions & abstentions">
           <div className="paper-summary">
             <span>{selected.length} decisions in bounded view</span>
             <span>{paper.recent_outcomes.length} completed paper outcomes</span>
           </div>
-          {actionable.length ? (
-            actionable.map((decision) => (
-              <DecisionRow key={decision.decision_id} decision={decision} />
-            ))
+          {selected.length ? (
+            [...selected]
+              .reverse()
+              .map((decision) => (
+                <DecisionRow key={decision.decision_id} decision={decision} />
+              ))
           ) : (
             <div className="empty">
-              No qualifying hypothesis in the retained window.
+              No paper decisions in the retained window.
             </div>
           )}
           <div className="paper-foot">

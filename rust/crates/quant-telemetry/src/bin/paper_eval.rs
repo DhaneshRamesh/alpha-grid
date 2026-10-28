@@ -83,6 +83,7 @@ fn p999(values: &[u64]) -> Option<u64> {
 
 fn event_type(event: &MarketEvent) -> &'static str {
     match event {
+        MarketEvent::RawStandardFrame(_) => "raw_standard_frame",
         MarketEvent::Depth(_) => "depth",
         MarketEvent::DepthSide(_) => "depth_side",
         MarketEvent::Trade(_) => "trade",
@@ -250,6 +251,12 @@ fn run_policy(
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if !cfg!(test) {
+        return Err(
+            "DATA UNAVAILABLE / NO TRADE: paper evaluation requires verified Dhan QJ01 provenance"
+                .into(),
+        );
+    }
     let args: Vec<String> = std::env::args().collect();
     if args.len() != 5 || args[1] != "--journal" || args[3] != "--output-dir" {
         return Err("usage: paper_eval --journal PATH --output-dir NEW_DIRECTORY".into());

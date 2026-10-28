@@ -1,5 +1,14 @@
 # Dhan-only first historical pilot (DATA_ONLY)
 
+Native Windows persistence was tested on NTFS with synthetic response bytes
+only. The save path checks real directory and file DACLs, including inherited
+grants, before storing bytes; broad or unverifiable access is rejected. File
+flushes and atomic link/replace publication work on the tested filesystem,
+and an interrupted publication was recovered in a separate process. Native
+Python cannot `fsync` a Windows directory, so publication after sudden power
+loss is not established. These local tests do not authorize another October
+request or establish authentic market evidence.
+
 Status on 2026-10-19: the operator ran the authorized read-only pilot.
 The received RELIANCE response was quarantined, then recovered offline into
 the raw checkpoint: 1,800 one-minute candles, SHA-256
@@ -8,7 +17,27 @@ NSE identity and CAS applicability are directly evidenced for October 15–16;
 the historical Dhan linkage is inferred. Earlier dates, timestamp meaning
 and adjustments remain unverified. No model is trained or promoted.
 
-## Operator activation
+## Current workflow boundary (2026-10-22)
+
+DhanHQ `/charts/intraday` is the primary source for this pilot's 1-minute
+NSE cash-equity OHLCV. The authenticated October 12–16 RELIANCE request was
+already executed on October 19; this authorization is consumed. Recover and
+verify its original saved bytes if available. Do not repeat the request or
+extend the instrument, dates, cadence or subscription from this runbook.
+
+The Dhan instrument master establishes **current** security identity. The
+scoped registry requires separately dated evidence for historical identity.
+The compact NSE calendar retains holiday and closing-auction checks; registry
+and quality checks retain corporate-action flags. The separate local NSE
+daily-price importer is not a prerequisite or an alternate minute-candle
+source for this pilot. Preserve original chart
+bytes, SHA-256, request and retrieval metadata before normalization. Report
+raw integrity, conditional exploratory inspection and causal eligibility as
+distinct results. Dhan's epoch timestamps alone establish neither bar-start
+meaning nor completion time, so the existing forward-observation gate remains
+closed until independent, dataset-bound timing evidence exists.
+
+## Historical operator activation (October 2026; do not repeat)
 
 1. Sign in at [Dhan Web](https://web.dhan.co/) yourself. Go to **My Profile
    → DhanHQ Trading APIs**. Dhan's [support page](https://dhan.co/support/platforms/dhanhq-api/how-can-i-access-live-market-data-through-dhan/)
@@ -281,3 +310,31 @@ missing sessions, processing cost and subscription charges must be
 re-estimated after the pilot. Valid saved windows are reused. A future
 read-only live-depth capture would reuse the Rust standard and 20-level
 decoders; no live capture, Utho change or order functionality starts here.
+
+## Separate October 15-16 attempt on 2026-10-24
+
+The owner separately approved exactly one new authenticated read-only
+RELIANCE (2885) one-minute request for `[2026-10-15, 2026-10-17)`, with no
+retries, and confirmed historical-data access. The older October 12-16 request
+remains consumed; its missing original response was not reconstructed.
+
+The current public Dhan instrument master was saved as exact bytes at
+`data/instruments/dhan-scrip-master-2026-10-24.csv` (27,210,972 bytes,
+SHA-256 `56b51dfbc372ab682f861fc7b360dc2176aaa9aead2c79e4946ce004db4b576a`).
+Its dated manifest records retrieval at 06:04:28 UTC, and the existing
+validator uniquely identified current RELIANCE as security ID 2885. It does
+not establish historical Dhan identity on October 15-16.
+
+The first pilot invocation stopped at the native NTFS private ACL check before
+sending a request: the sandbox-owned directory was inaccessible to the
+network-enabled user's process. A separate private directory under
+`data/historical/raw-dhan-2026-10-24` passed the same, unmodified validator.
+The single POST to `https://api.dhan.co/v2/charts/intraday` then returned HTTP
+401. The 140 original error-response bytes and SHA-256
+`f8ba2d257a5d624e8c33f4ab842ca7feb661ffc826a5d2b4b1f46e3d70942c63`
+are preserved in its `.quarantine` directory with request, receipt time and
+HTTP status. Exact read-back, hash, private DACL and token exclusion passed.
+No retry was made. No successful candle checkpoint, lake, movement
+distribution, causal sample or paper decision resulted. The new request is
+consumed; HTTP 401 alone does not identify whether the token, entitlement or
+another authentication prerequisite failed.

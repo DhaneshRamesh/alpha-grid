@@ -4,11 +4,32 @@ use crate::{
     Commit, DurabilityPolicy, JournalReader, JournalRecord, JournalWriter, encoded_record_bytes,
 };
 use serde::{Deserialize, Serialize};
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    #[cfg(windows)]
+    {
+        // Rust cannot open an NTFS directory for sync_all. File sync and
+        // atomic rename remain required; power-loss directory durability is
+        // not established on Windows.
+        if !fs::metadata(path)?.is_dir() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "not a directory",
+            ));
+        }
+        Ok(())
+    }
+    #[cfg(not(windows))]
+    {
+        File::open(path)?.sync_all()
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct SegmentConfig {
@@ -94,10 +115,11 @@ fn save_manifest(root: &Path, manifest: &Manifest) -> io::Result<()> {
     file.write_all(b"\n")?;
     file.sync_all()?;
     fs::rename(temp, final_path)?;
-    File::open(root)?.sync_all()?;
+    sync_directory(root)?;
     Ok(())
 }
 
+#[cfg(unix)]
 fn disk_free(root: &Path) -> io::Result<u64> {
     let path = CString::new(root.as_os_str().as_encoded_bytes())
         .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "path contains NUL"))?;
@@ -108,6 +130,42 @@ fn disk_free(root: &Path) -> io::Result<u64> {
     let stats = unsafe { stats.assume_init() };
     let bytes = u128::from(stats.f_bavail).saturating_mul(u128::from(stats.f_frsize));
     Ok(u64::try_from(bytes).unwrap_or(u64::MAX))
+}
+
+#[cfg(windows)]
+fn disk_free(root: &Path) -> io::Result<u64> {
+    use std::os::windows::ffi::OsStrExt;
+    #[link(name = "Kernel32")]
+    unsafe extern "system" {
+        fn GetDiskFreeSpaceExW(
+            path: *const u16,
+            available: *mut u64,
+            total: *mut u64,
+            free: *mut u64,
+        ) -> i32;
+    }
+    let wide: Vec<u16> = root.as_os_str().encode_wide().chain(Some(0)).collect();
+    let mut available = 0_u64;
+    if unsafe {
+        GetDiskFreeSpaceExW(
+            wide.as_ptr(),
+            &mut available,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    } == 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(available)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn disk_free(_root: &Path) -> io::Result<u64> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "segmented journal free-space checks require Unix",
+    ))
 }
 
 pub struct SegmentedJournal {
@@ -128,7 +186,7 @@ impl SegmentedJournal {
         fs::create_dir_all(root)?;
         if !root_existed {
             if let Some(parent) = root.parent().filter(|part| !part.as_os_str().is_empty()) {
-                File::open(parent)?.sync_all()?;
+                sync_directory(parent)?;
             }
         }
         let path = root.join("manifest.json");
@@ -161,7 +219,7 @@ impl SegmentedJournal {
         let index = manifest.sealed.len() as u64;
         reject_orphans(root, index)?;
         let active = JournalWriter::open(&segment_path(root, index), config.durability)?;
-        File::open(root)?.sync_all()?;
+        sync_directory(root)?;
         let recovered_tail_bytes = active.recovered_tail_bytes();
         Ok(Self {
             root: root.into(),
@@ -251,7 +309,7 @@ impl SegmentedJournal {
         self.sealed_bytes += bytes;
         self.active =
             JournalWriter::open(&segment_path(&self.root, index + 1), self.config.durability)?;
-        File::open(&self.root)?.sync_all()?;
+        sync_directory(&self.root)?;
         self.opened_at = Instant::now();
         self.poisoned = false;
         Ok(())
