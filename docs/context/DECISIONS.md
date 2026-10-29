@@ -1437,3 +1437,19 @@ Application suites were not run because their toolchains are absent here.
   bounded 60-second diagnostic caller would require the existing 8765 gateway
   to stop cleanly first. Context-index refresh remained blocked by the host's
   Restricted PowerShell execution policy.
+
+### macOS offline development readiness (2026-10-29)
+
+- Scope: review commit `888c8e7`; keep Dhan credentials and the private archive
+  on their Windows host. The Mac path starts only the existing localhost
+  services in DATA_ONLY / NO TRADE and cannot open a Dhan feed or account sync.
+- The new launcher checks a user-owned POSIX-private development directory and
+  existing approval/settings files before startup; it does not copy or
+  reinterpret QJ01/QP01 evidence from Windows. Windows NTFS ACL checks and the
+  online launcher remain unchanged.
+- Ubuntu CI previously passed on main commit `afed781` (run 39289010280), but
+  the review branch had no run before this change. The workflow now includes a
+  macOS runner. Actual Mac results must be read from that run before claiming
+  validation.
+- The required context-index check was attempted and blocked by the host's
+  Restricted PowerShell execution policy. No policy change was made.

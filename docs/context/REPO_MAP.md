@@ -1,5 +1,22 @@
 # Alpha Grid context map
 
+## macOS offline development path (2026-10-29)
+
+`tools/start-cockpit-macos.sh` starts the existing Rust gateway, Node account
+service, and Vite cockpit on 8765/8767/5173 in offline DATA_ONLY / NO TRADE
+mode. It requires a local Python 3.12 environment, a built `telemetry_local`,
+installed web dependencies, and Node 24. It removes Dhan credentials from the
+child environments and does not load the Windows private archive. Mac-local
+QP01 approvals and settings use the current user's private
+`~/Library/Application Support/AlphaGrid/offline-dev` directory, with owner and
+POSIX mode checks. The existing Windows launcher remains the online path.
+
+`.github/workflows/validate.yml` now runs the same locked Python, Rust, and
+React validation on Ubuntu and macOS. The prior review commit `888c8e7` had no
+CI run on its branch because the workflow listens only to main pushes and pull
+requests. A successful older main-branch Ubuntu run is not evidence for this
+review commit or for macOS.
+
 Inspected 2026-10-20 (Asia/Calcutta), against application HEAD `afed781`.
 Scope: tracked repository, architecture documentation, manifests, CI, selected
 implementation paths and test inventory. This is a navigation map, not a

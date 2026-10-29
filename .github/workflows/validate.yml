@@ -10,9 +10,15 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Check macOS offline launcher syntax
+        run: bash -n tools/start-cockpit-macos.sh
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.12'
