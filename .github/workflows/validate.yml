@@ -38,6 +38,8 @@ jobs:
           uv sync --extra dev --locked --python python3.12
       - name: Python tests and static checks
         run: |
+          umask 077
+          mkdir -p data/.secrets
           uv run --locked --extra dev python -m pytest -q
           uv run --locked --extra dev ruff check .
           uv run --locked --extra dev ruff format --check .
