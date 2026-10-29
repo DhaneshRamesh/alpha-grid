@@ -160,9 +160,9 @@ export interface WireInstrument {
   [k: string]: unknown;
 }
 export interface WireMarket {
-  cumulative_traded_volume?: string | null;
   best_ask_price_nanos?: string | null;
   best_bid_price_nanos?: string | null;
+  cumulative_traded_volume?: string | null;
   depth_receive_timestamp_ns?: string | null;
   freshness: string;
   incremental_volume?: string | null;

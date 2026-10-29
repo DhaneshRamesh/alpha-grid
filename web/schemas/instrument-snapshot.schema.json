@@ -295,12 +295,6 @@
     },
     "WireMarket": {
       "properties": {
-        "cumulative_traded_volume": {
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "best_ask_price_nanos": {
           "type": [
             "string",
@@ -308,6 +302,12 @@
           ]
         },
         "best_bid_price_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cumulative_traded_volume": {
           "type": [
             "string",
             "null"
