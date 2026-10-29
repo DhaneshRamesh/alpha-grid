@@ -54,7 +54,9 @@ describe("offline research status", () => {
       ),
     );
     render(<ResearchWorkspace />);
-    expect(await screen.findByText(/DATA UNAVAILABLE \/ NO TRADE/)).toBeTruthy();
+    expect(
+      await screen.findByText(/DATA UNAVAILABLE \/ NO TRADE/),
+    ).toBeTruthy();
     expect(screen.queryByText("5 instruments")).toBeNull();
   });
 
@@ -82,7 +84,9 @@ describe("offline research status", () => {
       }),
     );
     render(<ResearchWorkspace />);
-    expect(await screen.findByText(/Verified Dhan research evidence is/)).toBeTruthy();
+    expect(
+      await screen.findByText(/Verified Dhan research evidence is/),
+    ).toBeTruthy();
     expect(screen.queryByText("insufficient independent sessions")).toBeNull();
     expect(screen.getAllByText(/N\/A/).length).toBeGreaterThan(1);
     expect(screen.queryByRole("img", { name: "Calibration curve" })).toBeNull();

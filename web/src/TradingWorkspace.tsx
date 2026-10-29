@@ -286,19 +286,23 @@ export function TradeDesk({
           {historical?.status === "AVAILABLE" && historical.replay && (
             <div>
               <p>
-                HISTORICAL REPLAY · {historical.replay.processed_bars} / {historical.replay.total_bars}
-                {" "}source-integrity-verified archive rows processed. Latest archived session {historical.replay.latest_session};
-                {" "}last source timestamp {dateTime(historical.replay.latest_source_timestamp_ns)}.
+                HISTORICAL REPLAY · {historical.replay.processed_bars} /{" "}
+                {historical.replay.total_bars} source-integrity-verified archive
+                rows processed. Latest archived session{" "}
+                {historical.replay.latest_session}; last source timestamp{" "}
+                {dateTime(historical.replay.latest_source_timestamp_ns)}.
               </p>
               <p>
-                {historical.replay.no_trade_evaluations} NO TRADE evaluations ·
-                {" "}paper orders {historical.replay.paper_orders} · fills {historical.replay.paper_fills}.
-                {" "}Reasons: {historical.replay.reasons.join(", ")}.
+                {historical.replay.no_trade_evaluations} NO TRADE evaluations ·{" "}
+                paper orders {historical.replay.paper_orders} · fills{" "}
+                {historical.replay.paper_fills}. Reasons:{" "}
+                {historical.replay.reasons.join(", ")}.
               </p>
               <p>
-                Retrospective price/volume baseline: {historical.replay.retrospective_baseline_samples}
-                {" "}rows. Outcomes withheld; net edge and executable costs unavailable.
-                {" "}Historical candles are not live quotes or attainable fills.
+                Retrospective price/volume baseline:{" "}
+                {historical.replay.retrospective_baseline_samples} rows.
+                Outcomes withheld; net edge and executable costs unavailable.{" "}
+                Historical candles are not live quotes or attainable fills.
               </p>
             </div>
           )}

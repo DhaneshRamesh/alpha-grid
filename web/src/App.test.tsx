@@ -44,31 +44,53 @@ describe("trading workspace", () => {
       retrieved_at: "2026-10-16T16:00:00Z",
       coverage: { "2026-10-16": 1 },
       causal_eligibility: "BLOCKED",
-      bars: [{
-        timestamp_ns: "1792143840000000000",
-        open_nanos: "100", high_nanos: "101", low_nanos: "99",
-        close_nanos: "100", volume: "10",
-      }],
+      bars: [
+        {
+          timestamp_ns: "1792143840000000000",
+          open_nanos: "100",
+          high_nanos: "101",
+          low_nanos: "99",
+          close_nanos: "100",
+          volume: "10",
+        },
+      ],
       replay: {
-        mode: "HISTORICAL_REPLAY", status: "COMPLETE_NO_TRADE",
-        source_sha256: "fixture-only", processed_bars: 1, total_bars: 1,
+        mode: "HISTORICAL_REPLAY",
+        status: "COMPLETE_NO_TRADE",
+        source_sha256: "fixture-only",
+        processed_bars: 1,
+        total_bars: 1,
         latest_session: "2026-10-16",
         latest_source_timestamp_ns: "1792143840000000000",
-        missing_source_minutes: 0, retrospective_baseline_samples: 0,
+        missing_source_minutes: 0,
+        retrospective_baseline_samples: 0,
         latest_retrospective_baseline: null,
         baseline_eligibility: "DESCRIPTIVE_ONLY",
-        outcomes: "WITHHELD_UNVERIFIED_COMPLETION", decision: "NO_TRADE",
-        no_trade_evaluations: 1, reasons: ["CANDLE_COMPLETION_UNVERIFIED"],
-        paper_eligible: 0, paper_orders: 0, paper_fills: 0,
-        qp01_records_written: 0, broker_orders: "DISABLED",
+        outcomes: "WITHHELD_UNVERIFIED_COMPLETION",
+        decision: "NO_TRADE",
+        no_trade_evaluations: 1,
+        reasons: ["CANDLE_COMPLETION_UNVERIFIED"],
+        paper_eligible: 0,
+        paper_orders: 0,
+        paper_fills: 0,
+        qp01_records_written: 0,
+        broker_orders: "DISABLED",
       },
     };
-    render(<TradeDesk onSettings={() => {}} engineSnapshot={null}
-      engineConnection="DISCONNECTED" historical={historical} />);
+    render(
+      <TradeDesk
+        onSettings={() => {}}
+        engineSnapshot={null}
+        engineConnection="DISCONNECTED"
+        historical={historical}
+      />,
+    );
     expect(screen.getByText(/HISTORICAL REPLAY/)).toBeTruthy();
     expect(screen.getByText(/1 NO TRADE evaluations/)).toBeTruthy();
     expect(screen.getByText(/paper orders 0/)).toBeTruthy();
-    expect(screen.getByText(/not live quotes or attainable fills/)).toBeTruthy();
+    expect(
+      screen.getByText(/not live quotes or attainable fills/),
+    ).toBeTruthy();
   });
 
   it("starts with unavailable Dhan data and no fictional candidate", async () => {

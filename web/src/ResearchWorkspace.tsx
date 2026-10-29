@@ -160,8 +160,8 @@ export default function ResearchWorkspace() {
         </div>
       </div>
       <div className="paper-warning">
-        DATA UNAVAILABLE / NO TRADE · NO VALIDATED MARKET ALPHA ·
-        NO LIVE ORDERS · PAPER POLICY UNCHANGED
+        DATA UNAVAILABLE / NO TRADE · NO VALIDATED MARKET ALPHA · NO LIVE ORDERS
+        · PAPER POLICY UNCHANGED
       </div>
       <section className="panel acquisition-panel">
         <div className="panel-head">

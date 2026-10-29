@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 # Offline development only. No Dhan credentials, market socket, or account refresh.
 set -euo pipefail
+if [[ $# -gt 1 || ( $# -eq 1 && "$1" != --no-browser ) ]]; then
+  echo 'Usage: bash tools/start-cockpit-macos.sh [--no-browser]' >&2
+  exit 2
+fi
 if [[ "$(uname -s)" != Darwin ]]; then
   echo 'This offline launcher requires macOS.' >&2
   exit 1
@@ -19,6 +23,9 @@ done
 
 python="$root/.venv/bin/python"
 gateway="$root/rust/target/debug/telemetry_local"
+if [[ ! -x "$gateway" ]]; then
+  gateway="$root/rust/target/release/telemetry_local"
+fi
 vite="$root/web/node_modules/vite/bin/vite.js"
 [[ -x "$python" && -x "$gateway" && -f "$vite" ]] || {
   echo 'Build the locked Python, Rust, and web dependencies before offline startup.' >&2
@@ -98,7 +105,9 @@ for attempt in {1..40}; do
      curl --silent --fail http://127.0.0.1:8767/trade/status >/dev/null; then
     echo 'Alpha Grid offline development: DATA_ONLY / NO TRADE.'
     echo 'Press Ctrl+C to stop these three services.'
-    open "http://127.0.0.1:5173/#bootstrap=$bootstrap"
+    if [[ "${1:-}" != --no-browser ]]; then
+      open "http://127.0.0.1:5173/#bootstrap=$bootstrap"
+    fi
     bootstrap=''
     while true; do
       for pid in "${pids[@]}"; do

@@ -102,7 +102,9 @@ describe("telemetry recovery", () => {
     const prompt = vi.spyOn(window, "prompt").mockReturnValue("unused");
     const fetchMock = vi.fn().mockResolvedValue({ status: 204, ok: true });
     vi.stubGlobal("fetch", fetchMock);
-    class TestSocket { close() {} }
+    class TestSocket {
+      close() {}
+    }
     vi.stubGlobal("WebSocket", TestSocket);
     const view = renderHook(() => useEngineStream());
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
@@ -120,17 +122,31 @@ describe("telemetry recovery", () => {
     let finishBootstrap!: (response: { status: number; ok: boolean }) => void;
     const fetchMock = vi.fn((url: string) =>
       url === "/trade/session/bootstrap"
-        ? new Promise<{ status: number; ok: boolean }>((resolve) => { finishBootstrap = resolve; })
+        ? new Promise<{ status: number; ok: boolean }>((resolve) => {
+            finishBootstrap = resolve;
+          })
         : Promise.resolve({ status: 204, ok: true }),
     );
     vi.stubGlobal("fetch", fetchMock);
-    class TestSocket { close() {} }
+    class TestSocket {
+      close() {}
+    }
     vi.stubGlobal("WebSocket", TestSocket);
     const view = renderHook(() => useEngineStream(), { wrapper: StrictMode });
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/trade/session/bootstrap")).toHaveLength(1);
-    expect(fetchMock.mock.calls.filter(([url]) => url === "/api/session")).toHaveLength(0);
+    expect(
+      fetchMock.mock.calls.filter(
+        ([url]) => url === "/trade/session/bootstrap",
+      ),
+    ).toHaveLength(1);
+    expect(
+      fetchMock.mock.calls.filter(([url]) => url === "/api/session"),
+    ).toHaveLength(0);
     finishBootstrap({ status: 204, ok: true });
-    await waitFor(() => expect(fetchMock.mock.calls.filter(([url]) => url === "/api/session").length).toBeGreaterThan(0));
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => url === "/api/session").length,
+      ).toBeGreaterThan(0),
+    );
     view.unmount();
     vi.unstubAllGlobals();
   });

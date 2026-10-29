@@ -15,7 +15,8 @@ POSIX mode checks. The existing Windows launcher remains the online path.
 React validation on Ubuntu and macOS. The prior review commit `888c8e7` had no
 CI run on its branch because the workflow listens only to main pushes and pull
 requests. A successful older main-branch Ubuntu run is not evidence for this
-review commit or for macOS.
+review commit or for macOS. The Mac job also starts the three existing services
+without a browser or Dhan credentials and checks their loopback health routes.
 
 Inspected 2026-10-20 (Asia/Calcutta), against application HEAD `afed781`.
 Scope: tracked repository, architecture documentation, manifests, CI, selected

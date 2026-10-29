@@ -1453,3 +1453,11 @@ Application suites were not run because their toolchains are absent here.
   validation.
 - The required context-index check was attempted and blocked by the host's
   Restricted PowerShell execution policy. No policy change was made.
+- Draft PR #1 runs the existing workflow on both Ubuntu and macOS. On run
+  40839436464, both runners passed 181 Python tests (3 skipped), Python static
+  checks, and the Rust workspace checks; frontend validation stopped at
+  checked-in schema drift. Five generated artifacts were refreshed to match the
+  exporter. Windows local UI checks passed 23/23 Vitest tests, TypeScript,
+  ESLint, Prettier after formatting, and Vite build. These are not live market
+  or Mac startup evidence. The workflow now includes a Mac-only headless
+  localhost startup smoke test after the full suite.

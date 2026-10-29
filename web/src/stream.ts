@@ -183,9 +183,15 @@ export function useEngineStream(enabled = true): StreamState {
     }
     async function connect() {
       if (closed) return;
-      const bootstrap = /^#bootstrap=([0-9a-f]{64})$/.exec(window.location.hash)?.[1];
+      const bootstrap = /^#bootstrap=([0-9a-f]{64})$/.exec(
+        window.location.hash,
+      )?.[1];
       if (window.location.hash.startsWith("#bootstrap=")) {
-        window.history.replaceState(null, "", window.location.pathname + window.location.search);
+        window.history.replaceState(
+          null,
+          "",
+          window.location.pathname + window.location.search,
+        );
       }
       try {
         if (bootstrap && !localBootstrap) {
@@ -195,9 +201,13 @@ export function useEngineStream(enabled = true): StreamState {
             cache: "no-store",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ token: bootstrap }),
-          }).then((response) => {
-            if (!response.ok) throw new Error("Local sign-in unavailable");
-          }).finally(() => { localBootstrap = null; });
+          })
+            .then((response) => {
+              if (!response.ok) throw new Error("Local sign-in unavailable");
+            })
+            .finally(() => {
+              localBootstrap = null;
+            });
         }
         if (localBootstrap) await localBootstrap;
         const session = await fetch("/api/session", {
