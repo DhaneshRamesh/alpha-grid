@@ -16,30 +16,41 @@ from quant.apps.cockpit_cache import REQUEST, descriptive_replay, read_cached_re
 def test_cached_history_requires_matching_archived_hash(tmp_path: Path) -> None:
     stamps = [
         int(
-            datetime(2026, 10, day, 9, minute, tzinfo=ZoneInfo("Asia/Kolkata"))
-            .timestamp()
+            datetime(
+                2026, 10, day, 9, minute, tzinfo=ZoneInfo("Asia/Kolkata")
+            ).timestamp()
         )
         for day, minute in ((15, 15), (15, 17), (16, 15))
     ]
-    raw = json.dumps({
-        "timestamp": stamps,
-        "open": [100, 101, 102], "high": [102, 103, 104],
-        "low": [99, 100, 101], "close": [101, 102, 103], "volume": [10, 12, 13],
-    }).encode()
+    raw = json.dumps(
+        {
+            "timestamp": stamps,
+            "open": [100, 101, 102],
+            "high": [102, 103, 104],
+            "low": [99, 100, 101],
+            "close": [101, 102, 103],
+            "volume": [10, 12, 13],
+        }
+    ).encode()
 
     class FixtureTransport:
         def post_json(self, url: str, payload: dict[str, object], token: str) -> bytes:
             return raw
 
     path = run_backfill(
-        (REQUEST,), output_dir=tmp_path / "private", enabled=True,
-        transport=FixtureTransport(), token="fixture-only", max_retries=0,
+        (REQUEST,),
+        output_dir=tmp_path / "private",
+        enabled=True,
+        transport=FixtureTransport(),
+        token="fixture-only",
+        max_retries=0,
         sleep=lambda _: None,
     )[0]
     result = read_cached_reliance(path, sha256(raw).hexdigest())
     assert result["coverage"] == {"2026-10-15": 2, "2026-10-16": 1}
     assert result["source_timestamp_internal_gaps"] == {
-        "2026-10-15": 1, "2026-10-16": 0,
+        "2026-10-15": 1,
+        "2026-10-16": 0,
     }
     assert result["causal_eligibility"] == "BLOCKED"
     replay = result["replay"]
@@ -56,14 +67,16 @@ def test_descriptive_replay_is_past_ordered_and_never_paper_eligible() -> None:
     start = int(
         datetime(2026, 10, 15, 9, 15, tzinfo=ZoneInfo("Asia/Kolkata")).timestamp()
     )
-    raw = json.dumps({
-        "timestamp": [start + 60 * i for i in range(22)],
-        "open": [100 + i for i in range(22)],
-        "high": [101 + i for i in range(22)],
-        "low": [99 + i for i in range(22)],
-        "close": [100 + i for i in range(22)],
-        "volume": [10 + i for i in range(22)],
-    }).encode()
+    raw = json.dumps(
+        {
+            "timestamp": [start + 60 * i for i in range(22)],
+            "open": [100 + i for i in range(22)],
+            "high": [101 + i for i in range(22)],
+            "low": [99 + i for i in range(22)],
+            "close": [100 + i for i in range(22)],
+            "volume": [10 + i for i in range(22)],
+        }
+    ).encode()
     digest = sha256(raw).hexdigest()
     bars = tuple(parse_response(raw, REQUEST))
     replay = descriptive_replay(bars, digest)

@@ -93,8 +93,12 @@ def test_exact_intraday_window_and_http_metadata_are_preserved(tmp_path: Path) -
             )
 
     path = run_backfill(
-        (request,), output_dir=tmp_path / "raw", enabled=True,
-        token="fixture-only", transport=MetadataTransport(), max_retries=0,
+        (request,),
+        output_dir=tmp_path / "raw",
+        enabled=True,
+        token="fixture-only",
+        transport=MetadataTransport(),
+        max_retries=0,
         sleep=lambda _: None,
     )[0]
     metadata = json.loads(path.with_suffix(".meta.json").read_text())

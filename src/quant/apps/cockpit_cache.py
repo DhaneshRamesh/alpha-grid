@@ -75,8 +75,11 @@ def descriptive_replay(
                 latest_baseline = {
                     "source_timestamp_ns": str(stamp),
                     "prior_only_5m_close_change_bps": str(
-                        (Decimal(bar.close_nanos - prior_closes[0]) * 10_000
-                         / Decimal(prior_closes[0])).quantize(Decimal("0.001"))
+                        (
+                            Decimal(bar.close_nanos - prior_closes[0])
+                            * 10_000
+                            / Decimal(prior_closes[0])
+                        ).quantize(Decimal("0.001"))
                     ),
                     "volume_vs_prior_20m_median": str(
                         (Decimal(bar.volume) / Decimal(reference_volume)).quantize(
