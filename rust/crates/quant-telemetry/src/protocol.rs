@@ -183,6 +183,7 @@ impl From<&DepthEvent> for WireDepth {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WireMarket {
     pub price_nanos: Option<String>,
+    pub cumulative_traded_volume: Option<String>,
     pub incremental_volume: Option<String>,
     pub best_bid_price_nanos: Option<String>,
     pub best_ask_price_nanos: Option<String>,
@@ -222,10 +223,14 @@ fn freshness_name(value: quant_engine::Freshness) -> &'static str {
     }
 }
 impl WireMarket {
-    pub fn from_output(value: &FeatureOutput) -> Self {
+    pub fn from_output(
+        value: &FeatureOutput,
+        volume: Option<&quant_core::VolumeObservation>,
+    ) -> Self {
         let market = &value.market;
         Self {
             price_nanos: market.price_nanos.map(|n| n.to_string()),
+            cumulative_traded_volume: volume.map(|v| v.cumulative_traded_volume.to_string()),
             incremental_volume: market.incremental_volume.map(|n| n.to_string()),
             best_bid_price_nanos: market.best_bid.map(|n| n.price_nanos.to_string()),
             best_ask_price_nanos: market.best_ask.map(|n| n.price_nanos.to_string()),
@@ -387,6 +392,8 @@ pub struct WireEngineSnapshot {
     pub instruments: Vec<WireInstrumentSnapshot>,
     pub audit: Vec<AuditEvent>,
     pub paper: Option<WirePaperSnapshot>,
+    pub approved_security_ids: Vec<String>,
+    pub no_trade_reasons: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -409,6 +416,8 @@ pub struct WireEngineSnapshotStatus {
     pub backpressure_state: String,
     pub counters: WireCounters,
     pub paper: Option<WirePaperSnapshot>,
+    pub approved_security_ids: Vec<String>,
+    pub no_trade_reasons: Vec<String>,
 }
 
 impl From<&WireEngineSnapshot> for WireEngineSnapshotStatus {
@@ -424,6 +433,8 @@ impl From<&WireEngineSnapshot> for WireEngineSnapshotStatus {
             backpressure_state: value.backpressure_state.clone(),
             counters: value.counters.clone(),
             paper: value.paper.clone(),
+            approved_security_ids: value.approved_security_ids.clone(),
+            no_trade_reasons: value.no_trade_reasons.clone(),
         }
     }
 }
@@ -542,6 +553,25 @@ pub struct WirePaperSnapshot {
     pub risk_rules_version: String,
     pub policy_version: String,
     pub risk_limits: WirePaperRiskLimits,
+    pub approved_security_ids: Vec<String>,
+    pub scanner: Vec<WirePaperOpportunity>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WirePaperOpportunity {
+    pub instrument: WireInstrument,
+    pub horizon: String,
+    pub horizon_ns: Option<String>,
+    pub approved: bool,
+    pub source_receive_timestamp_ns: String,
+    pub model_version: String,
+    pub model_status: String,
+    pub expected_gross_edge_nanos: Option<String>,
+    pub expected_cost_nanos: Option<String>,
+    pub adverse_cost_nanos: Option<String>,
+    pub uncertainty_nanos: Option<String>,
+    pub robust_net_edge_nanos: Option<String>,
+    pub reason: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -727,6 +757,35 @@ impl From<&PaperSnapshot> for WirePaperSnapshot {
                 max_order_age_ns: value.risk_limits.max_order_age_ns.to_string(),
                 allow_uncalibrated_paper: value.risk_limits.allow_uncalibrated_paper,
             },
+            approved_security_ids: value.approved_security_ids.clone(),
+            scanner: value
+                .scanner
+                .iter()
+                .map(|row| WirePaperOpportunity {
+                    instrument: WireInstrument::from(&row.instrument),
+                    horizon: row.assessment.horizon.clone(),
+                    horizon_ns: row.assessment.horizon_ns.map(|v| v.to_string()),
+                    approved: row.assessment.approved,
+                    source_receive_timestamp_ns: row
+                        .assessment
+                        .source_receive_timestamp_ns
+                        .to_string(),
+                    model_version: row.assessment.model_version.clone(),
+                    model_status: format!("{:?}", row.assessment.model_status),
+                    expected_gross_edge_nanos: row
+                        .assessment
+                        .expected_gross_edge_nanos
+                        .map(|v| v.to_string()),
+                    expected_cost_nanos: row.assessment.expected_cost_nanos.map(|v| v.to_string()),
+                    adverse_cost_nanos: row.assessment.adverse_cost_nanos.map(|v| v.to_string()),
+                    uncertainty_nanos: row.assessment.uncertainty_nanos.map(|v| v.to_string()),
+                    robust_net_edge_nanos: row
+                        .assessment
+                        .robust_net_edge_nanos
+                        .map(|v| v.to_string()),
+                    reason: format!("{:?}", row.assessment.reason),
+                })
+                .collect(),
         }
     }
 }

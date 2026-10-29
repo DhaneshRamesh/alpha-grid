@@ -123,6 +123,29 @@ def test_pilot_guard_and_no_network_dry_run(
         )
 
 
+def test_pilot_dispatch_disables_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    master, manifest = master_fixture(tmp_path)
+    monkeypatch.setenv("DHAN_ACCESS_TOKEN", "fixture-only")
+
+    def capture(*args: object, **kwargs: object) -> None:
+        assert kwargs["max_retries"] == 0
+        raise RuntimeError("captured before network")
+
+    monkeypatch.setattr("quant.apps.acquisition.run_backfill", capture)
+    with pytest.raises(RuntimeError, match="captured before network"):
+        run(
+            [
+                "pilot",
+                *arguments(master, manifest),
+                "--subscription-confirmed",
+                "--pilot-authorized",
+                "--execute-read-only",
+            ]
+        )
+
+
 def test_diagnose_saved_bytes_is_offline(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -305,6 +328,13 @@ def test_mocked_saved_response_verify_and_import(tmp_path: Path) -> None:
     assert verified["timestamp_semantics"] == "UNVERIFIED"
     result = run(["import", *common, "--code-commit", "fixture"])
     lake = verify_dataset(output)
+    digest = hashlib.sha256(response).hexdigest()
+    staged = source_dir / "DHAN_HISTORICAL" / digest
+    saved_metadata = json.loads(paths[0].with_suffix(".meta.json").read_text())
+    assert staged.read_bytes() == paths[0].read_bytes() == response
+    assert lake.source_checksums == (digest,)
+    assert lake.source_provenance[0].sha256 == digest
+    assert lake.source_provenance[0].acquired_at == saved_metadata["received_at"]
     assert result["dataset_sha256"] == lake.dataset_sha256
     assert lake.row_count == 2
     table = pq.read_table(next(output.rglob("*.parquet")))

@@ -115,6 +115,7 @@ export interface WireInstrument {
 export interface WireMarket {
   best_ask_price_nanos?: string | null;
   best_bid_price_nanos?: string | null;
+  cumulative_traded_volume?: string | null;
   depth_receive_timestamp_ns?: string | null;
   freshness: string;
   incremental_volume?: string | null;
@@ -126,12 +127,14 @@ export interface WireMarket {
   [k: string]: unknown;
 }
 export interface WireEngineSnapshotStatus {
+  approved_security_ids: string[];
   backpressure_state: string;
   counters: WireCounters;
   engine_running: boolean;
   feed_connected: boolean;
   journal_blocked: boolean;
   latest_data_timestamp_ns?: string | null;
+  no_trade_reasons: string[];
   paper?: WirePaperSnapshot | null;
   replay_paused: boolean;
   replay_speed?: number | null;
@@ -172,6 +175,7 @@ export interface LatencySummary {
   [k: string]: unknown;
 }
 export interface WirePaperSnapshot {
+  approved_security_ids: string[];
   fee_schedule_version: string;
   last_source_record_index: string;
   ledger_healthy: boolean;
@@ -185,6 +189,7 @@ export interface WirePaperSnapshot {
   recent_outcomes: WirePaperOutcome[];
   risk_limits: WirePaperRiskLimits;
   risk_rules_version: string;
+  scanner: WirePaperOpportunity[];
   schema_version: number;
   [k: string]: unknown;
 }
@@ -292,5 +297,21 @@ export interface WirePaperRiskLimits {
   max_session_loss_nanos: string;
   max_slippage_bps: number;
   max_spread_bps: number;
+  [k: string]: unknown;
+}
+export interface WirePaperOpportunity {
+  adverse_cost_nanos?: string | null;
+  approved: boolean;
+  expected_cost_nanos?: string | null;
+  expected_gross_edge_nanos?: string | null;
+  horizon: string;
+  horizon_ns?: string | null;
+  instrument: WireInstrument;
+  model_status: string;
+  model_version: string;
+  reason: string;
+  robust_net_edge_nanos?: string | null;
+  source_receive_timestamp_ns: string;
+  uncertainty_nanos?: string | null;
   [k: string]: unknown;
 }

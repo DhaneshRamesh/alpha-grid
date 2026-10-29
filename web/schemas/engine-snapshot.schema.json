@@ -563,6 +563,12 @@
             "null"
           ]
         },
+        "cumulative_traded_volume": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "depth_receive_timestamp_ns": {
           "type": [
             "string",
@@ -774,6 +780,77 @@
         "fees_nanos",
         "timestamp_ns",
         "assumptions"
+      ],
+      "type": "object"
+    },
+    "WirePaperOpportunity": {
+      "properties": {
+        "adverse_cost_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "approved": {
+          "type": "boolean"
+        },
+        "expected_cost_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expected_gross_edge_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "horizon": {
+          "type": "string"
+        },
+        "horizon_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "instrument": {
+          "$ref": "#/$defs/WireInstrument"
+        },
+        "model_status": {
+          "type": "string"
+        },
+        "model_version": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "robust_net_edge_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_receive_timestamp_ns": {
+          "type": "string"
+        },
+        "uncertainty_nanos": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "instrument",
+        "horizon",
+        "approved",
+        "source_receive_timestamp_ns",
+        "model_version",
+        "model_status",
+        "reason"
       ],
       "type": "object"
     },
@@ -1056,6 +1133,12 @@
     },
     "WirePaperSnapshot": {
       "properties": {
+        "approved_security_ids": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
         "fee_schedule_version": {
           "type": "string"
         },
@@ -1107,6 +1190,12 @@
         "risk_rules_version": {
           "type": "string"
         },
+        "scanner": {
+          "items": {
+            "$ref": "#/$defs/WirePaperOpportunity"
+          },
+          "type": "array"
+        },
         "schema_version": {
           "format": "uint16",
           "maximum": 65535,
@@ -1128,7 +1217,9 @@
         "fee_schedule_version",
         "risk_rules_version",
         "policy_version",
-        "risk_limits"
+        "risk_limits",
+        "approved_security_ids",
+        "scanner"
       ],
       "type": "object"
     },
@@ -1199,6 +1290,12 @@
   },
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
+    "approved_security_ids": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "audit": {
       "items": {
         "$ref": "#/$defs/AuditEvent"
@@ -1237,6 +1334,12 @@
     },
     "mode": {
       "type": "string"
+    },
+    "no_trade_reasons": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "paper": {
       "anyOf": [
@@ -1283,7 +1386,9 @@
     "backpressure_state",
     "counters",
     "instruments",
-    "audit"
+    "audit",
+    "approved_security_ids",
+    "no_trade_reasons"
   ],
   "title": "WireEngineSnapshot",
   "type": "object"

@@ -307,6 +307,12 @@
             "null"
           ]
         },
+        "cumulative_traded_volume": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "depth_receive_timestamp_ns": {
           "type": [
             "string",

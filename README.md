@@ -2,21 +2,58 @@
 
 Python 3.12+ and Rust research foundation for NSE market data and offline paper
 trading. It includes a Dhan 20-level depth source, durable storage, feed health,
-and a local synthetic paper decision cockpit. It has no broker order API.
+and an offline paper decision engine. It has no broker order API.
+
+## Single-start read-only cockpit (Windows)
+
+The UI opens on `DATA UNAVAILABLE / NO TRADE`. It does not show sample market
+prices, stock picks, fills or performance. The separate Trading settings tab
+settings tab saves maximum amount per trade, maximum daily loss, stop-loss and
+profit target to ignored `.local/trading/settings.json`, with INR or percentage
+options. The Trade desk shows the verified local October 15-16 RELIANCE
+minute archive and the five approved read-only Dhan account panels when a
+valid token is available. Current stock selection and live order execution
+remain disabled. See the
+[trading product brief](docs/trading-product-brief.md) for the intended workflow.
+
+From an ordinary PowerShell in the repository root:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File tools/start-cockpit.ps1
+```
+
+The launcher opens `http://127.0.0.1:5173/` and starts the existing Rust
+gateway, React UI and local account/settings service. Press Ctrl+C in that
+PowerShell to stop all three. The launcher signs in the opened localhost tab
+once with a one-use startup token; the seven-day signed HttpOnly cookie restores
+login across ordinary browser and cockpit restarts without a local key prompt.
+Forget this device logs out; restart the launcher to sign in again. The Dhan
+token is renewed separately through the private manual consent flow.
+The authorized refresh scope is five GETs (funds, holdings, positions,
+today's orders and today's trades), each at most once per five minutes.
+The live feed, historical backfill, ledger and broker orders do not start.
 
 ## Local SHADOW / PAPER research
 
 The [Phase 3A paper guide](rust/docs/phase3a-paper.md) describes the independent
 paper risk gate, provisional cost model, conservative fill simulator, QP01
-experience ledger, offline evaluator and local launch commands. The synthetic
-fixture is a correctness aid; it is not evidence of a profitable strategy.
+experience ledger and offline evaluator. Synthetic fixtures are isolated to
+software tests. Replay/evaluation executables refuse normal runtime use until
+QJ01 can be bound to authenticated Dhan source evidence.
 
 ## Local DATA_ONLY cockpit
 
 The Phase 2C [Rust telemetry gateway and React cockpit](rust/docs/phase2c-cockpit.md)
-display a local synthetic QJ01 replay with real Phase 2B candles, depth and
-features. The demo has no Dhan login or broker orders. It does not touch the
-Utho VM.
+are retained as presentation infrastructure. Replay/demo snapshots are
+rejected by the cockpit; no real market results are available. The UI does
+not touch the Utho VM.
+
+The single-start command above shows DATA_ONLY / NO TRADE and never opens a
+Dhan market-feed socket. Approval and revocation remain in the local QP01
+ledger for future paper research only. The historical cache is descriptive;
+it does not pass the causal research gate. See the
+[cockpit runbook](rust/docs/phase2c-cockpit.md) and
+[manual Dhan consent renewal](docs/dhan-api-key-callbacks.md).
 
 ## Set up
 
@@ -37,6 +74,8 @@ DhanHQ, websockets and pandas. For exact resolved versions, use
 `quant-diagnostics` validates the environment settings and writes a JSON startup
 log. Copy `.env.example` to `.env` if useful, then export its variables; the
 application deliberately does not load `.env` files or embed credentials.
+For Dhan API-key login and isolated order postbacks, see
+[local callback setup](docs/dhan-api-key-callbacks.md).
 
 ## Collect Dhan 20-level depth
 
@@ -181,6 +220,11 @@ risk and optimization → execution and OMS. Those later components are delibera
 outside this foundation. No live orders can be placed from this repository.
 
 ## Offline statistical research
+
+The offline [forward candle observation guide](docs/forward-observations.md)
+describes fixed 5- and 15-minute movement outcomes from verified one-minute
+cash-equity candles, with point-in-time features and separate matured labels.
+It requires independently evidenced candle timing and dated sessions.
 
 Phase 3B research contracts and validation limits are in [rust/docs/phase3b-research.md](rust/docs/phase3b-research.md); the opt-in, read-only data plan is in [docs/research-acquisition.md](docs/research-acquisition.md). No trained market model or live order path is enabled.
 

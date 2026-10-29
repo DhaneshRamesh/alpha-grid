@@ -5,6 +5,7 @@ edition.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+ring = "0.17.14"
 quant-core.workspace = true
 serde.workspace = true
 postcard.workspace = true

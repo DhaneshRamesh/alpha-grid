@@ -11,6 +11,7 @@ type ResearchStatus = {
   schema_version: string;
   status: string;
   source_kind: string | null;
+  source?: string;
   feature_rows: number;
   label_rows: number;
   independent_sessions: number;
@@ -109,7 +110,16 @@ export default function ResearchWorkspace() {
         if (!response.ok) throw new Error(`Research status ${response.status}`);
         return response.json() as Promise<ResearchStatus>;
       })
-      .then(setStatus)
+      .then((value) => {
+        if (
+          value.source_kind === "REAL_VERIFIED" &&
+          value.source === "DHAN_HISTORICAL"
+        ) {
+          setStatus(value);
+        } else {
+          setError(true);
+        }
+      })
       .catch((reason: unknown) => {
         if (!(reason instanceof DOMException && reason.name === "AbortError"))
           setError(true);
@@ -121,13 +131,15 @@ export default function ResearchWorkspace() {
         return response.json() as Promise<AcquisitionStatus>;
       })
       .then((value) => {
-        if (value.schema_version === "acquisition-status-v1")
+        if (
+          value.schema_version === "acquisition-status-v1" &&
+          value.sources_configured.every((source) => source.startsWith("DHAN_"))
+        )
           setAcquisition(value);
       })
       .catch(() => undefined);
     return () => controller.abort();
   }, []);
-  const fixture = status?.source_kind === "SYNTHETIC";
   const validated =
     status?.source_kind === "REAL_VERIFIED" &&
     (status.status === "VALIDATED_RESEARCH" ||
@@ -148,8 +160,8 @@ export default function ResearchWorkspace() {
         </div>
       </div>
       <div className="paper-warning">
-        {fixture ? "TEST FIXTURE / UNVALIDATED" : "NO VALIDATED MARKET ALPHA"} ·
-        NO LIVE ORDERS · PAPER POLICY UNCHANGED
+        DATA UNAVAILABLE / NO TRADE · NO VALIDATED MARKET ALPHA · NO LIVE ORDERS
+        · PAPER POLICY UNCHANGED
       </div>
       <section className="panel acquisition-panel">
         <div className="panel-head">
@@ -228,8 +240,8 @@ export default function ResearchWorkspace() {
       {error && (
         <div className="panel">
           <div className="empty">
-            Research status unavailable. The market and paper engines are
-            unaffected.
+            DATA UNAVAILABLE / NO TRADE. Verified Dhan research evidence is
+            unavailable.
           </div>
         </div>
       )}

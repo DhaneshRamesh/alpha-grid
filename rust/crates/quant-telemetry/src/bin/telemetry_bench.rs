@@ -243,6 +243,11 @@ async fn trial(
 }
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if !cfg!(test) {
+        return Err(
+            "DATA UNAVAILABLE: telemetry replay requires verified Dhan QJ01 provenance".into(),
+        );
+    }
     let mut args = std::env::args().skip(1);
     let journal = PathBuf::from(
         args.next()

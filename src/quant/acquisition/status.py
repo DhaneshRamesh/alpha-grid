@@ -10,6 +10,7 @@ from typing import Any
 
 import pyarrow.parquet as pq
 
+from quant.acquisition.dhan import _sync_directory
 from quant.acquisition.lake import verify_dataset
 from quant.acquisition.nse import file_sha256
 from quant.acquisition.quality import QualityReport
@@ -126,10 +127,6 @@ def write_json_atomic(path: Path, value: dict[str, Any]) -> None:
             stream.flush()
             os.fsync(stream.fileno())
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _sync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)

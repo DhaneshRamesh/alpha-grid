@@ -168,6 +168,16 @@ pub struct TradeEvent {
     pub quantity: u64,
 }
 
+/// Exact binary WebSocket frame, retained before any decoded observation.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RawStandardFrame {
+    pub feed_session_id: String,
+    pub frame_id: u64,
+    pub receive_timestamp_ns: i64,
+    pub sha256: [u8; 32],
+    pub bytes: Vec<u8>,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MarketEvent {
     Depth(Box<DepthEvent>),
@@ -178,6 +188,8 @@ pub enum MarketEvent {
     Price(PriceObservation),
     Quote(Box<QuoteObservation>),
     Session(Box<MarketSessionEvent>),
+    // Appended: historical QJ01/Postcard market-event tags stay unchanged.
+    RawStandardFrame(Box<RawStandardFrame>),
 }
 
 impl MarketEvent {
@@ -189,6 +201,7 @@ impl MarketEvent {
             Self::Price(event) => event.metadata.receive_timestamp_ns,
             Self::Quote(event) => event.price.metadata.receive_timestamp_ns,
             Self::Session(event) => event.metadata.receive_timestamp_ns,
+            Self::RawStandardFrame(event) => event.receive_timestamp_ns,
         }
     }
 }

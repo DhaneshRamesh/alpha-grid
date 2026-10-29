@@ -1,7 +1,12 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Chart from "./Chart";
 import PaperWorkspace from "./PaperWorkspace";
 import ResearchWorkspace from "./ResearchWorkspace";
+import {
+  AutomationSettings,
+  TradeDesk,
+  type HistoricalCache,
+} from "./TradingWorkspace";
 import {
   amount,
   dateTime,
@@ -19,9 +24,15 @@ import type {
   WireInstrumentSnapshot,
   WireQuality,
 } from "./generated/engine-snapshot";
-import { useEngineStream, type Connection } from "./stream";
+import {
+  forgetCockpitSession,
+  useEngineStream,
+  type Connection,
+} from "./stream";
 
 type View =
+  | "Trade desk"
+  | "Trading settings"
   | "Overview"
   | "Market intelligence"
   | "Candle workstation"
@@ -32,6 +43,8 @@ type View =
   | "Paper research"
   | "Statistical research";
 const views: { name: View; icon: string; short: string }[] = [
+  { name: "Trade desk", icon: "◎", short: "DESK" },
+  { name: "Trading settings", icon: "⚙", short: "RULES" },
   { name: "Overview", icon: "◫", short: "01" },
   { name: "Market intelligence", icon: "◈", short: "02" },
   { name: "Candle workstation", icon: "▥", short: "03" },
@@ -160,32 +173,50 @@ function Field({
 function Header({
   snapshot,
   connection,
+  tradingView,
+  onForgetDevice,
 }: {
   snapshot: WireEngineSnapshot | null;
   connection: Connection;
+  tradingView: boolean;
+  onForgetDevice: () => void;
 }) {
   return (
     <header className="topbar">
       <div className="breadcrumbs">
-        ALPHA GRID <span>/</span> OBSERVABILITY <span>/</span> <b>COCKPIT</b>
+        ALPHA GRID <span>/</span> {tradingView ? "TRADING" : "REPLAY LAB"}{" "}
+        <span>/</span> <b>{tradingView ? "INTRADAY" : "COCKPIT"}</b>
       </div>
       <div className="top-actions">
+        <button type="button" onClick={onForgetDevice}>
+          Forget this device
+        </button>
         <span className="mode-pill">
-          {snapshot?.paper
-            ? "PAPER · SYNTHETIC · REPLAY"
-            : `${snapshot?.mode ?? "DATA_ONLY"} · SIMULATED`}
+          {snapshot?.mode === "OBSERVE_ONLY"
+            ? "OBSERVATION ONLY · NO TRADE"
+            : tradingView
+              ? "DATA UNAVAILABLE · NO TRADE"
+              : snapshot?.paper
+                ? "PAPER · SIMULATED FILLS"
+                : "DATA UNAVAILABLE · NO TRADE"}
         </span>
-        <span
-          className={`connection-pill ${connection === "CONNECTED" ? "online" : ""}`}
-        >
-          <i />
-          {connection === "CONNECTED" ? "TELEMETRY ONLINE" : "UI DISCONNECTED"}
-        </span>
-        <span className="clock">
-          {snapshot?.latest_data_timestamp_ns
-            ? dateTime(snapshot.latest_data_timestamp_ns)
-            : "NO DATA"}
-        </span>
+        {!tradingView && (
+          <span
+            className={`connection-pill ${connection === "CONNECTED" ? "online" : ""}`}
+          >
+            <i />
+            {connection === "CONNECTED"
+              ? "TELEMETRY ONLINE"
+              : "UI DISCONNECTED"}
+          </span>
+        )}
+        {!tradingView && (
+          <span className="clock">
+            {snapshot?.latest_data_timestamp_ns
+              ? dateTime(snapshot.latest_data_timestamp_ns)
+              : "NO DATA"}
+          </span>
+        )}
       </div>
     </header>
   );
@@ -257,9 +288,15 @@ function Overview({
             Command center<span className="heading-dot">.</span>
           </h1>
           <p>
-            Live view of a local, durable replay. Every number below comes from
-            the Rust engine or journal.
+            Observed state from the Rust engine and journal. Source quality and
+            NO TRADE reasons remain visible when the feed is stale.
           </p>
+          {snapshot?.mode === "OBSERVE_ONLY" && (
+            <p>
+              Provisional Dhan quotes only. Session-specific CAS classification
+              UNVERIFIED; research and trading blocked.
+            </p>
+          )}
         </div>
         <div className="session-card">
           <span>ACTIVE SESSION</span>
@@ -276,16 +313,7 @@ function Overview({
           label="FEED"
           value={snapshot?.feed_connected ? "CONNECTED" : "DISCONNECTED"}
         />
-        <Status
-          label="JOURNAL"
-          value={
-            snapshot?.journal_blocked
-              ? "BLOCKED"
-              : snapshot
-                ? "DURABLE"
-                : "UNKNOWN"
-          }
-        />
+        <Status label="JOURNAL" value={snapshot?.storage_status ?? "UNKNOWN"} />
         <Status label="TELEMETRY" value={connection} />
         <Status
           label="REPLAY"
@@ -307,9 +335,13 @@ function Overview({
           note="Read from checksummed QJ01 journal"
         />
         <Metric
-          label="DURABLE RECORDS"
+          label="FILE-SYNCED RECORDS"
           value={amount(c?.durably_committed_records)}
-          note="This replay creates no new writes"
+          note={
+            snapshot?.storage_status === "FILE_SYNC_ONLY"
+              ? "Windows directory crash durability is unverified"
+              : "Per-record file sync acknowledgements"
+          }
         />
         <Metric
           label="MONITORED INSTRUMENTS"
@@ -423,7 +455,8 @@ function Overview({
       </div>
       <div className="overview-footer">
         <span>
-          <i className="tiny-dot" /> DATA_ONLY SYSTEM · NO BROKER ORDERS
+          <i className="tiny-dot" /> {snapshot?.mode ?? "DATA_ONLY"} · NO BROKER
+          ORDERS
         </span>
         <span>
           Latest source receive: {dateTime(snapshot?.latest_data_timestamp_ns)}
@@ -435,8 +468,10 @@ function Overview({
 
 function MarketIntelligence({
   instrument,
+  observationOnly,
 }: {
   instrument: WireInstrumentSnapshot | null;
+  observationOnly: boolean;
 }) {
   const m = instrument?.market,
     f = instrument?.features;
@@ -452,6 +487,9 @@ function MarketIntelligence({
             Observed prices and derived top-of-book features, with explicit
             unknowns.
           </p>
+          {observationOnly && (
+            <p>OBSERVATION ONLY · CAS classification UNVERIFIED · NO TRADE</p>
+          )}
         </div>
       </div>
       <div className="market-grid">
@@ -467,9 +505,14 @@ function MarketIntelligence({
             value={delta(m?.price_nanos, instrument?.previous_close_nanos)}
           />
           <Field
-            name="Incremental volume"
-            value={amount(m?.incremental_volume)}
+            name="Cumulative traded volume"
+            value={amount(m?.cumulative_traded_volume)}
           />
+          <Field
+            name="Incremental volume"
+            value={observationOnly ? "N/A" : amount(m?.incremental_volume)}
+          />
+          <Field name="Quote freshness" value={m?.freshness ?? "UNAVAILABLE"} />
           <Field
             name="Last trade source time"
             value={time(m?.source_last_trade_timestamp_ns)}
@@ -533,11 +576,24 @@ function CandleWorkstation({
   instrument,
   timeframe,
   setTimeframe,
+  historical,
 }: {
   instrument: WireInstrumentSnapshot | null;
   timeframe: string;
   setTimeframe: (v: string) => void;
+  historical: HistoricalCache | null;
 }) {
+  const [historicalDay, setHistoricalDay] = useState("2026-10-16");
+  const archived =
+    historical?.status === "AVAILABLE"
+      ? historical.bars.filter(
+          (bar) =>
+            new Date(
+              Number(BigInt(bar.timestamp_ns) / 1_000_000n),
+            ).toLocaleDateString("sv-SE", { timeZone: "Asia/Kolkata" }) ===
+            historicalDay,
+        )
+      : [];
   const selected =
     instrument?.candles.filter((c) => c.timeframe_ns === timeframe) ?? [];
   const latest: WireCandle | undefined = selected[selected.length - 1];
@@ -625,6 +681,66 @@ function CandleWorkstation({
         />
       </div>
       <Quality quality={latest?.quality} />
+      <Panel
+        eyebrow="AUTHENTIC ARCHIVE / EXPLORATORY ONLY"
+        title="RELIANCE 1-minute Dhan candles"
+      >
+        {historical?.status === "AVAILABLE" ? (
+          <>
+            <p>
+              Source Dhan historical · Retrieved {historical.retrieved_at} ·
+              SHA-256 {historical.response_sha256} · Source timestamp meaning
+              unverified · NO TRADE
+            </p>
+            <label htmlFor="historical-day">Session </label>
+            <select
+              id="historical-day"
+              value={historicalDay}
+              onChange={(event) => setHistoricalDay(event.target.value)}
+            >
+              {Object.entries(historical.coverage ?? {}).map(([day, count]) => (
+                <option key={day} value={day}>
+                  {day} ({count} rows)
+                </option>
+              ))}
+            </select>
+            <div style={{ maxHeight: 420, overflowY: "auto" }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Source time IST</th>
+                    <th>Open</th>
+                    <th>High</th>
+                    <th>Low</th>
+                    <th>Close</th>
+                    <th>Volume</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {archived.map((bar) => (
+                    <tr key={bar.timestamp_ns}>
+                      <td>{dateTime(bar.timestamp_ns)}</td>
+                      <td>{price(bar.open_nanos)}</td>
+                      <td>{price(bar.high_nanos)}</td>
+                      <td>{price(bar.low_nanos)}</td>
+                      <td>{price(bar.close_nanos)}</td>
+                      <td>{amount(bar.volume)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Daily Dhan candles unavailable. Historical identity and candle
+              completion timing remain unverified; causal research blocked.
+            </p>
+          </>
+        ) : (
+          <p>
+            DATA UNAVAILABLE · No source-integrity-verified local candle cache.
+          </p>
+        )}
+      </Panel>
     </>
   );
 }
@@ -1017,8 +1133,40 @@ function Audit({ snapshot }: { snapshot: WireEngineSnapshot | null }) {
 }
 
 export default function App() {
+  const [view, setView] = useState<View>("Trade desk");
+  const tradingView = view === "Trade desk" || view === "Trading settings";
   const { snapshot, connection, messageLagMs, reconnects } = useEngineStream();
-  const [view, setView] = useState<View>("Overview");
+  const [historical, setHistorical] = useState<HistoricalCache | null>(null);
+  useEffect(() => {
+    if (connection !== "CONNECTED") return;
+    const controller = new AbortController();
+    void fetch("/api/historical/reliance", {
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then((response) => {
+        if (!response.ok) throw new Error("historical cache unavailable");
+        return response.json() as Promise<HistoricalCache>;
+      })
+      .then((value) => {
+        if (
+          !controller.signal.aborted &&
+          value.schema_version === "dhan-historical-cache-v1" &&
+          value.causal_eligibility === "BLOCKED" &&
+          (value.status !== "AVAILABLE" ||
+            (value.source === "DHAN_HISTORICAL" && value.bars.length === 720))
+        ) {
+          setHistorical(value);
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setHistorical(null);
+      });
+    return () => controller.abort();
+  }, [connection]);
+  const forgetDevice = async () => {
+    if (await forgetCockpitSession()) window.location.reload();
+  };
   const [instrumentKey, setInstrumentKey] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState("5000000000");
   const instrument =
@@ -1040,7 +1188,7 @@ export default function App() {
           </div>
         </div>
         <div className="sidebar-group">
-          <div className="nav-caption">WORKSPACE / 01</div>
+          <div className="nav-caption">TRADING / REPLAY LAB</div>
           <nav aria-label="Cockpit views">
             {views.map((item) => (
               <button
@@ -1060,9 +1208,19 @@ export default function App() {
             <span className="small-indicator" />
             <div>
               <strong>
-                {snapshot?.paper ? "PAPER SIMULATION" : "DATA_ONLY MODE"}
+                {tradingView
+                  ? "DATA UNAVAILABLE"
+                  : snapshot?.mode === "OBSERVE_ONLY"
+                    ? "OBSERVATION ONLY"
+                    : snapshot?.paper
+                      ? "PAPER SIMULATION"
+                      : "DATA UNAVAILABLE"}
               </strong>
-              <small>Real execution disabled</small>
+              <small>
+                {tradingView
+                  ? "NO TRADE · Dhan market data unverified"
+                  : "NO TRADE · real execution disabled"}
+              </small>
             </div>
           </div>
           <div className="sidebar-version">
@@ -1071,26 +1229,45 @@ export default function App() {
         </div>
       </aside>
       <div className="workspace">
-        <Header snapshot={snapshot} connection={connection} />
+        <Header
+          snapshot={snapshot}
+          connection={connection}
+          tradingView={tradingView}
+          onForgetDevice={() => void forgetDevice()}
+        />
         <main>
-          <div className="toolbar">
-            <div className="instrument-select">
-              <label htmlFor="instrument">INSTRUMENT</label>
-              <select
-                id="instrument"
-                value={instrument?.instrument.key ?? ""}
-                onChange={(event) => setInstrumentKey(event.target.value)}
-              >
-                {snapshot?.instruments.map((item) => (
-                  <option key={item.instrument.key} value={item.instrument.key}>
-                    {item.instrument.symbol ?? item.instrument.security_id} ·{" "}
-                    {item.instrument.security_id}
-                  </option>
-                )) ?? <option value="">Awaiting engine</option>}
-              </select>
+          {!tradingView && (
+            <div className="toolbar">
+              <div className="instrument-select">
+                <label htmlFor="instrument">INSTRUMENT</label>
+                <select
+                  id="instrument"
+                  value={instrument?.instrument.key ?? ""}
+                  onChange={(event) => setInstrumentKey(event.target.value)}
+                >
+                  {snapshot?.instruments.map((item) => (
+                    <option
+                      key={item.instrument.key}
+                      value={item.instrument.key}
+                    >
+                      {item.instrument.symbol ?? item.instrument.security_id} ·{" "}
+                      {item.instrument.security_id}
+                    </option>
+                  )) ?? <option value="">Awaiting engine</option>}
+                </select>
+              </div>
+              <ReplayControls snapshot={snapshot} />
             </div>
-            <ReplayControls snapshot={snapshot} />
-          </div>
+          )}
+          {view === "Trade desk" && (
+            <TradeDesk
+              onSettings={() => setView("Trading settings")}
+              engineSnapshot={snapshot}
+              engineConnection={connection}
+              historical={historical}
+            />
+          )}
+          {view === "Trading settings" && <AutomationSettings />}
           {view === "Overview" && (
             <Overview
               snapshot={snapshot}
@@ -1099,13 +1276,17 @@ export default function App() {
             />
           )}
           {view === "Market intelligence" && (
-            <MarketIntelligence instrument={instrument} />
+            <MarketIntelligence
+              instrument={instrument}
+              observationOnly={snapshot?.mode === "OBSERVE_ONLY"}
+            />
           )}
           {view === "Candle workstation" && (
             <CandleWorkstation
               instrument={instrument}
               timeframe={timeframe}
               setTimeframe={setTimeframe}
+              historical={historical}
             />
           )}
           {view === "Order book" && <OrderBook instrument={instrument} />}

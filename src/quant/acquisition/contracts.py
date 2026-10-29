@@ -46,7 +46,7 @@ class HistoricalBar:
         if self.interval_minutes is not None and (
             self.interval_minutes <= 0 or self.source_timestamp_ns is None
         ):
-            raise ValueError("intraday bar requires interval and start time")
+            raise ValueError("intraday bar requires interval and source timestamp")
         if self.interval_minutes is None and self.source_timestamp_ns is not None:
             raise ValueError("daily bar has no intraday timestamp")
         if min(self.open_nanos, self.high_nanos, self.low_nanos, self.close_nanos) <= 0:

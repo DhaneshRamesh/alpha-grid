@@ -30,10 +30,28 @@ class HistoricalRequest:
     start: date  # inclusive
     end: date  # exclusive
     interval_minutes: int | None
+    requested_from_ist: datetime | None = None
+    requested_to_ist: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.instrument.security_id.isdecimal():
             raise ValueError("Dhan security ID must be numeric")
+        bounds = (self.requested_from_ist, self.requested_to_ist)
+        if any(value is not None for value in bounds):
+            if self.interval_minutes is None or any(value is None for value in bounds):
+                raise ValueError("intraday request requires both exact time bounds")
+            lower, upper = bounds
+            assert lower is not None and upper is not None
+            start = datetime.combine(self.start, datetime.min.time(), _IST)
+            end = datetime.combine(self.end, datetime.min.time(), _IST)
+            if (
+                lower.utcoffset() != timedelta(hours=5, minutes=30)
+                or upper.utcoffset() != timedelta(hours=5, minutes=30)
+                or not start <= lower < upper <= end
+            ):
+                raise ValueError(
+                    "exact Dhan intraday bounds must be within the IST date window"
+                )
 
     @property
     def endpoint(self) -> str:
@@ -57,8 +75,18 @@ class HistoricalRequest:
         else:
             common.update(
                 interval=str(self.interval_minutes),
-                fromDate=f"{self.start.isoformat()} 00:00:00",
-                toDate=f"{self.end.isoformat()} 00:00:00",
+                fromDate=(
+                    self.requested_from_ist.astimezone(_IST).strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    )
+                    if self.requested_from_ist is not None
+                    else f"{self.start.isoformat()} 00:00:00"
+                ),
+                toDate=(
+                    self.requested_to_ist.astimezone(_IST).strftime("%Y-%m-%d %H:%M:%S")
+                    if self.requested_to_ist is not None
+                    else f"{self.end.isoformat()} 00:00:00"
+                ),
             )
         return common
 
@@ -116,23 +144,198 @@ def response_path(request: HistoricalRequest, output_dir: Path) -> Path:
         f"{request.instrument.security_id}-{request.interval_minutes or 'day'}-"
         f"{request.start}-{request.end}"
     )
+    if request.requested_from_ist is not None and request.requested_to_ist is not None:
+        label += (
+            f"-{request.requested_from_ist.astimezone(_IST):%Y%m%dT%H%M%S}"
+            f"-{request.requested_to_ist.astimezone(_IST):%Y%m%dT%H%M%S}"
+        )
     return output_dir / f"{label}.json"
+
+
+def _verify_windows_private_acl(path: Path) -> None:
+    """Reject any DACL grant outside the owner, SYSTEM and administrators."""
+    import ctypes
+    from ctypes import wintypes
+
+    # ctypes exposes these names only on Windows; mypy runs on both platforms.
+    advapi = ctypes.WinDLL("Advapi32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+    kernel = ctypes.WinDLL("Kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+    ptr = ctypes.c_void_p
+    advapi.GetNamedSecurityInfoW.argtypes = [
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        wintypes.DWORD,
+        ctypes.POINTER(ptr),
+        ptr,
+        ctypes.POINTER(ptr),
+        ptr,
+        ctypes.POINTER(ptr),
+    ]
+    advapi.GetNamedSecurityInfoW.restype = wintypes.DWORD
+    advapi.IsValidAcl.argtypes = [ptr]
+    advapi.IsValidAcl.restype = wintypes.BOOL
+    advapi.GetAce.argtypes = [ptr, wintypes.DWORD, ctypes.POINTER(ptr)]
+    advapi.GetAce.restype = wintypes.BOOL
+    advapi.ConvertSidToStringSidW.argtypes = [ptr, ctypes.POINTER(ptr)]
+    advapi.ConvertSidToStringSidW.restype = wintypes.BOOL
+    advapi.OpenProcessToken.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.HANDLE),
+    ]
+    advapi.OpenProcessToken.restype = wintypes.BOOL
+    advapi.GetTokenInformation.argtypes = [
+        wintypes.HANDLE,
+        wintypes.DWORD,
+        ptr,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    advapi.GetTokenInformation.restype = wintypes.BOOL
+    kernel.GetCurrentProcess.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.LocalFree.argtypes = [ptr]
+    kernel.LocalFree.restype = ptr
+    kernel.GetVolumePathNameW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+    ]
+    kernel.GetVolumePathNameW.restype = wintypes.BOOL
+    kernel.GetVolumeInformationW.argtypes = [
+        wintypes.LPCWSTR,
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+        ctypes.POINTER(wintypes.DWORD),
+        wintypes.LPWSTR,
+        wintypes.DWORD,
+    ]
+    kernel.GetVolumeInformationW.restype = wintypes.BOOL
+
+    def sid_text(sid: int | None) -> str:
+        if not sid:
+            raise ValueError("missing Windows SID")
+        value = ptr()
+        if not advapi.ConvertSidToStringSidW(ptr(sid), ctypes.byref(value)):
+            raise OSError(ctypes.get_last_error(), "invalid Windows SID")  # type: ignore[attr-defined,unused-ignore]
+        try:
+            return ctypes.wstring_at(value)
+        finally:
+            kernel.LocalFree(value)
+
+    token = wintypes.HANDLE()
+    descriptor = ptr()
+    try:
+        volume_root = ctypes.create_unicode_buffer(32768)
+        filesystem = ctypes.create_unicode_buffer(256)
+        if not kernel.GetVolumePathNameW(
+            str(path.resolve()), volume_root, len(volume_root)
+        ) or not kernel.GetVolumeInformationW(
+            volume_root.value,
+            None,
+            0,
+            None,
+            None,
+            None,
+            filesystem,
+            len(filesystem),
+        ):
+            raise OSError(ctypes.get_last_error(), "cannot verify Windows filesystem")  # type: ignore[attr-defined,unused-ignore]
+        if filesystem.value != "NTFS":
+            raise ValueError("private Windows storage requires NTFS")
+        if not advapi.OpenProcessToken(
+            kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)
+        ):
+            raise OSError(ctypes.get_last_error(), "cannot read Windows token")  # type: ignore[attr-defined,unused-ignore]
+        needed = wintypes.DWORD()
+        advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
+        if not needed.value:
+            raise ValueError("Windows token user unavailable")
+        token_data = ctypes.create_string_buffer(needed.value)
+        if not advapi.GetTokenInformation(
+            token, 1, token_data, needed.value, ctypes.byref(needed)
+        ):
+            raise OSError(ctypes.get_last_error(), "cannot read Windows token user")  # type: ignore[attr-defined,unused-ignore]
+        current_sid = sid_text(ptr.from_buffer(token_data).value)
+
+        owner = ptr()
+        dacl = ptr()
+        result = advapi.GetNamedSecurityInfoW(
+            str(path),
+            1,  # SE_FILE_OBJECT
+            0x00000005,  # OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION
+            ctypes.byref(owner),
+            None,
+            ctypes.byref(dacl),
+            None,
+            ctypes.byref(descriptor),
+        )
+        if result or not dacl.value or not advapi.IsValidAcl(dacl):
+            raise ValueError("Windows DACL unavailable or invalid")
+        trusted_owners = {current_sid, "S-1-5-18", "S-1-5-32-544"}
+        if sid_text(owner.value) not in trusted_owners:
+            raise ValueError("Windows storage owner is untrusted")
+        trusted_grants = trusted_owners | {"S-1-3-4"}  # OWNER RIGHTS
+        ace_count = int.from_bytes(ctypes.string_at(dacl.value + 4, 2), "little")
+        for index in range(ace_count):
+            ace = ptr()
+            if not advapi.GetAce(dacl, index, ctypes.byref(ace)) or not ace.value:
+                raise ValueError("Windows DACL entry unreadable")
+            ace_type = ctypes.c_ubyte.from_address(ace.value).value
+            ace_size = ctypes.c_ushort.from_address(ace.value + 2).value
+            if ace_type not in {0, 1} or ace_size < 16:
+                raise ValueError("Windows DACL entry unsupported")
+            principal = sid_text(ace.value + 8)
+            if ace_type == 0 and principal not in trusted_grants:
+                raise ValueError("Windows DACL grants broad access")
+    except (OSError, ValueError) as exc:
+        raise PermissionError(f"storage ACL is not privately verified: {path}") from exc
+    finally:
+        if descriptor.value:
+            kernel.LocalFree(descriptor)
+        if token.value:
+            kernel.CloseHandle(token)
 
 
 def _private_directory(path: Path) -> None:
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     mode = path.lstat().st_mode
-    if not stat.S_ISDIR(mode) or mode & 0o077:
-        raise PermissionError(f"quarantine directory is not private: {path}")
+    if not stat.S_ISDIR(mode):
+        raise PermissionError(f"storage directory is not private: {path}")
+    if os.name == "nt":
+        _verify_windows_private_acl(path)
+    elif mode & 0o077:
+        raise PermissionError(f"storage directory is not private: {path}")
 
 
 def _write_private_bytes(path: Path, data: bytes) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     fd = os.open(path, flags, 0o600)
     with os.fdopen(fd, "wb") as stream:
+        if os.name == "nt":
+            try:
+                _verify_windows_private_acl(path)
+            except PermissionError:
+                stream.close()
+                path.unlink(missing_ok=True)
+                raise
         stream.write(data)
         stream.flush()
         os.fsync(stream.fileno())
+
+
+def _sync_directory(path: Path) -> None:
+    if os.name == "nt":
+        # File flushes and atomic publication work on NTFS, but Python cannot
+        # open a Windows directory for fsync. Power-loss durability is unknown.
+        return
+    directory = os.open(path, os.O_RDONLY)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
 def _write_private_json(path: Path, value: dict[str, object]) -> None:
@@ -141,27 +344,25 @@ def _write_private_json(path: Path, value: dict[str, object]) -> None:
     try:
         _write_private_bytes(temporary, encoded)
         os.replace(temporary, path)
-        directory = os.open(path.parent, os.O_RDONLY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _sync_directory(path.parent)
     finally:
         temporary.unlink(missing_ok=True)
 
 
 def _quarantine_response(
-    raw: bytes, request: HistoricalRequest, directory: Path, received_at: str
+    raw: bytes,
+    request: HistoricalRequest,
+    directory: Path,
+    received_at: str,
+    *,
+    http_status: int | None = None,
+    server_date: str | None = None,
 ) -> Path:
     _private_directory(directory)
     path = directory / f"{uuid.uuid4().hex}.response"
     digest = sha256(raw).hexdigest()
     _write_private_bytes(path, raw)
-    folder = os.open(directory, os.O_RDONLY)
-    try:
-        os.fsync(folder)
-    finally:
-        os.close(folder)
+    _sync_directory(directory)
     _write_private_json(
         path.with_suffix(".meta.json"),
         {
@@ -169,7 +370,10 @@ def _quarantine_response(
             "sha256": digest,
             "received_at": received_at,
             "endpoint": request.endpoint,
+            "method": "POST",
             "request": request.payload(),
+            **({"http_status": http_status} if http_status is not None else {}),
+            **({"server_date": server_date} if server_date is not None else {}),
         },
     )
     return path
@@ -238,9 +442,11 @@ def recover_quarantined_response(
         raise ValueError("quarantined Dhan receipt time has no timezone")
     bars = parse_response(raw, request)
     diagnostics = diagnose_response(raw, request)
-    output_dir.mkdir(parents=True, exist_ok=True)
+    _private_directory(output_dir)
     path = response_path(request, output_dir)
     if path.exists():
+        if os.name == "nt":
+            _verify_windows_private_acl(path)
         if path.read_bytes() != raw:
             raise ValueError("existing Dhan checkpoint has different response bytes")
     else:
@@ -252,11 +458,15 @@ def recover_quarantined_response(
             temporary.unlink(missing_ok=True)
     checksum = path.with_suffix(".sha256")
     if checksum.exists():
+        if os.name == "nt":
+            _verify_windows_private_acl(checksum)
         if checksum.read_text().strip() != digest:
             raise ValueError("checkpoint source checksum mismatch")
     else:
         _write_private_bytes(checksum, (digest + "\n").encode())
     metadata_path = path.with_suffix(".meta.json")
+    if metadata_path.exists() and os.name == "nt":
+        _verify_windows_private_acl(metadata_path)
     if not metadata_path.exists():
         _write_private_json(
             metadata_path,
@@ -277,11 +487,7 @@ def recover_quarantined_response(
                 "recovered_from_quarantine": evidence.name,
             },
         )
-    directory = os.open(output_dir, os.O_RDONLY)
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    _sync_directory(output_dir)
     audit = verify_saved_response(request, path)
     if len(audit.bars) != len(bars):
         raise ValueError("recovered Dhan bar count changed")
@@ -292,8 +498,20 @@ class HistoricalTransport(Protocol):
     def post_json(self, url: str, payload: dict[str, object], token: str) -> bytes: ...
 
 
+@dataclass(frozen=True, slots=True)
+class HistoricalHttpResponse:
+    raw: bytes
+    http_status: int
+    server_date: str | None
+
+
 class UrlLibTransport:
     def post_json(self, url: str, payload: dict[str, object], token: str) -> bytes:
+        return self.post_json_with_metadata(url, payload, token).raw
+
+    def post_json_with_metadata(
+        self, url: str, payload: dict[str, object], token: str
+    ) -> HistoricalHttpResponse:
         request = urllib.request.Request(
             url,
             data=json.dumps(payload, sort_keys=True).encode(),
@@ -301,7 +519,11 @@ class UrlLibTransport:
             method="POST",
         )
         with urllib.request.urlopen(request, timeout=30) as response:
-            return cast(bytes, response.read())
+            return HistoricalHttpResponse(
+                cast(bytes, response.read()),
+                response.status,
+                response.headers.get("Date"),
+            )
 
 
 def run_backfill(
@@ -325,35 +547,58 @@ def run_backfill(
     if minimum_interval_seconds <= 0 or max_retries < 0:
         raise ValueError("invalid pacing or retry policy")
     client = transport or UrlLibTransport()
-    output_dir.mkdir(parents=True, exist_ok=True)
+    _private_directory(output_dir)
     quarantine = quarantine_dir or output_dir / ".quarantine"
     paths = []
     for req in requests:
         path = response_path(req, output_dir)
         label = path.stem
         if path.exists():
+            if os.name == "nt":
+                _verify_windows_private_acl(path)
             raw_existing = path.read_bytes()
             parse_response(raw_existing, req)
             checksum = path.with_suffix(".sha256")
             digest = sha256(raw_existing).hexdigest()
             if checksum.exists():
+                if os.name == "nt":
+                    _verify_windows_private_acl(checksum)
                 if checksum.read_text().strip() != digest:
                     raise ValueError("checkpoint source checksum mismatch")
             else:
                 # Recover the sidecar after atomic raw publication.
-                with checksum.open("x") as stream:
-                    stream.write(digest + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
+                _write_private_bytes(checksum, (digest + "\n").encode())
+            metadata_path = path.with_suffix(".meta.json")
+            if metadata_path.exists() and os.name == "nt":
+                _verify_windows_private_acl(metadata_path)
             paths.append(path)
             continue
+        # Check private storage before consuming a request.
+        _private_directory(quarantine)
         for attempt in range(max_retries + 1):
             try:
-                raw = client.post_json(req.endpoint, req.payload(), secret)
+                if isinstance(client, UrlLibTransport):
+                    response = client.post_json_with_metadata(
+                        req.endpoint, req.payload(), secret
+                    )
+                    raw = response.raw
+                    http_status = response.http_status
+                    server_date = response.server_date
+                else:
+                    raw = client.post_json(req.endpoint, req.payload(), secret)
+                    http_status = None
+                    server_date = None
                 received_at = datetime.now(UTC).isoformat()
                 # The received bytes are evidence even when validation fails. Never
                 # retry a validation error or advance the checkpoint without them.
-                evidence = _quarantine_response(raw, req, quarantine, received_at)
+                evidence = _quarantine_response(
+                    raw,
+                    req,
+                    quarantine,
+                    received_at,
+                    http_status=http_status,
+                    server_date=server_date,
+                )
                 diagnostics = diagnose_response(raw, req)
                 try:
                     parse_response(raw, req)
@@ -372,60 +617,56 @@ def run_backfill(
                 )
                 temporary = output_dir / f".{label}.{uuid.uuid4().hex}.partial"
                 try:
-                    with temporary.open("xb") as stream:
-                        stream.write(raw)
-                        stream.flush()
-                        os.fsync(stream.fileno())
+                    _write_private_bytes(temporary, raw)
                     os.link(temporary, path)
                 finally:
                     temporary.unlink(missing_ok=True)
                 checksum = path.with_suffix(".sha256")
-                with checksum.open("x") as stream:
-                    stream.write(sha256(raw).hexdigest() + "\n")
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                metadata_temp = output_dir / f".{label}.{uuid.uuid4().hex}.meta"
-                try:
-                    with metadata_temp.open("xb") as stream:
-                        stream.write(
-                            (
-                                json.dumps(
-                                    {
-                                        "schema_version": "dhan-chart-raw-v1",
-                                        "endpoint": req.endpoint,
-                                        "method": "POST",
-                                        "request": req.payload(),
-                                        "received_at": received_at,
-                                        "sha256": sha256(raw).hexdigest(),
-                                        "normalization": {
-                                            "reordered": diagnostics["reordered"],
-                                            "sorted_original_indices": diagnostics[
-                                                "sorted_original_indices"
-                                            ],
-                                            "collapsed_duplicate_indices": diagnostics[
-                                                "identical_duplicate_indices"
-                                            ],
-                                        },
-                                    },
-                                    sort_keys=True,
-                                    separators=(",", ":"),
-                                )
-                                + "\n"
-                            ).encode()
-                        )
-                        stream.flush()
-                        os.fsync(stream.fileno())
-                    os.replace(metadata_temp, path.with_suffix(".meta.json"))
-                finally:
-                    metadata_temp.unlink(missing_ok=True)
-                directory = os.open(output_dir, os.O_RDONLY)
-                try:
-                    os.fsync(directory)
-                finally:
-                    os.close(directory)
+                _write_private_bytes(
+                    checksum, (sha256(raw).hexdigest() + "\n").encode()
+                )
+                _write_private_json(
+                    path.with_suffix(".meta.json"),
+                    {
+                        "schema_version": "dhan-chart-raw-v1",
+                        "endpoint": req.endpoint,
+                        "method": "POST",
+                        "request": req.payload(),
+                        "received_at": received_at,
+                        **(
+                            {"http_status": http_status}
+                            if http_status is not None
+                            else {}
+                        ),
+                        **(
+                            {"server_date": server_date}
+                            if server_date is not None
+                            else {}
+                        ),
+                        "sha256": sha256(raw).hexdigest(),
+                        "normalization": {
+                            "reordered": diagnostics["reordered"],
+                            "sorted_original_indices": diagnostics[
+                                "sorted_original_indices"
+                            ],
+                            "collapsed_duplicate_indices": diagnostics[
+                                "identical_duplicate_indices"
+                            ],
+                        },
+                    },
+                )
+                _sync_directory(output_dir)
                 paths.append(path)
                 break
             except urllib.error.HTTPError as exc:
+                _quarantine_response(
+                    exc.read(),
+                    req,
+                    quarantine,
+                    datetime.now(UTC).isoformat(),
+                    http_status=exc.code,
+                    server_date=exc.headers.get("Date") if exc.headers else None,
+                )
                 if exc.code not in {429, 500, 502, 503, 504} or attempt == max_retries:
                     raise RuntimeError(f"Dhan chart HTTP {exc.code}") from None
                 sleep(min(2**attempt, 16))
