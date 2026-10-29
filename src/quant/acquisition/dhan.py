@@ -157,8 +157,9 @@ def _verify_windows_private_acl(path: Path) -> None:
     import ctypes
     from ctypes import wintypes
 
-    advapi = ctypes.WinDLL("Advapi32", use_last_error=True)
-    kernel = ctypes.WinDLL("Kernel32", use_last_error=True)
+    # ctypes exposes these names only on Windows; mypy runs on both platforms.
+    advapi = ctypes.WinDLL("Advapi32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
+    kernel = ctypes.WinDLL("Kernel32", use_last_error=True)  # type: ignore[attr-defined,unused-ignore]
     ptr = ctypes.c_void_p
     advapi.GetNamedSecurityInfoW.argtypes = [
         wintypes.LPWSTR,
@@ -218,7 +219,7 @@ def _verify_windows_private_acl(path: Path) -> None:
             raise ValueError("missing Windows SID")
         value = ptr()
         if not advapi.ConvertSidToStringSidW(ptr(sid), ctypes.byref(value)):
-            raise OSError(ctypes.get_last_error(), "invalid Windows SID")
+            raise OSError(ctypes.get_last_error(), "invalid Windows SID")  # type: ignore[attr-defined,unused-ignore]
         try:
             return ctypes.wstring_at(value)
         finally:
@@ -241,13 +242,13 @@ def _verify_windows_private_acl(path: Path) -> None:
             filesystem,
             len(filesystem),
         ):
-            raise OSError(ctypes.get_last_error(), "cannot verify Windows filesystem")
+            raise OSError(ctypes.get_last_error(), "cannot verify Windows filesystem")  # type: ignore[attr-defined,unused-ignore]
         if filesystem.value != "NTFS":
             raise ValueError("private Windows storage requires NTFS")
         if not advapi.OpenProcessToken(
             kernel.GetCurrentProcess(), 0x0008, ctypes.byref(token)
         ):
-            raise OSError(ctypes.get_last_error(), "cannot read Windows token")
+            raise OSError(ctypes.get_last_error(), "cannot read Windows token")  # type: ignore[attr-defined,unused-ignore]
         needed = wintypes.DWORD()
         advapi.GetTokenInformation(token, 1, None, 0, ctypes.byref(needed))
         if not needed.value:
@@ -256,7 +257,7 @@ def _verify_windows_private_acl(path: Path) -> None:
         if not advapi.GetTokenInformation(
             token, 1, token_data, needed.value, ctypes.byref(needed)
         ):
-            raise OSError(ctypes.get_last_error(), "cannot read Windows token user")
+            raise OSError(ctypes.get_last_error(), "cannot read Windows token user")  # type: ignore[attr-defined,unused-ignore]
         current_sid = sid_text(ptr.from_buffer(token_data).value)
 
         owner = ptr()
