@@ -1461,3 +1461,10 @@ Application suites were not run because their toolchains are absent here.
   ESLint, Prettier after formatting, and Vite build. These are not live market
   or Mac startup evidence. The workflow now includes a Mac-only headless
   localhost startup smoke test after the full suite.
+- Review commit `1daf0d5`, PR #1, run 40841059276 completed successfully on
+  Ubuntu 24.04 and macOS 15. Both jobs passed locked Python, Rust, React and
+  schema checks. The macOS runner's three-service offline startup smoke reached
+  the 5173/8765/8767 health routes and logged DATA_ONLY / NO TRADE. No Mac
+  browser login, private Dhan archive migration, credential loading, live feed
+  or broker order path was tested. A follow-up Mac CI assertion checks the
+  private directory and newly created QP01 file modes directly.
