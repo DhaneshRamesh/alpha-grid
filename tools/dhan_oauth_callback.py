@@ -11,6 +11,7 @@ import hashlib
 import ipaddress
 import json
 import os
+import stat
 import uuid
 import webbrowser
 from collections.abc import Callable
@@ -157,6 +158,50 @@ class DhanAuthClient:
         )
 
     @classmethod
+    def from_env_file(cls, path: Path) -> DhanAuthClient:
+        """Read Mac-local credentials without exporting or logging their values."""
+        if os.name == "nt":
+            _verify_windows_private_acl(path)
+        descriptor = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_size > 16 * 1024
+                or (
+                    os.name != "nt"
+                    and (info.st_uid != os.getuid() or info.st_mode & 0o077)
+                )
+            ):
+                raise PermissionError("Dhan env file must be owner-private")
+            with os.fdopen(descriptor, "r", encoding="utf-8") as stream:
+                descriptor = -1
+                lines = stream.readlines()
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+        values: dict[str, str] = {}
+        required = {"DHAN_CLIENT_ID", "DHAN_API_KEY", "DHAN_API_SECRET"}
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#"):
+                continue
+            name, separator, value = stripped.partition("=")
+            name = name.strip()
+            if not separator or name in values:
+                raise ValueError("Dhan env file has duplicate or malformed entries")
+            if name in required:
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+                    value = value[1:-1]
+                values[name] = value
+        return cls(
+            values.get("DHAN_CLIENT_ID", ""),
+            values.get("DHAN_API_KEY", ""),
+            values.get("DHAN_API_SECRET", ""),
+        )
+
+    @classmethod
     def from_private_store(cls) -> DhanAuthClient:
         _private_directory(CLIENT_ID_FILE.parent)
         values: list[str] = []
@@ -238,6 +283,7 @@ class CallbackServer(HTTPServer):
         self.client = client
         self.token_file = token_file
         self.postback_dir = postback_dir
+        self.consent_complete = False
 
     def handle_error(self, request: object, client_address: tuple[str, int]) -> None:
         # Default HTTPServer tracebacks can include request details.
@@ -266,11 +312,17 @@ class CallbackHandler(BaseHTTPRequestHandler):
         assert isinstance(server, CallbackServer)
         address = urlsplit(self.path)
         if address.path == "/dhan/complete":
-            self._reply(200, b"Dhan authorization received. You may close this tab.")
+            if server.consent_complete:
+                self._reply(
+                    200, b"Dhan authorization received. You may close this tab."
+                )
+            else:
+                self._reply(404, b"Consent incomplete")
             return
         if address.path.rstrip("/") != CALLBACK_PATH:
             self._reply(404, b"Not found")
             return
+        print("Dhan callback route reached", flush=True)
         try:
             values = parse_qs(
                 address.query, keep_blank_values=True, max_num_fields=10
@@ -283,11 +335,13 @@ class CallbackHandler(BaseHTTPRequestHandler):
             or not 1 <= len(values[0]) <= 4096
             or any(not 33 <= ord(char) <= 126 for char in values[0])
         ):
+            print("Dhan callback token ID unavailable", flush=True)
             self._reply(400, b"Invalid callback")
             return
         try:
             token = server.client.consume_consent(values[0])
         except (OSError, ValueError):
+            print("Dhan consent exchange failed", flush=True)
             self._reply(502, b"Dhan authorization failed")
             return
         try:
@@ -315,8 +369,11 @@ class CallbackHandler(BaseHTTPRequestHandler):
                 replace=True,
             )
         except OSError:
+            print("Dhan token storage failed", flush=True)
             self._reply(500, b"Token storage failed")
             return
+        server.consent_complete = True
+        print("Dhan consent token saved", flush=True)
         self._reply(303, b"", location="/dhan/complete")
 
     def do_POST(self) -> None:
@@ -391,8 +448,13 @@ class CallbackHandler(BaseHTTPRequestHandler):
 def main() -> None:
     parser = argparse.ArgumentParser(description="Private local Dhan consent callback")
     parser.add_argument("--initiate", action="store_true")
+    parser.add_argument("--env-file", type=Path)
     args = parser.parse_args()
-    client = DhanAuthClient.from_private_store()
+    client = (
+        DhanAuthClient.from_env_file(args.env_file)
+        if args.env_file is not None
+        else DhanAuthClient.from_private_store()
+    )
     endpoint_urls(dict(os.environ))
     with CallbackServer((HOST, PORT), client) as server:
         print("Dhan consent callback listening locally")

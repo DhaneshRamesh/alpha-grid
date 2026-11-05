@@ -30,20 +30,14 @@ from quant.acquisition.dhan import (
 from quant.acquisition.registry import load_registry
 
 IST = ZoneInfo("Asia/Kolkata")
-SESSION_DAY = date(2026, 10, 27)
+SESSION_DAY = date(2026, 11, 3)
 SLOT_TIMES = (
     "09:59:55",
     "10:00:02",
-    "10:00:07",
-    "10:00:20",
-    "10:00:45",
-    "10:00:55",
+    "10:00:10",
+    "10:00:30",
     "10:01:02",
-    "10:01:07",
-    "10:01:20",
-    "10:01:45",
     "10:02:02",
-    "10:02:20",
     "10:05:00",
     "15:45:00",
 )
@@ -138,7 +132,7 @@ def capture(
 ) -> dict[str, object]:
     """Save every received body before inspecting it; skip missed slots, never retry."""
     if max_requests != len(SLOT_TIMES) or not token:
-        raise PermissionError("exact 14-request scope and local access token required")
+        raise PermissionError("exact 8-request scope and local access token required")
     _verified_session(calendar_path)
     _verified_instrument(registry_path)
     if now().astimezone(IST).date() != SESSION_DAY or now() >= _slot_utc(
@@ -374,7 +368,7 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path("data/historical/availability-2026-10-27"),
+        default=Path("data/historical/availability-2026-11-03"),
     )
     parser.add_argument("--report", action="store_true")
     args = parser.parse_args()

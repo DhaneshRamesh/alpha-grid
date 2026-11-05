@@ -6,6 +6,7 @@ import hashlib
 import http.client
 import io
 import json
+import os
 import tempfile
 import threading
 import unittest
@@ -51,6 +52,27 @@ def request(
 
 
 class CallbackTests(unittest.TestCase):
+    def test_private_env_file_loads_api_key_flow_without_token(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / ".env"
+            path.write_text(
+                "DHAN_ACCESS_TOKEN=\nDHAN_CLIENT_ID=test-client\n"
+                "DHAN_API_KEY='test-key'\nDHAN_API_SECRET=test-secret\n"
+            )
+            path.chmod(0o600)
+            client = DhanAuthClient.from_env_file(path)
+            self.assertEqual(client.client_id, "test-client")
+            self.assertEqual(client._api_key, "test-key")
+            self.assertEqual(client._api_secret, "test-secret")
+            if os.name != "nt":
+                path.chmod(0o644)
+                with self.assertRaisesRegex(PermissionError, "owner-private"):
+                    DhanAuthClient.from_env_file(path)
+                path.chmod(0o600)
+            path.write_text("DHAN_CLIENT_ID=a\nDHAN_CLIENT_ID=b\n")
+            with self.assertRaisesRegex(ValueError, "duplicate or malformed"):
+                DhanAuthClient.from_env_file(path)
+
     def test_documented_generate_consent_is_one_post(self) -> None:
         seen: list[object] = []
 
@@ -121,7 +143,7 @@ class CallbackTests(unittest.TestCase):
             mismatched.consume_consent("one-time")
 
     def test_http_callback_exchanges_then_saves_token_without_echo(self) -> None:
-        with tempfile.TemporaryDirectory(dir=Path("data/.secrets")) as directory:
+        with tempfile.TemporaryDirectory() as directory:
             client = FakeClient()
             token_file = Path(directory) / "token"
             postbacks = Path(directory) / "postbacks"
@@ -131,6 +153,11 @@ class CallbackTests(unittest.TestCase):
                 thread = threading.Thread(target=server.serve_forever, daemon=True)
                 thread.start()
                 try:
+                    status, _, body = request(
+                        server.server_port, "GET", "/dhan/complete"
+                    )
+                    self.assertEqual(status, 404)
+                    self.assertNotIn(b"authorization received", body)
                     status, _, _ = request(
                         server.server_port,
                         "GET",
@@ -169,7 +196,7 @@ class CallbackTests(unittest.TestCase):
                     thread.join(timeout=3)
 
     def test_postback_is_quarantined_with_unverified_origin(self) -> None:
-        with tempfile.TemporaryDirectory(dir=Path("data/.secrets")) as directory:
+        with tempfile.TemporaryDirectory() as directory:
             client = FakeClient()
             postbacks = Path(directory) / "postbacks"
             with CallbackServer(

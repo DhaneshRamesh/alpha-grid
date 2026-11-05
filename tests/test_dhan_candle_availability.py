@@ -21,10 +21,10 @@ def _calendar(path: Path) -> Path:
         json.dumps(
             {
                 "version": "synthetic-test-only",
-                "scope": {"start": "2026-10-27", "end": "2026-10-28"},
+                "scope": {"start": "2026-11-03", "end": "2026-11-04"},
                 "special": [
                     {
-                        "day": "2026-10-27",
+                        "day": "2026-11-03",
                         "opens": "09:15:00",
                         "closes": "15:15:00",
                         "kind": "CAS_CONTINUOUS_TRADING",
@@ -51,8 +51,8 @@ def _registry(path: Path) -> Path:
                             "symbol": "RELIANCE",
                         },
                         "name": "RELIANCE INDUSTRIES LTD",
-                        "effective_from": "2026-10-27",
-                        "effective_to": "2026-10-28",
+                        "effective_from": "2026-11-03",
+                        "effective_to": "2026-11-04",
                         "listing_status": "LISTED",
                         "source_manifest_version": "synthetic-test-only",
                     }
@@ -124,21 +124,24 @@ def test_plan_is_offline_and_cap_is_exact(
     probe.main()
     value = json.loads(capsys.readouterr().out)
     assert value["mode"] == "PLAN_NO_NETWORK"
-    assert value["maximum_requests"] == 14
+    assert value["maximum_requests"] == 8
     assert value["request"]["securityId"] == "2885"
-    assert value["request"]["fromDate"] == "2026-10-27 00:00:00"
-    assert value["request"]["toDate"] == "2026-10-28 00:00:00"
+    assert value["request"]["fromDate"] == "2026-11-03 00:00:00"
+    assert value["request"]["toDate"] == "2026-11-04 00:00:00"
+    assert value["scheduled_ist"] == [
+        f"2026-11-03T{slot}+05:30" for slot in probe.SLOT_TIMES
+    ]
     assert not list(tmp_path.iterdir())
 
     clock = FakeClock()
     client = FakeTransport(clock)
-    with pytest.raises(PermissionError, match="14-request"):
+    with pytest.raises(PermissionError, match="8-request"):
         probe.capture(
             tmp_path / "blocked",
             _calendar(tmp_path / "calendar.json"),
             _registry(tmp_path / "registry.json"),
             "fixture-token-only",
-            max_requests=13,
+            max_requests=7,
             transport=client,
             now=clock.now,
             monotonic_ns=clock.monotonic_ns,
@@ -153,8 +156,8 @@ def test_undated_instrument_identity_blocks_all_requests(tmp_path: Path) -> None
     client = FakeTransport(clock)
     registry = _registry(tmp_path / "registry.json")
     data = json.loads(registry.read_text())
-    data["records"][0]["effective_from"] = "2026-10-26"
-    data["records"][0]["effective_to"] = "2026-10-27"
+    data["records"][0]["effective_from"] = "2026-11-02"
+    data["records"][0]["effective_to"] = "2026-11-03"
     registry.write_text(json.dumps(data))
     with pytest.raises(ValueError, match="historical security ID"):
         probe.capture(
@@ -162,7 +165,7 @@ def test_undated_instrument_identity_blocks_all_requests(tmp_path: Path) -> None
             _calendar(tmp_path / "calendar.json"),
             registry,
             "fixture-token-only",
-            max_requests=14,
+            max_requests=8,
             transport=client,
             now=clock.now,
             monotonic_ns=clock.monotonic_ns,
@@ -183,16 +186,16 @@ def test_synthetic_capture_preserves_every_version_and_reports_observed_stabilit
         _calendar(tmp_path / "calendar.json"),
         _registry(tmp_path / "registry.json"),
         "fixture-token-only",
-        max_requests=14,
+        max_requests=8,
         transport=client,
         now=clock.now,
         monotonic_ns=clock.monotonic_ns,
         sleep=clock.advance,
     )
-    assert result["requests_sent"] == client.calls == 14
+    assert result["requests_sent"] == client.calls == 8
     assert result["slots_skipped"] == 0
     assert result["timing_eligibility"] == "UNVERIFIED"
-    for index in range(14):
+    for index in range(8):
         slot = json.loads((output / f"slot-{index:02}.json").read_text())
         raw = (output / slot["response_file"]).read_bytes()
         receipt = json.loads(
@@ -222,7 +225,7 @@ def test_http_failure_is_saved_without_retry(tmp_path: Path) -> None:
         _calendar(tmp_path / "calendar.json"),
         _registry(tmp_path / "registry.json"),
         "fixture-token-only",
-        max_requests=14,
+        max_requests=8,
         transport=client,
         now=clock.now,
         monotonic_ns=clock.monotonic_ns,
@@ -239,7 +242,7 @@ def test_historical_transport_exposes_status_without_changing_raw_bytes(
 ) -> None:
     class Response(io.BytesIO):
         status = 200
-        headers = {"Date": "Tue, 27 Oct 2026 04:30:00 GMT"}
+        headers = {"Date": "Tue, 03 Nov 2026 04:30:00 GMT"}
 
     def fake_urlopen(request: object, *, timeout: int) -> Response:
         assert timeout == 30
@@ -250,4 +253,4 @@ def test_historical_transport_exposes_status_without_changing_raw_bytes(
     result = client.post_json_with_metadata("https://example.invalid", {}, "fixture")
     assert result.raw == b"raw-synthetic-only\n"
     assert result.http_status == 200
-    assert result.server_date == "Tue, 27 Oct 2026 04:30:00 GMT"
+    assert result.server_date == "Tue, 03 Nov 2026 04:30:00 GMT"

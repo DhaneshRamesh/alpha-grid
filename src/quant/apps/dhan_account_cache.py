@@ -19,6 +19,7 @@ from quant.acquisition.dhan import (
     _write_private_bytes,
     _write_private_json,
 )
+from quant.apps.live_feed_credentials import _private_bytes
 
 ROOT = Path("data/.secrets/dhan-account-cache")
 TOKEN_PATH = Path("data/.secrets/dhan-access-token")
@@ -26,6 +27,27 @@ ENDPOINTS = ("fundlimit", "holdings", "positions", "orders", "trades")
 MIN_INTERVAL = timedelta(minutes=5)
 MAX_BODY = 2 * 1024 * 1024
 IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def _client_id() -> str | None:
+    """Read the backend identity without placing credentials in child environments."""
+    path = TOKEN_PATH.parent / "dhan-client-id"
+    if path.is_file():
+        client_id = _private_bytes(path).decode("ascii").strip()
+    else:
+        try:
+            lines = _private_bytes(Path(".env")).decode("utf-8").splitlines()
+        except OSError:
+            return None
+        values = [
+            line.partition("=")[2].strip().strip("\"'")
+            for line in lines
+            if line.strip().startswith("DHAN_CLIENT_ID=")
+        ]
+        if len(values) != 1:
+            return None
+        client_id = values[0]
+    return client_id if client_id.isdecimal() else None
 
 
 def _state_path(name: str) -> Path:
@@ -72,7 +94,7 @@ def save(name: str, status: int, raw: bytes, received_at: str) -> dict[str, Any]
     state = _read_state(name)
     if not state.get("last_attempt_at"):
         raise ValueError("account response has no reserved request")
-    client_id = os.environ.get("DHAN_CLIENT_ID", "").strip()
+    client_id = _client_id()
     if not client_id:
         raise ValueError("Dhan client identity unavailable")
     identifier = uuid.uuid4().hex
@@ -278,8 +300,11 @@ def main() -> None:
             meta = json.loads(meta_path.read_text(encoding="utf-8"))
             expiry = datetime.fromisoformat(meta.get("expires_at_utc", ""))
             metadata_valid = (
-                meta.get("schema_version") == "dhan-consent-token-v1"
-                and meta.get("source") == "https://auth.dhan.co/app/consumeApp-consent"
+                (meta.get("schema_version"), meta.get("source"))
+                in {
+                    ("dhan-consent-token-v1", "https://auth.dhan.co/app/consumeApp-consent"),
+                    ("dhan-web-manual-token-v1", "https://web.dhan.co/"),
+                }
                 and meta.get("token_sha256")
                 == sha256(path.read_bytes().strip()).hexdigest()
                 and expiry.tzinfo is not None
@@ -310,7 +335,7 @@ def main() -> None:
         record_failure(name, payload["received_at"])
         print("{}")
     elif command == "load":
-        print(json.dumps(load(name, os.environ.get("DHAN_CLIENT_ID"))))
+        print(json.dumps(load(name, _client_id())))
     else:
         raise ValueError("unsupported account cache operation")
 

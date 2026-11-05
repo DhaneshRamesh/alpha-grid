@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import stat
 from collections import Counter, deque
 from datetime import date, datetime, time
 from decimal import Decimal
@@ -27,6 +28,15 @@ REQUEST = HistoricalRequest(
     1,
 )
 EXPECTED_SHA256 = "bcace97b4dfd1b1cbfe10481b4718b770368a50c5264fb1f61a50f9c325d9861"
+MAC_ROOT = Path("data/historical/raw-dhan-macos-2026-11-01")
+MAC_REQUEST = HistoricalRequest(
+    CashInstrument("NSE", "NSE_EQ", "2885", "RELIANCE"),
+    date(2026, 10, 26),
+    date(2026, 10, 31),
+    1,
+)
+MAC_EXPECTED_SHA256 = "a4c61e3d5ad8ce3b9bf78317ac73ff15502bcefa52bd6a09c3771b866d2d8653"
+MAC_COVERAGE = {f"2026-10-{day}": 360 for day in range(26, 31)}
 MINUTE_NS = 60_000_000_000
 
 
@@ -126,7 +136,14 @@ def descriptive_replay(
     }
 
 
-def read_cached_reliance(path: Path, expected_sha256: str) -> dict[str, object]:
+def read_cached_reliance(
+    path: Path,
+    expected_sha256: str,
+    *,
+    request: HistoricalRequest = REQUEST,
+    expected_coverage: dict[str, int] | None = None,
+    unavailable_date: str | None = "2026-10-27",
+) -> dict[str, object]:
     """Fail closed on missing private evidence; never use a fixture at runtime."""
     if os.name == "nt":
         for item in (
@@ -136,16 +153,35 @@ def read_cached_reliance(path: Path, expected_sha256: str) -> dict[str, object]:
             path.with_suffix(".meta.json"),
         ):
             _verify_windows_private_acl(item)
-    audit = verify_saved_response(REQUEST, path)
+    else:
+        for item in (
+            path.parent,
+            path,
+            path.with_suffix(".sha256"),
+            path.with_suffix(".meta.json"),
+        ):
+            info = item.lstat()
+            expected_type = stat.S_ISDIR if item == path.parent else stat.S_ISREG
+            if (
+                not expected_type(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_mode & 0o077
+            ):
+                raise PermissionError("cached Dhan source is not owner-private")
+    audit = verify_saved_response(request, path)
     if audit.sha256 != expected_sha256 or audit.retrieved_at is None:
         raise ValueError(
             "cached Dhan source integrity or retrieval provenance unavailable"
         )
     bars = audit.bars
-    if not bars or len(bars) > 1_000:
+    if not bars or len(bars) > 2_000:
         raise ValueError("cached Dhan source size unavailable")
     counts = Counter(bar.trading_date.isoformat() for bar in bars)
-    if set(counts) != {"2026-10-15", "2026-10-16"}:
+    if expected_coverage is None:
+        coverage_ok = set(counts) == {"2026-10-15", "2026-10-16"}
+    else:
+        coverage_ok = dict(counts) == expected_coverage
+    if not coverage_ok:
         raise ValueError("cached Dhan session coverage mismatch")
     gaps: dict[str, int] = {}
     for day in counts:
@@ -161,6 +197,12 @@ def read_cached_reliance(path: Path, expected_sha256: str) -> dict[str, object]:
             max(0, (later - earlier) // 60_000_000_000 - 1)
             for earlier, later in zip(ordered, ordered[1:], strict=False)
         )
+    simulation: dict[str, object] | None = None
+    if audit.sha256 == MAC_EXPECTED_SHA256:
+        from quant.apps.historical_simulator import UNIVERSE_PATH, simulate
+
+        universe = json.loads(UNIVERSE_PATH.read_text())
+        simulation = simulate({"RELIANCE": bars}, universe)
     return {
         "schema_version": "dhan-historical-cache-v1",
         "status": "AVAILABLE",
@@ -170,7 +212,7 @@ def read_cached_reliance(path: Path, expected_sha256: str) -> dict[str, object]:
         "retrieved_at": audit.retrieved_at.isoformat(),
         "coverage": counts,
         "source_timestamp_internal_gaps": gaps,
-        "unavailable_date": "2026-10-27",
+        **({"unavailable_date": unavailable_date} if unavailable_date else {}),
         "bar_timestamp_semantics": "UNVERIFIED",
         "historical_identity": "CURRENT_MASTER_ONLY",
         "source_integrity": "VERIFIED",
@@ -179,6 +221,7 @@ def read_cached_reliance(path: Path, expected_sha256: str) -> dict[str, object]:
         "production_eligibility": "BLOCKED",
         "daily_status": "NO_AUTHENTIC_DAILY_RESPONSE",
         "replay": descriptive_replay(bars, audit.sha256),
+        **({"simulation": simulation} if simulation is not None else {}),
         "bars": [
             {
                 "timestamp_ns": str(bar.source_timestamp_ns),
@@ -194,9 +237,71 @@ def read_cached_reliance(path: Path, expected_sha256: str) -> dict[str, object]:
 
 
 def main() -> None:
-    print(
-        json.dumps(read_cached_reliance(response_path(REQUEST, ROOT), EXPECTED_SHA256))
-    )
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cross-stock-symbol")
+    parser.add_argument("--private-dir", type=Path)
+    args = parser.parse_args()
+    if args.cross_stock_symbol:
+        if args.private_dir is None:
+            raise ValueError("private archive directory required")
+        from quant.acquisition.contracts import CashInstrument
+        from collections import Counter
+
+        manifest = json.loads(Path("docs/cross-stock-universe-2026-11-02.json").read_text())
+        rows = [row for row in manifest["instruments"] if row["symbol"] == args.cross_stock_symbol]
+        if len(rows) != 1:
+            raise ValueError("symbol outside frozen universe")
+        row = rows[0]
+        if row["symbol"] == "RELIANCE":
+            # The frozen universe reuses the pinned response; no duplicate
+            # RELIANCE file was written to the 24-response acquisition folder.
+            pinned = response_path(MAC_REQUEST, MAC_ROOT)
+            print(json.dumps(read_cached_reliance(
+                pinned, MAC_EXPECTED_SHA256, request=MAC_REQUEST,
+                expected_coverage=MAC_COVERAGE, unavailable_date=None,
+            )))
+            return
+        request = HistoricalRequest(
+            CashInstrument("NSE", "NSE_EQ", row["security_id"], row["symbol"], row["isin"]),
+            date(2026, 10, 26), date(2026, 10, 31), 1,
+        )
+        path = response_path(request, args.private_dir / "historical-25-oct26-30")
+        for item in (path.parent, path, path.with_suffix(".sha256"), path.with_suffix(".meta.json")):
+            info = item.lstat()
+            expected = stat.S_ISDIR if item == path.parent else stat.S_ISREG
+            if not expected(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
+                raise PermissionError("cross-stock archive storage not owner-private")
+        audit = verify_saved_response(request, path)
+        if audit.retrieved_at is None or not audit.bars or len(audit.bars) > 2_000:
+            raise ValueError("verified cross-stock archive unavailable")
+        bars = audit.bars
+        coverage = dict(Counter(bar.trading_date.isoformat() for bar in bars))
+        print(json.dumps({
+            "schema_version": "dhan-historical-cache-v1", "status": "AVAILABLE",
+            "source": "DHAN_HISTORICAL", "instrument": f"NSE_EQ:{row['security_id']}:{row['symbol']}",
+            "response_sha256": audit.sha256, "retrieved_at": audit.retrieved_at.isoformat(),
+            "coverage": coverage, "source_integrity": "VERIFIED",
+            "exploratory_eligibility": "DESCRIPTIVE_ONLY", "causal_eligibility": "BLOCKED",
+            "bar_timestamp_semantics": "UNVERIFIED", "historical_identity": "CURRENT_MASTER_ONLY",
+            "bars": [{"timestamp_ns": str(bar.source_timestamp_ns), "open_nanos": str(bar.open_nanos),
+                      "high_nanos": str(bar.high_nanos), "low_nanos": str(bar.low_nanos),
+                      "close_nanos": str(bar.close_nanos), "volume": str(bar.volume)} for bar in bars],
+        }))
+        return
+    mac_path = response_path(MAC_REQUEST, MAC_ROOT)
+    if mac_path.exists():
+        cache = read_cached_reliance(
+            mac_path,
+            MAC_EXPECTED_SHA256,
+            request=MAC_REQUEST,
+            expected_coverage=MAC_COVERAGE,
+            unavailable_date=None,
+        )
+    else:
+        cache = read_cached_reliance(response_path(REQUEST, ROOT), EXPECTED_SHA256)
+    print(json.dumps(cache))
 
 
 if __name__ == "__main__":
