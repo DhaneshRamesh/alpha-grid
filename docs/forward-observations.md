@@ -106,6 +106,11 @@ run. QJ01/QP01 ledgers and the frozen 15-minute experiment are untouched.
 
 ## Proposed Dhan candle-availability observation (not executed)
 
+The October 27, 14-slot text below records an earlier proposal that was never
+executed and is **superseded**. The current offline probe is fixed to November
+3, 2026, eight slots, as specified in `docs/reliance-candle-timing-review.md`.
+Do not use the October command or payload below for execution.
+
 `python -m quant.apps.dhan_candle_availability` prints the fixed plan without
 reading a token or making a request. This separate, opt-in probe uses the
 existing Dhan historical client, parser and private response quarantine. It
@@ -154,7 +159,8 @@ request cap for a training pass does not authorize this new session.
   with an after-close match shown separately. Unsampled revisions and later
   corrections remain possible; exact stable completion is unverified.
 
-After separate approval and preflight evidence, the explicit execution guard
+For the superseded October proposal, after separate approval and preflight
+evidence, the explicit execution guard
 requires `--execute-read-only --approved-scope --max-requests 14 --calendar
 DATED.json --registry DATED.json`; the token stays in a local environment
 variable and is never recorded. Use a fresh private output directory. The

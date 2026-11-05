@@ -1,5 +1,15 @@
 # RELIANCE six-month Dhan backfill plan (DATA_ONLY)
 
+> **Mac execution update, 2026-11-01 IST:** The owner subsequently authorized
+> a different six-calendar-month window, May 1 through October 30, 2026.
+> The existing Mac `backfill` workflow made two new no-retry historical POSTs
+> for May 1–July 29 and July 30–October 25, then reused the verified
+> October 26–30 response. All three original responses are preserved under
+> ignored `data/historical/raw-dhan-macos-2026-11-01/`. Their hashes, receipt
+> metadata and offline audit are recorded in
+> [the Mac audit](reliance-six-month-mac-audit.md). The older plan below is
+> retained as historical planning context; it is not the command to rerun.
+
 Status: **offline preparation only**. No new authenticated chart request has
 been made. Dhan's [intraday API](https://docs.dhanhq.co/api/v2/historical-data/get-intraday-historical)
 limits each request to 90 calendar days. The existing October 12–16 response

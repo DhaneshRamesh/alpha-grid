@@ -8,10 +8,10 @@ These documents are navigation aids. Read the relevant implementation and tests
 before changing behavior; dated documentation is not evidence of current remote
 services or of ignored local datasets.
 
-Run `powershell -NoProfile -File tools/repo-context.ps1 -Check` to detect changes
+Run `powershell -NoProfile -File tools/repo-context.ps1 -Check` (or `python3 tools/repo_context.py --check` on macOS/Linux) to detect changes
 against `docs/context/merkle.json`. A stale index is a prompt to inspect changed
 files and revise affected summaries. Refresh it with
-`powershell -NoProfile -File tools/repo-context.ps1` after updating context.
+`powershell -NoProfile -File tools/repo-context.ps1` (or `python3 tools/repo_context.py`) after updating context.
 Stage new source files or add them to the script's explicit support list before
 refreshing so Git includes them in the inventory.
 

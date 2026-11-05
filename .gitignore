@@ -19,6 +19,8 @@ data/config/*
 benchmark-data/
 rust/target/
 .local/
+node_modules/
+.vscode/
 web/node_modules/
 web/dist/
 web/*.tsbuildinfo

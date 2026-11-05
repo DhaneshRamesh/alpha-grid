@@ -27,6 +27,25 @@ are rejected.
 
 ## Local setup
 
+On macOS, the callback can read the three API-key inputs directly from a
+repository-root `.env` using `--env-file .env`. The file must be owned by the
+current user, mode 0600, regular and no larger than 16 KiB. It needs
+`DHAN_CLIENT_ID`, `DHAN_API_KEY` and `DHAN_API_SECRET`; the callback does not
+use `DHAN_ACCESS_TOKEN` to start consent. Run from the repository root only
+after separately authorizing the Dhan consent POST, personal browser login,
+and consume-consent GET:
+
+    .venv/bin/python -B tools/dhan_oauth_callback.py --env-file .env --initiate
+
+The Dhan API-key registration must redirect to the callback URL that this
+machine can receive. For local use that is
+`http://127.0.0.1:8766/dhan/callback`; Dhan's acceptance of a loopback
+redirect is not established here. The callback stores the resulting token and
+expiry in private `data/.secrets/dhan-access-token` and its metadata sidecar.
+The historical acquisition CLI still requires `DHAN_ACCESS_TOKEN` in its
+process environment; it does not read the API key, secret or `.env` by itself.
+The consent calls are separate from any approved historical-chart request.
+
 The existing API key, secret and client ID are kept in ordinary-user-owned
 private NTFS files `data/.secrets/dhan-api-key`, `dhan-api-secret` and
 `dhan-client-id`. The callback verifies their DACLs and loads them in memory;

@@ -1,5 +1,333 @@
 # Alpha Grid context map
 
+## Targeted capture reliability and order-book amendment v3 — 2026-11-04 IST
+
+`rust/crates/quant-journal` extends `JournalWriter` with automatic directory detection and seamless delegation to `SegmentedJournal` (4 GB capacity, 64 MB chunk rotation) alongside single-file journal capacity raised to 512 MB. This resolves the QJ01 raw capture halt observed on November 4 at 15:06 IST when `STANDARD_FULL` (packet code 8, 5-level book) reached the legacy 128 MB ceiling, preserving frame hashes, durability, and recovery guarantees. Python preflight (`dhan_quote_preflight.py`) and Rust telemetry (`quant-telemetry`, `quant-engine`) inspect active writer capacities accordingly.
+`src/quant/research/prospective.py` reconciles NSE cash transaction charges to Dhan's published uniform tariff of 0.0030699% (₹3.0699 per lakh turnover), updating fee models for ₹5,000, ₹15,000, and ₹100,000 virtual deployments.
+`src/quant/research/order_book_imbalance.py` audits `evaluate_filter_economics` to enforce strict single-counting of avoided trade P&L, fees saved, missed entries, dynamic capital release on position exit, and redeployment value without double-counting spread or statutory charges, while tracking sequential portfolio capital constraints (₹15,000 ceiling). Outcomes in `locate_outcome_quote` enforce exact feed session identity, causal availability ($T_{\text{maturity}} \le T_{\text{exit}} \le \text{as\_of}$), and deterministic ordering. Capture startup rotates into segmented journal directories via `quant-journal`, with transparent reader support across flat and segmented formats.
+Tripathi et al. (2021) *Finance Research Letters* article identifier is corrected to **101863** (formerly 101831). All research updates are formally pre-registered in `ORDER_BOOK_AMENDMENT_V3` (`alpha-grid-order-book-amendment-v3`) preserving the frozen November RELIANCE holdout and exploratory November 4 status.
+
+## Engineering fixes: Cross-platform Merkle, NSE ingestion, and 20-level depth telemetry — 2026-11-04 IST
+
+`tools/repo_context.py` provides cross-platform Merkle tree context validation and refresh (`python tools/repo_context.py [--check]`), maintaining full compatibility with `tools/repo-context.ps1` for non-Windows environments.
+`src/quant/apps/ingest_nse_evidence.py` ingests manual browser downloads of official daily `NSE_CM_security_DDMMYYYY.csv.gz` files, verifying integrity and normal market eligibility across all 25 frozen universe stocks, generating verified `.manifest.json` sidecars and updating `calendar.json` observation evidence.
+`quant-depth` exports verified 20-level depth books to `data/telemetry/depth-books.json` via `--depth-books`, polled by `telemetry_local.rs` using atomic seqlock updates and streamed to the web cockpit (`web/src/stream.ts`), allowing real-time depth inspection on the trading dashboard.
+
+## Live Full and depth capture, chart time display — 2026-11-04 IST
+
+The operator explicitly approved a persistent read-only `STANDARD_FULL` and
+`DEPTH_20` scope for the frozen 25 NSE_EQ IDs. The private scope now records
+both feeds and the launcher has one external socket per feed. A read-only
+QJ01 sweep during the session counted 98,154 original standard frames,
+118,903 code-4 Quote packets and 21,279 code-8 Full packets. The local
+gateway snapshot showed 25 raw observed prices and 25 `STANDARD_FULL_RAW`
+same-packet five-level books. The depth collector's private status showed
+1,243 received frames and a connected socket at that check. These are
+capture observations, not decision-eligible quotes or simulated fills.
+
+`read_model.rs` now publishes genuine raw LTP and optional Full books with
+frame hash, receipt and durability metadata after QJ01 sync. The browser
+snapshot validator accepts only a Full book paired to its market packet by
+protocol, feed session, frame, offset, SHA-256 and receipt timestamp. Raw
+packets retain `RAW_CAPTURE_VALIDATION_PENDING`; the Python portfolio worker
+rejects them. The Candle workstation has a separate live LTP line and keeps
+historical Dhan OHLCV as source bars. TradingView's default UTC axis caused
+06:30 to be shown for a 12:00 IST source instant; custom tick and crosshair
+formatters now label instants in IST without rewriting archive timestamps.
+
+The depth collector installs Rustls' crypto provider before its live socket.
+The launcher counts actual network attempts rather than offline preflight
+passes toward its daily budget. Depth failure is reported separately from
+standard capture. Dated NSE security/CAS evidence remains unavailable, so
+the live observations remain descriptive and simulation is paused. Focused
+tests passed for Rust depth/telemetry, Python live worker and web stream,
+chart and app; web build and lint passed. Cross-platform Merkle checking and refresh is now handled via `tools/repo_context.py`.
+
+## Standard Full packet depth, 2026-11-04 IST
+
+The genuine November 3 raw QJ01 has 315,817 frames and 449,347 response-code-4
+Quote packets across all 25 IDs, with no code-8 Full packets. Its saved scope
+authorizes `STANDARD_QUOTE`, so missing books were caused by RequestCode 17.
+The existing standard socket now also supports RequestCode 21 under the
+approved `STANDARD_FULL` scope. The Rust decoder validates all five price, quantity and
+order-count levels; a bad book becomes unavailable for that instrument without
+discarding other decoded packets. Rust syncs the original QJ01 frame before
+publishing any book, hash and timestamps. With unresolved decision validation,
+it exposes `STANDARD_FULL_RAW` descriptive depth and a clearly labeled raw
+LTP observation, with neither eligible for portfolio decisions;
+the portfolio worker still sees validation pending and cannot ingest it. With
+all decision gates satisfied, `STANDARD_FULL` also supplies a same-packet
+quote. The local snapshot carries five-level spread, displayed liquidity,
+imbalance and receipt-ordered depth-change/OFI proxies. The Python v2 worker verifies that
+the book and quote share a receipt and checks displayed quantity for virtual
+reference decisions. Overview, Market intelligence, Order book and Feature
+monitor show the same book with its validation state; the simulator view uses
+only eligible observations. Raw capture still runs when decision-validation inputs are
+missing; the saved Full and depth scope was approved on November 4.
+
+## Eligible quote projection into virtual portfolio, 2026-11-03 IST
+
+`apps/live_feed_scope.py` first admits the existing approved 25-ID raw capture.
+It reuses the dated NSE/master/calendar and independent 100 ms clock checks
+for a separate virtual-decision projection; failure leaves the same raw socket
+running without publishing decision inputs. Rust `StandardCapture` fsyncs each
+original QJ01 frame, then `TelemetryPublisher` may publish its decoded quote
+with raw SHA-256, frame ID, packet offset, receipt and durability timestamps.
+The gateway marks validation-pending when that projection is unavailable and
+can downgrade/recover it as clock evidence changes. The Python v2 worker reads
+only this local gateway snapshot. Because the approved Dhan code-4 feed has
+LTP but no bid/ask, it uses the existing Node GET cache of original Dhan REST
+quote responses only when the book and Rust packet receipts are each under
+two seconds old and instrument IDs match. No new Dhan poll is made by the
+worker. It stores both hashes, availability and decision times with each
+observation; missing/crossed books reject only the affected instrument.
+The existing launcher can make one bounded scoped reconnect if dated proof
+arrives after raw capture started; exhausting its new-connection budget does
+not stop an already running socket.
+`SimulationWorkspace` shows book source and receipt-to-worker delay. See the
+latest decision note for genuine archive coverage and live blockers.
+
+## Concurrent local simulation and service recovery, 2026-11-03 IST
+
+`tools/start-cockpit-macos.sh` now starts `apps/live_simulation.py --portfolio-v2`
+with Node, Rust gateway, training worker and Vite. The active simulator keeps
+up to three concurrent virtual positions under the existing cash-paper-risk-v1
+default capital/exposure/loss limits. Past-only, validated Dhan standard-feed
+quotes can lead to independent BUY, HOLD, REDUCE and SELL decisions without a
+daily trade-count cap. The separate private `simulation-portfolio-v2.jsonl`
+is hash-chained and fsynced before state changes; restart replays it and
+deduplicates quote/decision IDs. RAW_CAPTURE_ONLY packets with unresolved
+research validation stay out of this decision path. The UI reads the v2
+positions, virtual cash, cost-basis equity, decisions and costs. The earlier
+single-position historical adaptive replay remains an archived research
+artifact. Non-gateway local workers receive bounded restart attempts; a
+failed optional worker does not terminate the remaining services. Private
+`service-events.jsonl` records failures.
+Rust owns the approved socket, original-frame QJ01, decoder, instrument
+routing, market-state projection and gateway. Python owns the v2 virtual
+portfolio decisions, accounting, risk-budget reservation and exclusive-ledger
+recovery; it does not call QP01 or broker routes. In `--raw-capture-only`, Rust
+quarantines packets and does not publish normalized quotes to that Python
+worker. This is the current end-to-end research-validation boundary.
+
+## Cross-equity adaptive v2 exploratory replay, 2026-11-03 IST
+
+`src/quant/apps/cross_equity_adaptive.py` rechecks the immutable ALL_25
+response hashes, reproduces the frozen five-trade simulator, exports all 125
+10:00 rankings and five complete selected minute paths, and runs a separate
+every-five-minute adaptive reference replay for 60/120/300-second assumed
+availability delays. It writes private immutable audit, decision and report
+artifacts. `web/server/trading-service.mjs` verifies their hashes and serves
+the report to the existing Simulator tab. All six exploratory variants are
+net negative; no model was fitted or live worker replaced. See
+`docs/cross-equity-adaptive-v2-2026-11-03.md` for results and limits.
+
+## One-shot Mac cockpit startup, 2026-11-03 IST
+
+`tools/start-cockpit-macos.sh` sets its own Node 24 PATH and repository working
+directory. A repeat invocation reattaches to a ready supervised instance and
+opens the plain loopback URL; crashed Alpha Grid listeners are replaced only
+after checking their command paths. The local Node service offers a loopback,
+same-origin, custom-header sign-in that issues the existing Rust-signed
+HttpOnly cookie, so a browser refresh needs no URL fragment. At startup it
+checks and caches all 25 saved October archives, including the original pinned
+RELIANCE response, loads the newest hash-verified saved REST quote, and makes
+one read-only quote refresh for a still-valid scope even after market close. The
+capability API reports the ALL_25 count and most recent raw frame count even
+after the market feed closes. Account sync and market-hour quote polling remain
+backend-owned. See `DECISIONS.md` for runtime validation and limitations.
+
+## Market-hour REST fallback, 2026-11-03 IST
+
+`web/server/trading-service.mjs` now owns a one-minute, session-window
+read-only `/v2/marketfeed/quote` poll for the approved frozen 25 IDs. It shares
+the saved original response and parsed current snapshot with the signed
+cockpit route; the browser polls that local cache without creating additional
+Dhan requests or sockets. The React views label
+these measurements `REST_SNAPSHOT` and keep feed-only metrics distinct.
+`tools/start-cockpit-macos.sh` checks the dated raw-capture event log so the
+bounded live WebSocket attempt ceiling survives launcher restarts. On
+November 3 the Rust request-path and unsigned-quantity decoder defects were
+fixed. The approved 25-ID standard socket now captures original frames in
+the private raw QJ01 while REST provides separately labeled current prices
+and five-level books. The daily journal bound is 128 MiB with preflight
+storage checks; raw observations remain validation-pending and NO TRADE.
+
+## Read-only Dhan integration, 2026-11-03 IST
+
+`tools/start-cockpit-macos.sh` now always registers the frozen 25 IDs and
+symbols with the offline gateway. With a valid owner-private local token and
+client ID, `apps/live_feed_scope.py --auto-local-scope` performs one cached
+`GET /v2/profile` check for that token and, only when Dhan reports an active
+Data API plan, writes the exact persistent standard-feed scope. A revoked
+file is never recreated automatically. The existing raw-capture preflight and
+research/production eligibility remain separate. During closed hours the
+gate reports `MARKET CLOSED / AUTO_CONNECT_ARMED` only after valid scope and
+credential checks; no socket is opened.
+
+The local Node service now loads the private credential files, refreshes only
+the three read-only account endpoints (`fundlimit`, `holdings`, `positions`),
+and exposes an authenticated one-shot profile test and bounded 25-ID REST
+market-quote snapshot. Complete REST response bytes, receipt, HTTP status,
+request and SHA-256 are kept under the private `offline-dev/rest-snapshots`
+directory before parsing. The React cockpit distinguishes REST snapshots,
+archived candles and live WebSocket observations. The Mac Paper view reads the
+separate virtual simulation ledger and does not send QP01 mutations. The
+Candle workstation plots original historical OHLCV at the provider's source
+labels when live quote-sampled bars are absent, with unverified label
+semantics displayed beside the chart.
+
+`apps/local_training_worker.py` now accepts a frozen-universe ticker or
+`ALL_25`. It reuses the pinned RELIANCE October 26–30 response and the existing
+Dhan acquisition writer to request at most one no-retry 1-minute intraday
+response per missing instrument for that same five-day interval. Saved raw
+bytes, metadata and checksums are verified before the existing frozen rule is
+replayed. This is an exploratory source/replay job with no newly fitted
+cross-stock model. `apps/cockpit_cache.py --cross-stock-symbol` serves only
+verified acquired local responses for selected-instrument historical views.
+The completed `ALL_25` job also writes an owner-private, checksummed
+`cross-stock-simulation.latest.json` pointer. The Node
+`/trade/cross-stock-simulation` route checks its immutable artifact and
+25 response hashes; the existing Simulator view uses that saved cross-stock
+replay while keeping the earlier RELIANCE-only replay as its fallback.
+The earlier 45,945-bar RELIANCE exploratory artifact is displayed from its
+saved bytes in Statistical Research; absent first-hit incidence remains
+explicitly unmeasured.
+
+Runtime on November 3 IST: local services listen on 8765/8767/5173, the
+gateway registers all 25 manifest names/IDs, and the Dhan profile check
+reports an active Data API plan for the newly stored token. The saved scope
+is `AUTO_CONNECT_ARMED` while the market is closed, with zero sockets/frames.
+Six genuine 25-ID quote responses and 24 genuine historical intraday
+responses have been retained and checked; the 25-stock October replay is
+exploratory. The account cache shows funds and positions from read-only HTTP
+200 responses, while holdings returned HTTP 500 (`DH-1111`). No live feed connection or
+causal performance eligibility has been established. See `DECISIONS.md` for
+counts and limitations.
+
+## Closed-market activation display and token check, 2026-11-02
+
+The Mac launcher now asks `apps/live_feed_scope.py --display-only` for an
+unexpired, enabled, exact 25-ID permission even when credentials or market
+hours block capture. It starts the offline Rust gateway with those IDs and the
+frozen manifest, so the gateway's instrument names and dropdown reflect the
+approved universe without opening Dhan. The private token loader accepts the
+existing OAuth-consent token or an operator-installed Dhan Web token with
+truthful source and expiry metadata. The explicit `--check-profile` CLI makes
+one read-only `GET /v2/profile` only after a saved scope and valid local token;
+it prints only a status, never account fields. This check is not account sync
+and is never automatic on approval. See `DECISIONS.md`.
+
+## Quarantined read-only capture, 2026-11-02
+
+The persistent v2 25-ID approval now permits `RAW_CAPTURE_ONLY` during a
+weekday 09:15–15:14 IST candidate continuous-session window after verifying
+the owner-private token, the frozen manifest against a checksummed Dhan master
+at most seven days old, and private journal capacity. The launcher and Rust
+gateway repeat the raw preflight. Original standard frames go only to a
+separate `raw-standard-YYYY-MM-DD.qj`; no normalized quote is published to the
+simulator. Missing dated NSE identity/CAS, dated calendar classification, or
+clock precision remain explicit unresolved conditions in the private
+`raw-capture-validation-YYYY-MM-DD.jsonl`. Capture lifecycle events and last
+raw receipt are retained separately. Research and production gates remain
+unchanged; this is a quarantined observation path. See `DECISIONS.md`.
+
+## Market-data activation, 2026-11-02
+
+Trading Settings' signed local permission API persists an exact, revocable
+25-ID scope. `apps/live_feed_scope.py` now checks saved authorization apart
+from market hours, allowing an honest closed-market armed state. During a
+verified session, the Mac launcher starts one Rust standard gateway and,
+only if explicitly approved, one existing `quant-depth` live read-only
+collector. Both use backend-only credentials, the same preflight and stop
+marker. Depth status reports observed socket/frame state without claiming
+gateway order-book integration. See `docs/context/DECISIONS.md` for tests and
+remaining dated-evidence blockers.
+
+## Persistent market-data permission, 2026-11-02
+
+`web/server/market-data-access.mjs` backs Trading Settings' signed-session
+Market Data Connection controls. It stores a private exact 25-ID standard-feed
+approval, duration, expiry, auto-connect and revoke state. The existing Mac
+launcher polls `apps/live_feed_scope.py`, which can carry a persistent
+approval into a later session only after current Dhan/NSE/calendar/clock and
+storage preflight. Optional depth uses the existing collector when explicitly
+approved and available. Automatic dated public-evidence acquisition remains
+blocked; no authenticated feed ran in this implementation task.
+
+## Mac cockpit integration, 2026-11-02
+
+The Mac launcher also supervises `apps/local_training_worker.py`. The local
+Node service exposes session-protected `/trade/capabilities` and
+`/trade/training`; Research now submits a single bounded exploratory job for
+the pinned RELIANCE archive and reports missing 25-name history as BLOCKED.
+The artifact is private, immutable and never promoted. The shared capability
+strip reports local service, gateway, telemetry, Dhan feed, socket counts,
+archive, simulation and training states. The Mac App disables QP01 paper
+approval controls. Candle workstation defaults to an actually available
+historical session, fixing an empty table when the Mac archive starts October
+26. See `docs/context/DECISIONS.md` for runtime results.
+
+## Persistent Mac simulation worker, 2026-11-02
+
+`tools/start-cockpit-macos.sh` now supervises `apps/live_simulation.py` with
+the existing Rust gateway, Node local service and React cockpit. The worker
+reads only authenticated local post-QJ01 snapshots, persists an independent
+hash-chained simulation ledger under the user's private offline-dev directory,
+and recovers positions/cash by replaying it. The Simulation view shows worker
+status and an authenticated Stop control. `apps/live_feed_scope.py` admits a
+future exact dated 25-name quote scope only after separate operator approval,
+same-day NSE/Dhan/calendar/storage evidence and a 100 ms clock gate. Rust's
+standard subscription is constrained to the frozen 25-ID manifest; depth is
+disabled for this quote-only rule. With no approved scope, the launcher and
+saved history stay offline and NO TRADE. See `docs/live-simulation-macos.md`.
+`apps/live_feed_credentials.py` verifies the existing private OAuth token,
+its hash and expiry, and supplies it only to the live Rust gateway. The
+approval names exact IDs, feed and expiry; the launcher publishes a non-secret
+gate status and supervises the gateway through that expiry.
+
+## November 2 Mac live pilot preflight
+
+`docs/live-pilot-2026-11-02-preflight.md` records the authorized, narrower
+one-standard-plus-one-depth scope and its continuing NO GO: no same-day NSE
+MII identity/CAS file (HTTP 404) or dated November 2 calendar evidence.
+A fresh public Dhan master verifies today's three Dhan mappings only. The
+depth collector now journals original binary frames with SHA-256 before
+decoding, pairs independently received sides within one second only when
+uncrossed and complete, defaults to zero reconnects and requires an explicit
+cutoff. The standard collector now accepts only the exact three-ID Quote-17
+subscription, preserves raw QJ01, checks Mac `sntp` at the unchanged 100 ms
+bound and derives a 14:45 cutoff. The complete pilot preflight returned
+`BLOCKED`; no authenticated Dhan socket was opened.
+
+## Cross-stock opportunity discovery (2026-11-02 IST)
+
+The subsequent inspection-only
+`docs/cross-stock-plan-review-2026-11-02.md` preserves that fixed universe
+and frozen plan but **defers** the 24 historical POSTs as the next acquisition.
+The three top-ranked dated IDs (HDFCBANK 1333, RELIANCE 2885, INFY 1594)
+were rechecked against 20 original NSE ZIPs, the October 30 MII security file
+and the Dhan master. Current Mac live capture is NO GO: standard Quote-17 is
+RELIANCE-hardcoded and Windows-clock-gated; depth QJ01 lacks original binary
+frames and a hard session stop. The review specifies narrow fixes and a
+separately approvable November 4 one-session, three-quote-plus-one-depth
+quality pilot. No authenticated request/socket or code behavior change was
+made. Focused offline decoder/journal/depth tests passed.
+
+`docs/cross-stock-universe-2026-11-02.json` pins 20 original October NSE CM
+UDiFF final bhavcopies, the October 30 NSE MII security file, and the existing
+November 1 Dhan master. Stable NSE ID/INE ISIN, normal-market eligibility and
+October median traded value yield a fixed 25-ID starting universe. The four
+October 30 non-CAS flags and all source hashes/retrieval times are retained.
+`docs/cross-stock-opportunity-plan-2026-11-02.md` freezes one cost-aware
+cross-sectional research question, baseline/evaluation/portfolio gates and a
+separately approvable 24-POST historical source/coverage pilot. The October
+selection cannot be used as an unbiased October backtest. No cross-stock Dhan
+data, live quote/depth capture, new model or order was produced. The failed
+RELIANCE candidate, frozen November experiment, QJ01/QP01 and DATA_ONLY /
+NO TRADE remain unchanged. PowerShell is not installed on this Mac, so the
+context Merkle check/refresh is unavailable.
+
 ## macOS offline development path (2026-10-29)
 
 `tools/start-cockpit-macos.sh` starts the existing Rust gateway, Node account
@@ -10,6 +338,78 @@ child environments and does not load the Windows private archive. Mac-local
 QP01 approvals and settings use the current user's private
 `~/Library/Application Support/AlphaGrid/offline-dev` directory, with owner and
 POSIX mode checks. The existing Windows launcher remains the online path.
+
+The October 30 historical-data transfer proposal in
+`docs/mac-historical-dhan-import.md` was superseded by direct Mac acquisition.
+The new ignored `data/historical/raw-dhan-macos-2026-11-01` archive contains
+the original October 26-30 NSE_EQ/2885 one-minute response, checksum and
+receipt metadata (HTTP 200, 87,694 bytes, SHA-256
+`a4c61e3d5ad8ce3b9bf78317ac73ff15502bcefa52bd6a09c3771b866d2d8653`).
+`cockpit_cache.py` reuses `verify_saved_response` and a pinned hash, requires
+360 bars on each of the five dates, and prefers the Mac archive when present.
+The October 15-16 Windows path and bytes are unchanged. `gateway.rs` admits
+only these two pinned archive/coverage pairs. An isolated DATA_ONLY gateway
+served the Mac replay with 1,800 NO_TRADE decisions and no orders, fills or
+approval writes. The already-running gateway on port 8765 predates these
+changes and requires a later restart to show the new archive in that process.
+The later, separately authorized six-month May 1–October 30 backfill added
+two new raw responses alongside that existing archive, for a verified total of
+45,945 candles on 125 sessions. See `docs/reliance-six-month-mac-audit.md` for
+the hashes and training blockers. The existing forward-observation gate has
+not admitted this archive to predictive training.
+`apps/descriptive_dhan_opportunities.py` now makes a pinned, offline-only
+source-path summary for 30m, 60m and remaining continuous-session windows.
+It requires the three original response hashes and intact session coverage,
+then writes a private exploratory report with session-grouped uncertainty.
+`docs/reliance-30-60-remaining-readiness.md` records the results, unavailable
+cost observations, conditional future probe and separate proposed experiment.
+The later owner-authorized offline `apps/exploratory_dhan_timing.py` fits one
+fixed ridge baseline under 60/120/300-second assumed availability delays,
+scores August–September chronologically and keeps its private report and
+coefficients exploratory. `docs/reliance-assumed-timing-exploratory.md` records
+the negative net result. No model is registered or connected to paper/cockpit.
+The separately frozen first-signal 60-minute falsification in
+`docs/reliance-60m-frozen-protocol.md` and
+`docs/reliance-60m-first-signal-result.md` reuses pinned raw-response checks,
+the existing session walk-forward splitter and session bootstrap. Its isolated
+`apps/reliance_60m_falsification.py` compares unconditional, preregistered
+15-minute momentum and 20-prior-session volume confirmation under three
+assumed delays and published Dhan fee estimates. The volume candidate failed
+the conservative net, delay-robust uncertainty and probability-score gates;
+no logistic fit, model registration or paper connection followed. The ignored
+private JSON holds the daily reference outcomes. This is exploratory on an
+already inspected period; all causal gates and DATA_ONLY / NO TRADE persist.
+The read-only `docs/reliance-60m-closure-audit.md` independently reconstructs
+selected close references, per-opportunity whole-share tariff estimates,
+paired session resampling and probability scores from the pinned originals.
+It reconciles the saved 42-session net accounting, quantifies the narrow
+hypothetical spread/slippage headroom and closes this particular candidate;
+no archive, research model, QJ01/QP01 or experiment behavior changed.
+The inspection-only `docs/real-microstructure-readiness-2026-11-02.md` checks
+the Rust standard quote and 20-level depth decoders, capture, segmented QJ01,
+replay, telemetry and paper gates against current official Dhan v2 contracts.
+Mac-local genuine live quote/depth frames were not found. Standard scoped raw
+frames are retained before decode; the depth path currently retains decoded
+sides/books only, and its live CLI lacks a dated session/clock cutoff and
+defaults to two reconnects. The report specifies the smallest source-integrity
+and bounded-runtime fixes before a separately approved, one-instrument,
+two-socket observation can be considered. No live scope was authorized or run.
+`docs/reliance-candle-timing-review.md` independently recomputes the source
+counts and descriptive point statistics from raw JSON, audits the pre/post
+August 3 session shapes against NSE dates, separates those checks from
+RELIANCE-specific CAS eligibility, and drafts an eight-poll future probe and
+Dhan support inquiry. The probe has not run; its offline plan now specifies
+November 3 and eight observations, pending dated preflight and separate
+authorization. `docs/nov3-dhan-probe-preflight.md` records the official NSE
+source, exact Mac evidence commands and the currently unmet clock/identity
+and operator gates. The probe's CLI does not enforce every external gate.
+
+For the separate Mac Dhan API-key consent path, `tools/dhan_oauth_callback.py`
+accepts an explicit private `--env-file .env` containing client ID, API key
+and secret, then uses its existing browser callback and private token store.
+It does not run as part of the offline cockpit. Its separately authorized
+consent flow saved a private access token. The operator separately authorized
+the one historical POST, which has now been consumed; do not rerun it.
 
 `.github/workflows/validate.yml` now runs the same locked Python, Rust, and
 React validation on Ubuntu and macOS. The prior review commit `888c8e7` had no
@@ -92,8 +492,8 @@ October Dhan minute-candle pilot.
 | Historical acquisition | `src/quant/acquisition/`, `apps/acquisition.py` | Dhan request planning, provenance, recovery, instrument identity, dated calendars, raw/lake checksums; `test_acquisition_*.py`, `test_dhan_pilot_cli.py`, `test_dhan_backfill_cli.py`. |
 | Candle research | `acquisition/ohlcv_research.py`, `apps/noise_reduction.py`, `apps/prospective_15m.py` | Completed-bar assumptions, causal transforms, provisional forecasts; `test_ohlcv_research.py`, `test_noise_reduction.py`, `test_prospective_15m.py`. |
 | Forward observations | `acquisition/forward_observations.py`, `apps/forward_observations.py` | Offline 5/15/30/60-minute and remaining-session candle paths with separate as-of features and matured outcomes; `test_forward_observations.py`. Requires a checksummed lake, dated verified session, and dataset-bound timing evidence. |
-| Dhan availability probe | `apps/dhan_candle_availability.py`, `docs/forward-observations.md` | Offline plan by default; guarded, fixed 14-poll one-session historical-chart observation proposed for separate approval. It preserves original responses and reports sampled first-seen/revisions without claiming candle completion or causal eligibility; `test_dhan_candle_availability.py` uses synthetic software fixtures only. |
-| Statistical research | `src/quant/research/` | Dataset joins, labels/censoring, baselines, Kalman/OU, competing risks, walk-forward, session bootstrap, utility, inference and registry; `test_research_*.py`. |
+| Dhan availability probe | `apps/dhan_candle_availability.py`, `docs/reliance-candle-timing-review.md` | Offline plan by default; guarded, fixed eight-poll November 3 historical-chart observation proposed for separate approval. It preserves original responses and reports sampled first-seen/revisions without claiming candle completion or causal eligibility; `test_dhan_candle_availability.py` uses synthetic software fixtures only. |
+| Statistical research | `src/quant/research/` | Dataset joins, labels/censoring, baselines, prospective measurement (`prospective.py`), five-level depth imbalance (`order_book_imbalance.py`), Kalman/OU, competing risks, walk-forward, session bootstrap, utility, inference and registry; `test_research_*.py`, `test_prospective.py`, `test_order_book_imbalance.py`. |
 | Infrastructure | `infra/benchmark/`, `benchmarks/parquet_benchmark.py` | Synthetic capacity, storage/network measurements and dated VM evidence; `test_infra_benchmark.py`, `test_ingestion_load.py`. |
 | Cockpit | `web/src/App.tsx`, `Chart.tsx`, `PaperWorkspace.tsx`, `ResearchWorkspace.tsx`, `stream.ts` | Market, reliability, paper and research views; corresponding `*.test.ts(x)`. |
 
@@ -467,6 +867,25 @@ the gateway signs a seven-day cookie with a private NTFS key, and the cockpit
 checks an existing cookie before asking for the key. Native DATA_ONLY login,
 backend restart, cookie reuse and forget-device checks passed; no Dhan feed
 was opened. See `docs/context/DECISIONS.md` for the response hash and tests.
+
+## First offline simulator, 2026-11-02
+
+`src/quant/apps/historical_simulator.py` verifies the pinned genuine Mac
+RELIANCE Dhan response through the existing acquisition verifier and performs
+deterministic `SIMULATION_ONLY` reference replay. `src/quant/apps/cockpit_cache.py`
+adds its result to the authenticated historical cache; the Rust telemetry
+gateway guards that provenance and `web/src/SimulationWorkspace.tsx` displays
+virtual equity, decisions, ledger and cost comparison. Synthetic accounting
+tests are in `tests/test_historical_simulator.py`; UI test is in
+`web/src/SimulationWorkspace.test.tsx`. The frozen rule, actual result and
+missing aligned cross-stock data are documented in
+`docs/historical-simulator-2026-11-02.md`.
+The same CLI also accepts `--six-month`, verifies all three pinned Mac
+RELIANCE responses through the shared acquisition verifier and the 125-session
+coverage audit, and replays the unchanged rule. Response SHA transitions are
+admitted only between trading dates. The October 26–30 cockpit cache remains
+separately pinned. The Mac launcher now `exec`s Vite in its supervised child,
+so ordinary shutdown reaches that listener.
 
 ## Single-start read-only cockpit, 2026-10-28
 
