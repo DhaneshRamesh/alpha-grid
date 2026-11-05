@@ -577,8 +577,9 @@ def run_backfill(
         _private_directory(quarantine)
         for attempt in range(max_retries + 1):
             try:
-                if isinstance(client, UrlLibTransport):
-                    response = client.post_json_with_metadata(
+                post_with_metadata = getattr(client, "post_json_with_metadata", None)
+                if callable(post_with_metadata):
+                    response = post_with_metadata(
                         req.endpoint, req.payload(), secret
                     )
                     raw = response.raw
