@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { HistoricalCache } from "./TradingWorkspace";
 
 type CurvePoint = {
   x: number;
@@ -55,6 +56,55 @@ type AcquisitionStatus = {
   blocked_model_families: string[];
   block_reasons: string[];
 };
+type TrainingStatus = {
+  id?: string;
+  ticker?: string;
+  state: string;
+  reason?: string;
+  sha256?: string;
+  artifact?: string;
+  research_eligibility?: string;
+};
+type ExploratoryArtifact = {
+  source: "EXPLORATORY_ARCHIVE";
+  sha256: string;
+  source_bars: number;
+  source_sessions: number;
+  primary_60m: {
+    evaluation_rows: number;
+    evaluation_sessions: number;
+    evaluation_mae_bps: number;
+    simple_mean_mae_bps: number;
+    positive_probability_calibration: { brier: number; unconditional_brier: number; bins: {count: number; observed_positive_fraction: number; predicted_positive_fraction: number}[] };
+    primary_50bps: { selected_decisions: number; model_mean_session_reference_net_bps: number; no_trade_mean_session_reference_net_bps: number };
+    sensitivity_25bps: { selected_decisions: number; model_mean_session_reference_net_bps: number };
+    incremental_economic_value_demonstrated: boolean;
+  };
+};
+
+function ArchiveResearchPanels({ artifact }: { artifact: ExploratoryArtifact }) {
+  const result = artifact.primary_60m;
+  return <>
+    <section className="panel acquisition-panel"><div className="panel-head"><div><div className="eyebrow">EXPLORATORY_ARCHIVE</div><h2>Verified local research archive</h2></div></div>
+      <p>1 instrument · {artifact.source_bars.toLocaleString()} original Dhan one-minute bars · {artifact.source_sessions} sessions · artifact SHA-256 {artifact.sha256}. Historical candle availability remains unverified.</p></section>
+    <div className="metric-grid research-metrics">
+      <div className="metric"><div className="metric-label">DATASET</div><div className="metric-value">RELIANCE · 2885</div><div className="metric-note">EXPLORATORY_ARCHIVE · {artifact.source_bars.toLocaleString()} bars</div></div>
+      <div className="metric"><div className="metric-label">EVALUATION SESSIONS</div><div className="metric-value">{result.evaluation_sessions}</div><div className="metric-note">{result.evaluation_rows.toLocaleString()} 60-minute observations</div></div>
+      <div className="metric"><div className="metric-label">MODEL STATUS</div><div className="metric-value">EXPLORATORY ONLY</div><div className="metric-note">No promotion or order connection</div></div>
+    </div>
+    <div className="paper-grid"><section className="panel"><div className="panel-head"><div><div className="eyebrow">MEASURED / 60M</div><h2>Probability calibration</h2></div></div>
+      <p>Brier {result.positive_probability_calibration.brier.toFixed(4)} · unconditional baseline {result.positive_probability_calibration.unconditional_brier.toFixed(4)}.</p>
+      <table><thead><tr><th>Bin</th><th>Rows</th><th>Predicted positive</th><th>Observed positive</th></tr></thead><tbody>{result.positive_probability_calibration.bins.map((bin, i) => <tr key={i}><td>{i + 1}</td><td>{bin.count}</td><td>{(100 * bin.predicted_positive_fraction).toFixed(1)}%</td><td>{(100 * bin.observed_positive_fraction).toFixed(1)}%</td></tr>)}</tbody></table>
+    </section><section className="panel"><div className="panel-head"><div><div className="eyebrow">MEASUREMENT LIMIT</div><h2>Cumulative incidence</h2></div></div><p>NOT MEASURED in this saved 60-minute artifact. It reports return sign calibration, not first-hit favorable/adverse incidence.</p></section></div>
+    <div className="paper-grid"><section className="panel"><div className="panel-head"><div><div className="eyebrow">REFERENCE OUTCOMES</div><h2>Net return versus costs</h2></div></div>
+      <p>50 bps assumed round trip: {result.primary_50bps.selected_decisions} selected; mean per evaluation session {result.primary_50bps.model_mean_session_reference_net_bps.toFixed(4)} bps.</p>
+      <p>25 bps assumed round trip: {result.sensitivity_25bps.selected_decisions} selected; mean per evaluation session {result.sensitivity_25bps.model_mean_session_reference_net_bps.toFixed(4)} bps. Historical close references are not fills.</p>
+    </section><section className="panel"><div className="panel-head"><div><div className="eyebrow">PAIRED BASELINES</div><h2>Baseline comparison</h2></div></div>
+      <p>Model MAE {result.evaluation_mae_bps.toFixed(3)} bps · simple mean MAE {result.simple_mean_mae_bps.toFixed(3)} bps · NO TRADE reference net {result.primary_50bps.no_trade_mean_session_reference_net_bps.toFixed(3)} bps.</p>
+      <p>Incremental economic value demonstrated: {result.incremental_economic_value_demonstrated ? "YES" : "NO"}.</p>
+    </section></div>
+  </>;
+}
 
 function Curve({
   points,
@@ -97,12 +147,57 @@ function Curve({
   );
 }
 
-export default function ResearchWorkspace() {
+export default function ResearchWorkspace({ historical = null }: { historical?: HistoricalCache | null }) {
   const [status, setStatus] = useState<ResearchStatus | null>(null);
   const [acquisition, setAcquisition] = useState<AcquisitionStatus | null>(
     null,
   );
   const [error, setError] = useState(false);
+  const [ticker, setTicker] = useState("");
+  const [training, setTraining] = useState<TrainingStatus | null>(null);
+  const [trainingError, setTrainingError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [exploratory, setExploratory] = useState<ExploratoryArtifact | null>(null);
+  useEffect(() => { void fetch("/trade/exploratory-artifact", { cache: "no-store" })
+    .then((response) => response.ok ? response.json() : null)
+    .then((value) => { if (value?.source === "EXPLORATORY_ARCHIVE") setExploratory(value); })
+    .catch(() => undefined); }, []);
+  useEffect(() => {
+    let mounted = true;
+    async function refresh() {
+      try {
+        const response = await fetch("/trade/training", { cache: "no-store" });
+        if (!response.ok) throw new Error(`Training worker HTTP ${response.status}`);
+        const value = (await response.json()) as TrainingStatus;
+        if (typeof value.state !== "string") throw new Error("Training worker response invalid");
+        if (mounted) { setTraining(value); setTrainingError(""); }
+      } catch (reason) {
+        if (mounted) setTrainingError(String(reason));
+      }
+    }
+    void refresh();
+    const timer = setInterval(() => void refresh(), 2000);
+    return () => { mounted = false; clearInterval(timer); };
+  }, []);
+  async function queueTraining(selectedTicker: string) {
+    setSubmitting(true);
+    setTrainingError("");
+    try {
+      const response = await fetch("/trade/training", {
+        method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ticker: selectedTicker }),
+      });
+      const value = await response.json();
+      if (!response.ok) throw new Error(value.error ?? `Training HTTP ${response.status}`);
+      setTraining(value as TrainingStatus);
+    } catch (reason) { setTrainingError(String(reason)); }
+    finally { setSubmitting(false); }
+  }
+  function addAndTrain(event: React.FormEvent) {
+    event.preventDefault();
+    void queueTraining(ticker.trim().toUpperCase());
+  }
   useEffect(() => {
     const controller = new AbortController();
     fetch("/api/research", { signal: controller.signal })
@@ -163,11 +258,31 @@ export default function ResearchWorkspace() {
         DATA UNAVAILABLE / NO TRADE · NO VALIDATED MARKET ALPHA · NO LIVE ORDERS
         · PAPER POLICY UNCHANGED
       </div>
+      <section className="panel">
+        <div className="panel-head"><div><div className="eyebrow">VERIFIED LOCAL SOURCE</div><h2>Historical archive</h2></div></div>
+        <p>{historical?.status === "AVAILABLE" && historical.source === "DHAN_HISTORICAL"
+          ? `${historical.bars.length} genuine RELIANCE one-minute bars · SHA-256 ${historical.response_sha256} · exploratory only; candle availability and causal eligibility remain unverified.`
+          : "No verified local historical archive is currently loaded."}</p>
+      </section>
+      <section className="panel">
+        <div className="panel-head"><div><div className="eyebrow">LOCAL EXPLORATORY JOB</div><h2>Add &amp; Train</h2></div></div>
+        <form onSubmit={addAndTrain}>
+          <label htmlFor="training-ticker">Ticker in frozen 25-stock universe</label>{" "}
+          <input id="training-ticker" value={ticker} onChange={(event) => setTicker(event.target.value)} placeholder="RELIANCE" required />{" "}
+          <button type="submit" disabled={submitting || training?.state === "RUNNING" || training?.state === "QUEUED"}>Add &amp; Train</button>
+        </form>
+        <button type="button" disabled={submitting || training?.state === "RUNNING" || training?.state === "QUEUED"} onClick={() => void queueTraining("ALL_25")}>Fetch 25-stock October archive and replay frozen rule</button>
+        <p role="status">{trainingError || (training ? `${training.state}${training.ticker ? ` · ${training.ticker}` : ""}${training.reason ? ` · ${training.reason}` : ""}` : "Training worker status unavailable")}</p>
+        {training?.state === "RUNNING" && <p>Acquiring or verifying genuine Dhan responses and running the existing exploratory job. No automatic retries. Completion time is not yet known.</p>}
+        {training?.sha256 && <p>Immutable artifact SHA-256: <code>{training.sha256}</code> · {training.research_eligibility}; no promotion.</p>}
+        <p className="source-note">For other tickers, the backend requests only 2026-10-26 through exclusive 2026-10-31 one-minute intraday bars, retains raw responses and replays the frozen simulator rule. The RELIANCE source is reused. A new fitted cross-stock model is not claimed.</p>
+      </section>
+      {exploratory && historical?.status === "AVAILABLE" ? <ArchiveResearchPanels artifact={exploratory} /> : <>
       <section className="panel acquisition-panel">
         <div className="panel-head">
           <div>
             <div className="eyebrow">MARKET DATA / 00</div>
-            <h2>Acquisition and quality</h2>
+            <h2>Gateway research registration</h2>
           </div>
         </div>
         <div className="paper-foot">
@@ -234,14 +349,14 @@ export default function ResearchWorkspace() {
             "DEPTH, ORDER_FLOW, HAWKES, EXECUTION"}
           .{" "}
           {acquisition?.block_reasons?.join(" · ") ??
-            "No verified real market dataset"}
+            "No dataset registered in this gateway research view"}
         </div>
       </section>
       {error && (
         <div className="panel">
           <div className="empty">
-            DATA UNAVAILABLE / NO TRADE. Verified Dhan research evidence is
-            unavailable.
+            No causally eligible Dhan research dataset is registered with the
+            gateway. The verified local archive above remains exploratory.
           </div>
         </div>
       )}
@@ -409,6 +524,7 @@ export default function ResearchWorkspace() {
           </div>
         </section>
       </div>
+      </>}
     </>
   );
 }

@@ -83,15 +83,29 @@ describe("telemetry recovery", () => {
     prompt.mockRestore();
     vi.unstubAllGlobals();
   });
-  it("never asks for a local key when no signed session exists", async () => {
+  it("signs in automatically from a plain loopback visit", async () => {
     const prompt = vi.spyOn(window, "prompt").mockReturnValue("unused");
-    const fetchMock = vi.fn().mockResolvedValue({ status: 401, ok: false });
+    let sessionChecks = 0;
+    const fetchMock = vi.fn((url: string, options?: RequestInit) => Promise.resolve(
+      options?.method === "POST" && url !== "/trade/session/local"
+        ? { status: 400, ok: false }
+        :
+      url === "/api/session" && ++sessionChecks === 1
+        ? { status: 401, ok: false }
+        : { status: 204, ok: true },
+    ));
     vi.stubGlobal("fetch", fetchMock);
+    class TestSocket { static created = 0; constructor() { TestSocket.created++; } close() {} }
+    vi.stubGlobal("WebSocket", TestSocket);
     const view = renderHook(() => useEngineStream());
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    await new Promise((resolve) => setTimeout(resolve, 400));
+    await waitFor(() => expect(TestSocket.created).toBe(1));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "/api/session", "/trade/session/local", "/api/session",
+    ]);
+    expect(fetchMock.mock.calls[1][1]).toMatchObject({
+      method: "POST", headers: { "X-Alpha-Grid-Local": "1" },
+    });
     expect(prompt).not.toHaveBeenCalled();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
     view.unmount();
     prompt.mockRestore();
     vi.unstubAllGlobals();
@@ -300,6 +314,94 @@ describe("telemetry recovery", () => {
       "99500000000",
     );
     expect(updated.snapshot?.instruments).toHaveLength(1);
+  });
+  it("accepts the gateway's 25-name raw-capture snapshot", () => {
+    const instruments = Array.from({ length: 25 }, (_, index) => ({
+      ...snapshot.instruments[0],
+      instrument: {
+        ...snapshot.instruments[0].instrument,
+        key: `NSE:NSE_EQ:${index + 1000}`,
+        security_id: String(index + 1000),
+        symbol: `STOCK${index}`,
+      },
+    }));
+    const observed = applyEnvelope(initialState, envelope("engine.snapshot", "1", {
+      ...snapshot, feed_connected: true, instruments,
+    }));
+    expect(observed.connection).toBe("CONNECTED");
+    expect(observed.snapshot?.instruments).toHaveLength(25);
+  });
+  it("keeps a same-packet raw Full book visible without accepting mismatched provenance", () => {
+    const hash = "a".repeat(64);
+    const provenance = {
+      source_protocol: "DhanStandardV2", feed_session_id: "feed-1",
+      source_frame_id: "12", packet_offset: 0, raw_frame_sha256: hash,
+    };
+    const level = { price_nanos: "100000000000", displayed_quantity: "10", cumulative_visible_quantity: "10" };
+    const instrument = {
+      ...snapshot.instruments[0],
+      market: {
+        price_nanos: "100000000000", packet_kind: "RAW_FULL",
+        source_receive_timestamp_ns: "1000", provenance,
+        quality: { stale: false, source_time_unverified: false },
+      },
+      depth: {
+        source: "STANDARD_FULL_RAW", receive_timestamp_ns: "1000", provenance,
+        bids: Array.from({ length: 5 }, () => level),
+        asks: Array.from({ length: 5 }, () => level),
+      },
+    };
+    const raw = { ...snapshot, no_trade_reasons: [...snapshot.no_trade_reasons, "RAW_CAPTURE_VALIDATION_PENDING"], instruments: [instrument] };
+    const accepted = applyEnvelope(initialState, envelope("engine.snapshot", "1", raw));
+    expect(accepted.snapshot?.instruments[0].depth?.source).toBe("STANDARD_FULL_RAW");
+    expect(applyEnvelope(initialState, envelope("engine.snapshot", "1", {
+      ...raw, instruments: [{ ...instrument, depth: {
+        ...instrument.depth, provenance: { ...provenance, raw_frame_sha256: "b".repeat(64) },
+      } }],
+    })).snapshot).toBeNull();
+    expect(applyEnvelope(initialState, envelope("engine.snapshot", "1", {
+      ...raw, no_trade_reasons: ["OBSERVATION_ONLY", "NO_ELIGIBLE_DHAN_FEED"],
+    })).snapshot).toBeNull();
+  });
+  it("accepts an eligible Full book without a raw-capture warning", () => {
+    const hash = "b".repeat(64);
+    const provenance = {
+      source_protocol: "DhanStandardV2", feed_session_id: "feed-2",
+      source_frame_id: "13", packet_offset: 0, raw_frame_sha256: hash,
+    };
+    const level = { price_nanos: "100000000000", displayed_quantity: "10", cumulative_visible_quantity: "10" };
+    const eligible = {
+      ...snapshot,
+      no_trade_reasons: ["OBSERVATION_ONLY", "NO_ELIGIBLE_DHAN_FEED"],
+      instruments: [{
+        ...snapshot.instruments[0],
+        market: { packet_kind: "FULL", source_receive_timestamp_ns: "1000", provenance,
+          quality: { stale: false, source_time_unverified: false } },
+        depth: { source: "STANDARD_FULL", receive_timestamp_ns: "1000", provenance,
+          bids: Array.from({ length: 5 }, () => level), asks: Array.from({ length: 5 }, () => level) },
+      }],
+    };
+    expect(applyEnvelope(initialState, envelope("engine.snapshot", "1", eligible)).snapshot?.instruments[0].depth?.source).toBe("STANDARD_FULL");
+  });
+  it("accepts a 20-level depth snapshot with derived pairing", () => {
+    const level = { price_nanos: "100000000000", displayed_quantity: "10", cumulative_visible_quantity: "10" };
+    const depth20Snapshot = {
+      ...snapshot,
+      instruments: [{
+        ...snapshot.instruments[0],
+        depth: {
+          source: "DEPTH_20",
+          receive_timestamp_ns: "1793770000000000000",
+          derived_pairing: true,
+          atomic_exchange_snapshot_verified: false,
+          bids: Array.from({ length: 20 }, () => level),
+          asks: Array.from({ length: 20 }, () => level),
+        },
+      }],
+    };
+    const accepted = applyEnvelope(initialState, envelope("engine.snapshot", "1", depth20Snapshot));
+    expect(accepted.snapshot?.instruments[0].depth?.source).toBe("DEPTH_20");
+    expect(accepted.snapshot?.instruments[0].depth?.bids.length).toBe(20);
   });
   it("rejects a missed delta and accepts resynchronization after boot change", () => {
     const first = applyEnvelope(

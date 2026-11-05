@@ -54,7 +54,11 @@ export interface WireCandle {
 export interface WireProvenance {
   arrival_ordinal?: string | null;
   feed_session_id: string;
+  packet_offset?: number | null;
+  raw_durable_at_ns?: string | null;
+  raw_frame_sha256?: string | null;
   source_exchange_timestamp_ns?: string | null;
+  source_frame_id?: string | null;
   source_last_trade_timestamp_ns?: string | null;
   source_protocol: string;
   [k: string]: unknown;
@@ -72,9 +76,12 @@ export interface WireDepth {
   asks: WireDepthLevel[];
   atomic_exchange_snapshot_verified: boolean;
   bids: WireDepthLevel[];
+  book_metrics?: WireBookMetrics | null;
   derived_pairing: boolean;
   exchange_timestamp_ns?: string | null;
+  provenance?: WireProvenance | null;
   receive_timestamp_ns: string;
+  source?: string | null;
   [k: string]: unknown;
 }
 export interface WireDepthLevel {
@@ -82,6 +89,22 @@ export interface WireDepthLevel {
   displayed_quantity: string;
   order_count?: number | null;
   price_nanos: string;
+  [k: string]: unknown;
+}
+export interface WireBookMetrics {
+  ask_depletion?: string | null;
+  ask_orders: number;
+  ask_quantity: string;
+  ask_quantity_change?: string | null;
+  ask_replenishment?: string | null;
+  bid_depletion?: string | null;
+  bid_orders: number;
+  bid_quantity: string;
+  bid_quantity_change?: string | null;
+  bid_replenishment?: string | null;
+  five_level_imbalance: number;
+  ofi_proxy_quantity?: string | null;
+  quoted_spread_bps: number;
   [k: string]: unknown;
 }
 export interface WireFeatures {
@@ -119,6 +142,7 @@ export interface WireMarket {
   depth_receive_timestamp_ns?: string | null;
   freshness: string;
   incremental_volume?: string | null;
+  packet_kind?: string | null;
   price_nanos?: string | null;
   provenance: WireProvenance;
   quality: WireQuality;

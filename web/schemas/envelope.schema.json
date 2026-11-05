@@ -31,7 +31,33 @@
         "feed_session_id": {
           "type": "string"
         },
+        "packet_offset": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "raw_durable_at_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_frame_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source_exchange_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_frame_id": {
           "type": [
             "string",
             "null"

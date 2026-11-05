@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { WireEngineSnapshot } from "./generated/engine-snapshot";
 import type { Connection } from "./stream";
 import { dateTime } from "./format";
@@ -64,6 +64,7 @@ export type HistoricalCache = {
   schema_version: "dhan-historical-cache-v1";
   status: "AVAILABLE" | "DATA_UNAVAILABLE";
   source: "DHAN_HISTORICAL" | null;
+  instrument?: string;
   response_sha256?: string;
   retrieved_at?: string;
   coverage?: Record<string, number>;
@@ -98,6 +99,7 @@ export type HistoricalCache = {
     qp01_records_written: 0;
     broker_orders: "DISABLED";
   };
+  simulation?: import("./SimulationWorkspace").SimulationResult;
   bars: {
     timestamp_ns: string;
     open_nanos: string;
@@ -107,6 +109,17 @@ export type HistoricalCache = {
     volume: string;
   }[];
 };
+export type RestSnapshot = {source: "REST_SNAPSHOT"; received_at: string; sha256: string;
+  snapshot_state?: "CURRENT_RECEIPT" | "STALE";
+  refresh_error?: string | null;
+  quotes: {symbol: string; security_id: string; last_price: number; volume?: number|null;
+    net_change?: number; average_price?: number; last_quantity?: number;
+    buy_quantity?: number; sell_quantity?: number;
+    upper_circuit_limit?: number; lower_circuit_limit?: number;
+    "52_week_high"?: number; "52_week_low"?: number;
+    last_trade_time?: string|null; depth?: {buy?: {price: number; quantity: number; orders: number}[];
+      sell?: {price: number; quantity: number; orders: number}[]}|null;
+    ohlc?: {open: number; high: number; low: number; close: number}|null}[]};
 const emptySettings: Settings = {
   maxTrade: { unit: "INR", value: "" },
   maxDailyLoss: { unit: "INR", value: "" },
@@ -119,15 +132,22 @@ export function TradeDesk({
   engineSnapshot,
   engineConnection,
   historical,
+  restSnapshot = null,
+  restError = "",
+  onRefreshRest = () => {},
 }: {
   onSettings: () => void;
   engineSnapshot: WireEngineSnapshot | null;
   engineConnection: Connection;
   historical: HistoricalCache | null;
+  restSnapshot?: RestSnapshot | null;
+  restError?: string;
+  onRefreshRest?: () => void;
 }) {
   const [status, setStatus] = useState<TradingStatus | null>(null);
   const [settings, setSettings] = useState<SavedSettings | null>(null);
   const [account, setAccount] = useState<AccountSnapshot | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
   useEffect(() => {
     const controller = new AbortController();
     void fetch("/trade/status", { signal: controller.signal })
@@ -151,10 +171,17 @@ export function TradeDesk({
           credentials: "same-origin",
           signal: controller.signal,
         });
-        if (!response.ok) throw new Error("Account unavailable");
+        if (!response.ok) {
+          setAccountError(`LOCAL_ACCOUNT_HTTP_${response.status}`);
+          throw new Error("Account unavailable");
+        }
         setAccount((await response.json()) as AccountSnapshot);
+        setAccountError(null);
       } catch {
-        if (!controller.signal.aborted) setAccount(null);
+        if (!controller.signal.aborted) {
+          setAccount(null);
+          setAccountError((previous) => previous ?? "LOCAL_ACCOUNT_REQUEST_FAILED");
+        }
       }
     }
     void readAccount();
@@ -173,6 +200,8 @@ export function TradeDesk({
   const trades = account?.panels.trades;
   const accountStale = account?.status === "REAUTHENTICATION_REQUIRED";
   const accountCacheOnly = account?.status === "CACHE_ONLY";
+  const rawCapture = engineSnapshot?.feed_connected &&
+    engineSnapshot.no_trade_reasons.includes("RAW_CAPTURE_VALIDATION_PENDING");
   const feedStage = engineSnapshot?.audit
     .filter((event) => event.kind === "FEED_LIFECYCLE")
     .at(-1)?.detail;
@@ -206,29 +235,45 @@ export function TradeDesk({
             Trade desk<span className="heading-dot">.</span>
           </h1>
           <p>
-            Verified Dhan account data appears below. Market candidates and
-            execution remain unavailable until their separate gates pass.
+            Read-only account status appears below. Genuine market observations
+            and archived research remain available independently of trade candidates.
           </p>
         </div>
         <div className="session-card">
           <span>EXECUTION</span>
-          <strong>{status?.execution ?? "UNAVAILABLE"}</strong>
+          <strong>{status?.execution === "UNAVAILABLE" ? "DISABLED · NO TRADE" : status?.execution ?? "LOCAL SERVICE UNAVAILABLE"}</strong>
           <small>Automatic orders are inactive</small>
         </div>
       </div>
       <div className="trade-notice" role="status">
-        <strong>DATA UNAVAILABLE · NO TRADE</strong>
+        <strong>{rawCapture ? "RAW MARKET DATA AVAILABLE · SIMULATION PAUSED" : "NO VALIDATED TRADE CANDIDATES · NO REAL ORDERS"}</strong>
         <p>
-          {status?.reason ?? "Trading service is not connected."} Account panels
-          below are read-only and do not enable stock picks or orders.
+          {rawCapture ? "The standard feed is saving genuine frames; dated validation is pending, so those frames cannot drive virtual decisions." : status?.reason ?? "Trading service is not connected."} Account panels
+          below are read-only and do not enable broker orders.
         </p>
       </div>
       <div className="trade-notice secondary" role="status">
-        <strong>MARKET DATA · {onlineState}</strong>
+        <strong>MARKET DATA · {rawCapture ? "RAW_CAPTURE + REST_SNAPSHOT" : engineSnapshot?.feed_connected ? "LIVE_WS" : restSnapshot ? "REST_SNAPSHOT" : onlineState}</strong>
         <p>
-          RELIANCE Quote-17 observation only ·{" "}
-          {feedStage ?? "NO FEED ATTEMPT RECORDED"} · NO TRADE
+          {engineSnapshot?.feed_connected ? `${feedStage ?? "WebSocket connected"} · ` : ""}
+          {restSnapshot
+            ? `${restSnapshot.quotes.length} genuine Dhan REST quotes · received ${restSnapshot.received_at} · SHA-256 ${restSnapshot.sha256}`
+            : restError || "No REST snapshot received"} · NO TRADE
         </p>
+        {!engineSnapshot?.feed_connected && <button type="button" onClick={onRefreshRest}>Refresh read-only Dhan snapshot</button>}
+        {restSnapshot && <p>{restSnapshot.quotes.map((item) => `${item.symbol} · ${item.security_id}: ₹${item.last_price}`).join(" · ")}</p>}
+        {engineSnapshot?.instruments && engineSnapshot.instruments.some((item) => item.market?.price_nanos || item.depth?.bids[0]) && (
+          <p>
+            LIVE WEBSOCKET: {engineSnapshot.instruments.filter((item) => item.market?.price_nanos || item.depth?.bids[0]).map((item) => {
+              const sym = item.instrument.symbol ?? item.instrument.security_id;
+              const p = item.market?.price_nanos ? `₹${(Number(item.market.price_nanos) / 1e9).toFixed(2)}` : "—";
+              const b = item.depth?.bids[0] ? `bid ₹${(Number(item.depth.bids[0].price_nanos) / 1e9).toFixed(2)}` : "";
+              const a = item.depth?.asks[0] ? `ask ₹${(Number(item.depth.asks[0].price_nanos) / 1e9).toFixed(2)}` : "";
+              const bookInfo = (b && a) ? ` (${b} / ${a})` : "";
+              return `${sym}: ${p}${bookInfo}`;
+            }).join(" · ")}
+          </p>
+        )}
       </div>
       <div className="trade-notice secondary" role="status">
         <strong>
@@ -238,7 +283,7 @@ export function TradeDesk({
               ? "DHAN ACCOUNT: VERIFIED LOCAL CACHE"
               : account?.status === "READ_ONLY"
                 ? "DHAN ACCOUNT: READ-ONLY SYNC"
-                : "DHAN ACCOUNT: DATA UNAVAILABLE"}
+                : `DHAN ACCOUNT: ${accountError ?? "NO VERIFIED RESPONSE"}`}
         </strong>
         <p>
           {accountStale
@@ -246,8 +291,8 @@ export function TradeDesk({
             : account?.status === "CACHE_ONLY"
               ? "Only previously verified local account responses are shown. No Dhan refresh is running."
               : account?.status === "READ_ONLY"
-                ? `Funds ${funds?.status ?? "unavailable"}; holdings ${holdings?.status ?? "unavailable"}; positions ${positions?.status ?? "unavailable"}; orders ${orders?.status ?? "unavailable"}; trades ${trades?.status ?? "unavailable"}. Each source refreshes independently.`
-                : "No verified current account response is available. Previously archived Dhan candles remain separate from account sync."}
+                ? `Funds ${funds?.status ?? "unavailable"}; holdings ${holdings?.status ?? "unavailable"}; positions ${positions?.status ?? "unavailable"}. Each read-only source refreshes independently.`
+                : `No verified current account response is available${accountError ? ` (${accountError})` : ""}. Previously archived Dhan candles remain separate from account sync.`}
         </p>
       </div>
       <div className="trade-notice secondary" role="status">
@@ -277,11 +322,11 @@ export function TradeDesk({
           </div>
           <p>
             {historical?.status === "AVAILABLE"
-              ? `Authentic archived 1-minute rows for ${Object.keys(historical.coverage ?? {}).join(", ")}; retrieved ${historical.retrieved_at}. Source timestamp gaps: ${Object.values(historical.source_timestamp_internal_gaps ?? {}).reduce((a, b) => a + b, 0)}. October 27 unavailable. Historical only; not a current quote.`
-              : "No verified local candle cache loaded. October 27 retrieval failed authentication."}
+              ? `Authentic archived 1-minute rows for ${Object.keys(historical.coverage ?? {}).join(", ")}; retrieved ${historical.retrieved_at}. Source timestamp gaps: ${Object.values(historical.source_timestamp_internal_gaps ?? {}).reduce((a, b) => a + b, 0)}. ${historical.unavailable_date ? `${historical.unavailable_date} unavailable. ` : ""}Historical only; not a current quote.`
+              : "No verified local candle cache loaded. Check the local archive and verifier output; the cockpit does not retry historical requests."}
           </p>
           <span className="trade-card-state">
-            DAILY UNAVAILABLE · CAUSAL RESEARCH BLOCKED
+            HISTORICAL_ARCHIVE · EXPLORATORY_ONLY
           </span>
           {historical?.status === "AVAILABLE" && historical.replay && (
             <div>
@@ -361,10 +406,10 @@ export function TradeDesk({
         <section className="trade-card">
           <span className="eyebrow">CURRENT MARKET</span>
           <h2>Trade candidates</h2>
-          <div className="trade-card-value">DATA UNAVAILABLE · NO TRADE</div>
+          <div className="trade-card-value">NO VALIDATED CANDIDATES · NO TRADE</div>
           <p>
-            Candidate ranking needs current NSE prices, a defined stock universe
-            and a checked research process.
+            Genuine market observations are available separately. No eligible
+            point-in-time candidate has been produced for this desk.
           </p>
           <span className="trade-card-state">
             {status?.marketFeed ?? "NOT CONNECTED"}
@@ -386,7 +431,7 @@ export function TradeDesk({
           </button>
         </section>
       </div>
-      <div className="trade-notice secondary">
+      {(orders || trades) && <div className="trade-notice secondary">
         <strong>
           Dhan orders and executed trades · account ledger unavailable
         </strong>
@@ -423,7 +468,7 @@ export function TradeDesk({
               {item.exchangeTime ?? item.updateTime ?? "unavailable"}
             </p>
           ))}
-      </div>
+      </div>}
       <div className="trade-notice secondary">
         <strong>Replay lab</strong>
         <p>
@@ -596,6 +641,139 @@ export function AutomationSettings() {
           </p>
         )}
       </form>
+      <MarketDataConnection />
     </div>
   );
+}
+
+type MarketAccess = {
+  authorized_security_ids: string[];
+  authorized_feeds: string[];
+  duration: "SESSION_ONLY" | "PERSISTENT";
+  expires_at: string | null;
+  auto_connect: boolean;
+  revoked_at: string | null;
+};
+
+function MarketDataConnection() {
+  const [access, setAccess] = useState<MarketAccess | null>(null);
+  const [universe, setUniverse] = useState<{ symbol: string; security_id: string }[]>([]);
+  const [depthAvailable, setDepthAvailable] = useState(false);
+  const [depthRequested, setDepthRequested] = useState(false);
+  const depthTouched = useRef(false);
+  const [standardMode, setStandardMode] = useState<"QUOTE" | "FULL">("QUOTE");
+  const modeTouched = useRef(false);
+  const [duration, setDuration] = useState<"SESSION_ONLY" | "PERSISTENT">("PERSISTENT");
+  const [expiry, setExpiry] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("Loading market-data permission…");
+  const [feed, setFeed] = useState("STARTING");
+  const [reason, setReason] = useState<string | null>(null);
+  const [profileStatus, setProfileStatus] = useState("");
+  useEffect(() => {
+    const controller = new AbortController();
+    async function refresh() {
+      try {
+        const [permission, capability] = await Promise.all([
+          fetch("/trade/market-data-access", { cache: "no-store", signal: controller.signal }),
+          fetch("/trade/capabilities", { cache: "no-store", signal: controller.signal }),
+        ]);
+        if (!permission.ok || !capability.ok) throw new Error("Market data controls unavailable");
+        const saved = await permission.json() as { access: MarketAccess | null; universe: { symbol: string; security_id: string }[]; depth_available: boolean };
+        const health = await capability.json() as { feed: string; feed_reason: string | null };
+        setAccess(saved.access ?? null);
+        if (!modeTouched.current)
+          setStandardMode(saved.access?.authorized_feeds[0] === "STANDARD_FULL" ? "FULL" : "QUOTE");
+        if (!depthTouched.current)
+          setDepthRequested(saved.access?.authorized_feeds.includes("DEPTH_20") ?? false);
+        setUniverse(Array.isArray(saved.universe) ? saved.universe : []);
+        setDepthAvailable(saved.depth_available === true);
+        setFeed(health.feed);
+        setReason(health.feed_reason);
+        setMessage("");
+      } catch (error) {
+        if (!controller.signal.aborted)
+          setMessage(error instanceof Error ? error.message : "Market data controls unavailable");
+      }
+    }
+    void refresh();
+    const timer = setInterval(() => void refresh(), 5000);
+    return () => { controller.abort(); clearInterval(timer); };
+  }, []);
+  async function act(action: "approve" | "connect" | "disconnect" | "revoke") {
+    setBusy(true);
+    setMessage("");
+    try {
+      const body = action === "approve" ? {
+        action, confirmed, universe: "FROZEN_25_NSE_EQ", standard_feed: true,
+        standard_mode: standardMode,
+        depth_feed: depthRequested,
+        duration: active ? access.duration : duration,
+        expires_at: active ? access.expires_at : expiry ? new Date(expiry).toISOString() : null,
+        auto_connect: true,
+      } : { action };
+      const response = await fetch("/trade/market-data-access", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const result = await response.json() as { access?: MarketAccess; error?: string };
+      if (!response.ok || !result.access) throw new Error(result.error ?? "Permission update failed");
+      setAccess(result.access);
+      modeTouched.current = false;
+      setStandardMode(result.access.authorized_feeds[0] === "STANDARD_FULL" ? "FULL" : "QUOTE");
+      setConfirmed(false);
+      setMessage(action === "approve" ? "Read-only scope saved. Connection awaits an eligible session and preflight." :
+        action === "connect" ? "Auto-connect enabled; connection awaits all gates." :
+          action === "disconnect" ? "Auto-connect disabled; active feed will disconnect." :
+            "Market-data access revoked.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Permission update failed");
+    } finally { setBusy(false); }
+  }
+  const active = access && !access.revoked_at;
+  return <section className="trade-settings" aria-label="Market Data Connection">
+    <h2>Market Data Connection</h2>
+    <p>Read-only Dhan data for the frozen 25 NSE cash equities. Virtual simulation only; broker orders remain disabled.</p>
+    <details><summary>Install a fresh Dhan Client ID and Access Token locally</summary>
+      <p>Run this in Terminal. The prompts hide both values and store them in owner-private backend files:</p>
+      <pre>{'cd ~/alpha-grid && PYTHONPATH=src .venv/bin/python -m quant.apps.live_feed_credentials --root . --private-dir "$HOME/Library/Application Support/AlphaGrid/offline-dev" --install-web-token'}</pre>
+      <p>Enter the expiry shown by Dhan. A new valid local token creates the standard-feed 25-stock scope unless you previously revoked it.</p>
+    </details>
+    <button type="button" disabled={busy} onClick={() => { setProfileStatus("CHECKING"); void fetch("/trade/dhan/profile", { method: "POST" }).then(async (response) => {
+      const value = await response.json() as { status?: string }; setProfileStatus(value.status ?? `HTTP_${response.status}`);
+    }).catch(() => setProfileStatus("PROFILE_CHECK_UNAVAILABLE")); }}>Test Dhan token and Data API now</button>
+    {profileStatus && <p role="status">Dhan profile: {profileStatus}</p>}
+    <details><summary>Approved universe: {universe.length} instruments</summary>
+      <p>{universe.map((item) => `${item.symbol} ${item.security_id}`).join(" · ")}</p>
+    </details>
+    <p role="status">Feed {feed}{reason ? ` · ${reason}` : ""} · Auto-connect {active && access.auto_connect ? "ON" : "OFF"}</p>
+    {active ? <>
+      <p>Approved: {access.authorized_security_ids.length} instruments · {access.authorized_feeds.join(", ")} · {access.duration === "PERSISTENT" ? "until revoked" : "this session only"}{access.expires_at ? ` · expires ${access.expires_at}` : ""}</p>
+      <p>Changing from Quote to Full expands the approved standard-feed data. Full uses the same shared socket and includes five displayed bid/ask levels.</p>
+      <label>Standard feed mode <select value={standardMode} onChange={(event) => { modeTouched.current = true; setStandardMode(event.target.value as "QUOTE" | "FULL"); setConfirmed(false); }}>
+        <option value="QUOTE">Quote · last price and volume</option><option value="FULL">Full · five-level order book</option>
+      </select></label>
+      <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I approve this exact read-only {standardMode === "FULL" ? "Full" : "Quote"} feed for the frozen 25 IDs.</label>
+      <div className="trade-settings-footer">
+        <button type="button" disabled={busy || !confirmed || access.authorized_feeds[0] === `STANDARD_${standardMode}`} onClick={() => void act("approve")}>Save selected feed mode</button>
+        <button type="button" className="trade-action" disabled={busy || access.auto_connect} onClick={() => void act("connect")}>Connect / Auto-connect ON</button>
+        <button type="button" disabled={busy || !access.auto_connect} onClick={() => void act("disconnect")}>Disconnect / Auto-connect OFF</button>
+        <button type="button" disabled={busy} onClick={() => void act("revoke")}>Revoke Access</button>
+      </div>
+    </> : <>
+      <label>Authorization duration <select value={duration} onChange={(event) => setDuration(event.target.value as "SESSION_ONLY" | "PERSISTENT")}>
+        <option value="SESSION_ONLY">This session only</option><option value="PERSISTENT">Persistent until revoked</option>
+      </select></label>
+      <label>Optional expiry <input type="datetime-local" value={expiry} onChange={(event) => setExpiry(event.target.value)} /></label>
+      <p>Standard market feed: ON (one shared socket).</p>
+      <label>Standard feed mode <select value={standardMode} onChange={(event) => { modeTouched.current = true; setStandardMode(event.target.value as "QUOTE" | "FULL"); setConfirmed(false); }}>
+        <option value="QUOTE">Quote · last price and volume</option><option value="FULL">Full · five-level order book</option>
+      </select></label>
+      <label><input type="checkbox" disabled={!depthAvailable} checked={depthRequested} onChange={(event) => { depthTouched.current = true; setDepthRequested(event.target.checked); setConfirmed(false); }} /> 20-level depth feed (one separate read-only socket){!depthAvailable ? " — collector unavailable" : ""}</label>
+      <label><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> I approve this exact read-only 25-stock {standardMode === "FULL" ? "Full" : "Quote"} scope{depthRequested ? " with 20-level depth" : ""} and confirm the required Dhan data entitlement is active.</label>
+      <button type="button" className="trade-action" disabled={busy || !confirmed} onClick={() => void act("approve")}>Approve and enable auto-connect</button>
+    </>}
+    {message && <p role="status">{message}</p>}
+  </section>;
 }

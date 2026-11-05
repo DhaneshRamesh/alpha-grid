@@ -1,19 +1,46 @@
-import { readFile } from "node:fs/promises";
+import { lstat, readFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export async function loadDhanCredentials(tokenPath) {
-  const clientId = process.env.DHAN_CLIENT_ID?.trim();
+  let clientId = process.env.DHAN_CLIENT_ID?.trim();
   let token = process.env.DHAN_ACCESS_TOKEN?.trim();
+  if (!clientId) {
+    const clientPath = resolve(dirname(tokenPath), "dhan-client-id");
+    try {
+      const info = await lstat(clientPath);
+      if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077))
+        throw new Error("Private Dhan client identity invalid");
+      clientId = (await readFile(clientPath, "utf8")).trim();
+    } catch (error) {
+      if (error.code !== "ENOENT") throw error;
+    }
+    if (!clientId) {
+      const envPath = resolve(dirname(tokenPath), "../..", ".env");
+      try {
+        const info = await lstat(envPath);
+        if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077))
+          throw new Error("Private Dhan client identity invalid");
+        const matches = (await readFile(envPath, "utf8")).split(/\r?\n/)
+          .filter((line) => line.trim().startsWith("DHAN_CLIENT_ID="));
+        if (matches.length === 1) clientId = matches[0].split("=", 2)[1].trim().replace(/^['"]|['"]$/g, "");
+      } catch (error) {
+        if (error.code !== "ENOENT") throw error;
+      }
+    }
+  }
   if (!token) {
     try {
+      const info = await lstat(tokenPath);
+      if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid?.() || (info.mode & 0o077))
+        throw new Error("Private Dhan token invalid");
       token = (await readFile(tokenPath, "utf8")).trim();
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
   }
-  return clientId && token ? { clientId, token } : null;
+  return /^[0-9]+$/.test(clientId ?? "") && token ? { clientId, token } : null;
 }
 
 function amount(value, name) {
@@ -116,7 +143,7 @@ export function tokenExpiryFuture(token, nowSeconds = Date.now() / 1000) {
   }
 }
 
-async function boundedResponseBytes(response) {
+export async function boundedResponseBytes(response) {
   const limit = 2 * 1024 * 1024;
   if (!response.body) {
     const raw = Buffer.from(await response.arrayBuffer());
@@ -178,9 +205,12 @@ export function createAccountSync({
   fetcher = fetch,
   now = () => Date.now(),
   pause = (ms) => new Promise((resolvePause) => setTimeout(resolvePause, ms)),
+  endpoints = APPROVED_ACCOUNT_ENDPOINTS,
 } = {}) {
+  if (!Array.isArray(endpoints) || endpoints.some((name) => !APPROVED_ACCOUNT_ENDPOINTS.includes(name)))
+    throw new Error("Unsupported account endpoint selection");
   const panels = Object.fromEntries(
-    APPROVED_ACCOUNT_ENDPOINTS.map((name) => [
+    endpoints.map((name) => [
       name,
       { endpoint: name, status: "DATA_UNAVAILABLE" },
     ]),
@@ -192,7 +222,7 @@ export function createAccountSync({
   let lastRequestStarted = 0;
 
   async function load() {
-    for (const name of APPROVED_ACCOUNT_ENDPOINTS) {
+    for (const name of endpoints) {
       try {
         panels[name] = {
           ...(await cacheCommand("load", name)),
@@ -224,21 +254,21 @@ export function createAccountSync({
         !privateToken.metadata_valid
       ) {
         reauthenticationRequired = true;
+        blockedTokenMtimeNs = privateToken?.token_mtime_ns ?? "ABSENT";
         return;
       }
       if (
         reauthenticationRequired &&
-        (!blockedTokenMtimeNs ||
-          privateToken.token_mtime_ns === blockedTokenMtimeNs)
+        privateToken.token_mtime_ns === blockedTokenMtimeNs
       )
         return;
       reauthenticationRequired = false;
       const credentials = await loadDhanCredentials(tokenPath);
-      if (!credentials || !tokenExpiryFuture(credentials.token, now() / 1000)) {
+      if (!credentials) {
         reauthenticationRequired = true;
         return;
       }
-      for (const name of APPROVED_ACCOUNT_ENDPOINTS) {
+      for (const name of endpoints) {
         if (reauthenticationRequired || storageBlocked) break;
         let reserved;
         try {

@@ -74,18 +74,19 @@ test("approved account refreshes are independent, reserved, and stop on 401", as
   const directory = await mkdtemp(join(tmpdir(), "alpha-grid-account-test-"));
   const path = join(directory, "token");
   const previous = process.env.DHAN_CLIENT_ID;
-  process.env.DHAN_CLIENT_ID = "test-client";
+  process.env.DHAN_CLIENT_ID = "123456";
   const token = `x.${Buffer.from(JSON.stringify({ exp: 9999999999 })).toString("base64url")}.x`;
-  await writeFile(path, token);
+  await writeFile(path, token, {mode: 0o600});
   const requests = [];
   const reserved = new Set();
   const panels = new Map();
+  let tokenMtime = "100";
   const cacheCommand = async (operation, name, payload) => {
     if (operation === "credential")
       return {
         private_token_present: true,
         metadata_valid: true,
-        token_mtime_ns: "100",
+        token_mtime_ns: tokenMtime,
       };
     if (operation === "reserve") {
       if (reserved.has(name)) return { reserved: false };
@@ -140,6 +141,10 @@ test("approved account refreshes are independent, reserved, and stop on 401", as
     await restarted.load();
     await restarted.refresh();
     assert.equal(requests.length, 3);
+    tokenMtime = "101";
+    reserved.clear();
+    await restarted.refresh();
+    assert.equal(requests.length, 6);
   } finally {
     if (previous === undefined) delete process.env.DHAN_CLIENT_ID;
     else process.env.DHAN_CLIENT_ID = previous;
@@ -147,17 +152,17 @@ test("approved account refreshes are independent, reserved, and stop on 401", as
   }
 });
 
-test("expired or malformed token never starts an account request", async () => {
+test("expired private metadata never starts an account request", async () => {
   assert.equal(tokenExpiryFuture("not-a-token"), false);
   const directory = await mkdtemp(
     join(tmpdir(), "alpha-grid-account-expired-"),
   );
   const path = join(directory, "token");
   const previous = process.env.DHAN_CLIENT_ID;
-  process.env.DHAN_CLIENT_ID = "test-client";
+  process.env.DHAN_CLIENT_ID = "123456";
   await writeFile(
     path,
-    `x.${Buffer.from('{"exp":1}').toString("base64url")}.x`,
+    `x.${Buffer.from('{"exp":1}').toString("base64url")}.x`, {mode: 0o600},
   );
   let requests = 0;
   try {
@@ -165,7 +170,7 @@ test("expired or malformed token never starts an account request", async () => {
       tokenPath: path,
       cacheCommand: async (operation, name) =>
         operation === "credential"
-          ? { private_token_present: true, metadata_valid: true }
+          ? { private_token_present: true, metadata_valid: false, token_mtime_ns: "100" }
           : { endpoint: name, status: "DATA_UNAVAILABLE" },
       fetcher: async () => {
         requests++;
@@ -188,10 +193,10 @@ test("a transport failure leaves other approved panels refreshable", async () =>
   );
   const path = join(directory, "token");
   const previous = process.env.DHAN_CLIENT_ID;
-  process.env.DHAN_CLIENT_ID = "test-client";
+  process.env.DHAN_CLIENT_ID = "123456";
   await writeFile(
     path,
-    `x.${Buffer.from('{"exp":9999999999}').toString("base64url")}.x`,
+    `x.${Buffer.from('{"exp":9999999999}').toString("base64url")}.x`, {mode: 0o600},
   );
   const called = [];
   const cacheCommand = async (operation, name, payload) => {
@@ -243,10 +248,11 @@ test("failed cache re-verification removes previously displayed account data", a
   );
   const path = join(directory, "token");
   const previous = process.env.DHAN_CLIENT_ID;
-  process.env.DHAN_CLIENT_ID = "test-client";
+  process.env.DHAN_CLIENT_ID = "123456";
   await writeFile(
     path,
     `x.${Buffer.from('{"exp":9999999999}').toString("base64url")}.x`,
+    {mode: 0o600},
   );
   let fundsLoads = 0;
   try {

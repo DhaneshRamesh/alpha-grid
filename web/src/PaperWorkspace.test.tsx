@@ -144,7 +144,7 @@ describe("paper workspace", () => {
       security_id: "2885",
       approved: true,
     });
-    expect(screen.getByText(/no validated stock candidates/i)).toBeTruthy();
+    expect(screen.getByText(/No connected paper decisions are available/i)).toBeTruthy();
     vi.unstubAllGlobals();
   });
   it("shows three abstaining horizons and queues paper-only approval", async () => {

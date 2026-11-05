@@ -24,6 +24,34 @@ export const initialState: StreamState = {
 let localBootstrap: Promise<void> | null = null;
 
 function validSnapshot(value: unknown): value is WireEngineSnapshot {
+  const hasReason = (reason: string) =>
+    (value as WireEngineSnapshot).no_trade_reasons.includes(reason);
+  const validDepth = (item: WireEngineSnapshot["instruments"][number]) => {
+    if (item.depth == null) return true;
+    const { market, depth } = item;
+    if (depth.source === "DEPTH_20") {
+      return (
+        depth.bids.length <= 20 &&
+        depth.asks.length <= 20 &&
+        depth.derived_pairing === true &&
+        typeof depth.receive_timestamp_ns === "string"
+      );
+    }
+    if (!market || !depth.provenance ||
+        !["RAW_FULL", "FULL"].includes(market.packet_kind ?? "") ||
+        depth.source !== (market.packet_kind === "RAW_FULL" ? "STANDARD_FULL_RAW" : "STANDARD_FULL") ||
+        (market.packet_kind === "RAW_FULL") !== hasReason("RAW_CAPTURE_VALIDATION_PENDING") ||
+        depth.receive_timestamp_ns !== market.source_receive_timestamp_ns ||
+        depth.provenance.source_protocol !== "DhanStandardV2" ||
+        depth.provenance.feed_session_id !== market.provenance.feed_session_id ||
+        depth.provenance.source_frame_id !== market.provenance.source_frame_id ||
+        depth.provenance.packet_offset !== market.provenance.packet_offset ||
+        !/^[0-9a-f]{64}$/i.test(market.provenance.raw_frame_sha256 ?? "") ||
+        depth.provenance.raw_frame_sha256 !== market.provenance.raw_frame_sha256 ||
+        depth.bids.length !== 5 || depth.asks.length !== 5)
+      return false;
+    return true;
+  };
   const usable = (value: unknown) => {
     if (typeof value !== "object" || value === null) return false;
     const item = value as WireEngineSnapshot["instruments"][number];
@@ -53,18 +81,24 @@ function validSnapshot(value: unknown): value is WireEngineSnapshot {
       (!("paper" in value) || value.paper == null) &&
       (value.no_trade_reasons as string[]).includes("OBSERVATION_ONLY") &&
       (value.no_trade_reasons as string[]).includes("NO_ELIGIBLE_DHAN_FEED") &&
-      (value.no_trade_reasons as string[]).includes(
-        "SESSION_CLASSIFICATION_UNVERIFIED",
-      ) &&
+      (!hasReason("RAW_CAPTURE_VALIDATION_PENDING") ||
+        hasReason("SESSION_CLASSIFICATION_UNVERIFIED")) &&
+      (value.instruments.length === 1 || value.instruments.length === 25) &&
+      new Set(value.instruments.map((item: WireEngineSnapshot["instruments"][number]) =>
+        item.instrument.security_id)).size === value.instruments.length &&
       value.instruments.every(usable) &&
       value.instruments.every(
         (item: WireEngineSnapshot["instruments"][number]) =>
           item.instrument.venue === "NSE" &&
           item.instrument.exchange_segment === "NSE_EQ" &&
-          item.instrument.security_id === "2885" &&
+          /^[0-9]+$/.test(item.instrument.security_id) &&
+          ((value.instruments as WireEngineSnapshot["instruments"]).length === 25 || item.instrument.security_id === "2885") &&
           item.features == null &&
-          item.depth == null &&
+          validDepth(item) &&
           item.candles.length === 0 &&
+          (!item.market?.packet_kind ||
+            !item.market.packet_kind.startsWith("RAW_") ||
+            hasReason("RAW_CAPTURE_VALIDATION_PENDING")) &&
           (!item.market ||
             item.market.provenance.source_protocol === "DhanStandardV2") &&
           (!item.market?.quality.stale ||
@@ -210,17 +244,28 @@ export function useEngineStream(enabled = true): StreamState {
             });
         }
         if (localBootstrap) await localBootstrap;
-        const session = await fetch("/api/session", {
+        let session = await fetch("/api/session", {
           credentials: "same-origin",
           cache: "no-store",
         });
         if (session.status === 401) {
-          setState((current) => ({
-            ...current,
-            snapshot: null,
-            connection: "DISCONNECTED",
-          }));
-          return;
+          if (!localBootstrap) {
+            localBootstrap = fetch("/trade/session/local", {
+              method: "POST",
+              credentials: "same-origin",
+              cache: "no-store",
+              headers: { "X-Alpha-Grid-Local": "1" },
+            })
+              .then((response) => {
+                if (!response.ok) throw new Error("Local sign-in unavailable");
+              })
+              .finally(() => { localBootstrap = null; });
+          }
+          await localBootstrap;
+          session = await fetch("/api/session", {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
         }
         if (!session.ok) throw new Error("UI session unavailable");
       } catch {

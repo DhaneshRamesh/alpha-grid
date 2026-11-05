@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { HistoricalCache } from "./TradingWorkspace";
+import type { SimulationResult } from "./SimulationWorkspace";
 import { amount, dateTime, latency, price, time } from "./format";
 import type {
   WireEngineSnapshot,
@@ -115,14 +117,34 @@ export default function PaperWorkspace({
   snapshot,
   connection,
   instrumentKey,
+  allowPaperMutations = true,
+  historical = null,
 }: {
   snapshot: WireEngineSnapshot | null;
   connection: Connection;
   instrumentKey: string | null;
+  allowPaperMutations?: boolean;
+  historical?: HistoricalCache | null;
 }) {
   const [approvalFeedback, setApprovalFeedback] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const paper: WirePaperSnapshot | null | undefined = snapshot?.paper;
+  const [virtualState, setVirtualState] = useState<{ state: string; cash_inr: string; equity_inr: string;
+    position: {symbol: string}|null; positions?: {symbol: string; remaining_shares: number}[];
+    decisions: {kind: string; symbol?: string; reason?: string}[];
+    trades: {symbol: string; net_reference?: string; net_reference_inr?: string}[];
+    rejected_count: number } | null>(null);
+  const [crossStock, setCrossStock] = useState<SimulationResult | null>(null);
+  const archiveSimulation = crossStock ?? historical?.simulation;
+  useEffect(() => { if (allowPaperMutations) return; let active = true;
+    const refresh = () => { void fetch("/trade/simulation", {cache: "no-store"}).then((response) => response.ok ? response.json() : null)
+      .then((value) => { if (active) setVirtualState(value); }).catch(() => undefined); };
+    const readArchive = () => { void fetch("/trade/cross-stock-simulation", {cache: "no-store"}).then((response) => response.ok ? response.json() : null)
+      .then((value) => { if (active) setCrossStock(value?.simulation?.schema_version === "alpha-grid-simulation-v1" ? value.simulation : null); })
+      .catch(() => { if (active) setCrossStock(null); }); };
+    refresh(); readArchive(); const timer = setInterval(() => { refresh(); readArchive(); }, 5000);
+    return () => { active = false; clearInterval(timer); };
+  }, [allowPaperMutations]);
   async function changeApproval(securityId: string, approved: boolean) {
     setBusyId(securityId);
     try {
@@ -161,10 +183,19 @@ export default function PaperWorkspace({
           </div>
         </div>
         <div className="panel">
-          <div className="empty">
-            Paper engine not active. DATA UNAVAILABLE / NO TRADE; no validated
-            stock candidates or decision records are available.
-          </div>
+          {!allowPaperMutations ? <>
+            <p>SIMULATION_ONLY / NO REAL ORDERS · QP01 connected paper engine inactive. The independent virtual ledger and historical reference rule remain inspectable.</p>
+            <p>Virtual worker {virtualState?.state ?? "UNAVAILABLE"} · cash ₹{virtualState?.cash_inr ?? "—"} · book equity ₹{virtualState?.equity_inr ?? "—"} · positions {virtualState?.positions?.map((row) => `${row.symbol} ${row.remaining_shares}`).join(", ") || virtualState?.position?.symbol || "none"} · rejected {virtualState?.rejected_count ?? "—"}.</p>
+            <p>Historical rule: {archiveSimulation?.available_symbols.join(", ") ?? "no verified archive"} available · {archiveSimulation?.missing_symbols.length ?? 25} missing instruments · {archiveSimulation?.candidate.selected_sessions ?? 0} selected sessions. {crossStock ? "EXPLORATORY_ARCHIVE · 25-stock October replay." : "Pinned RELIANCE replay."} Reference prices are not fills.</p>
+            <h3>Recent virtual decisions</h3>
+            {(virtualState?.decisions ?? []).slice(-20).map((decision, index) => <p key={index}>{decision.symbol ?? "UNIVERSE"} · {decision.kind} · {decision.reason ?? "observed"}</p>)}
+            <h3>Historical rule selections and rejections</h3>
+            {(archiveSimulation?.decisions ?? []).slice(-25).map((decision, index) => <p key={index}>{decision.day} · {decision.symbol} · {decision.decision}</p>)}
+            <h3>Virtual trades</h3>
+            {(virtualState?.trades ?? []).slice(-10).map((trade, index) => <p key={index}>{trade.symbol} · net reference ₹{trade.net_reference_inr ?? trade.net_reference}</p>)}
+            <h3>Historical rule-selected reference outcomes</h3>
+            {(archiveSimulation?.trade_ledger ?? []).map((trade) => <p key={`${trade.day}-${trade.symbol}`}>{trade.day} · {trade.symbol} · gross reference ₹{trade.gross_reference_inr} · fees ₹{trade.fee_components_inr.total} · assumed friction ₹{trade.assumed_friction_inr} · net reference ₹{trade.net_reference_inr} · no actual fill</p>)}
+          </> : <><div className="empty">Paper engine not active. No connected paper decisions are available.</div>
           {snapshot?.instruments.map(({ instrument }) => {
             const approved = snapshot.approved_security_ids.includes(
               instrument.security_id,
@@ -179,6 +210,7 @@ export default function PaperWorkspace({
                 </span>{" "}
                 <button
                   disabled={
+                    !allowPaperMutations ||
                     connection !== "CONNECTED" ||
                     busyId === instrument.security_id
                   }
@@ -192,6 +224,7 @@ export default function PaperWorkspace({
             );
           })}
           {approvalFeedback && <p role="status">{approvalFeedback}</p>}
+          </>}
         </div>
       </>
     );
@@ -285,7 +318,7 @@ export default function PaperWorkspace({
               ? "Paper ledger durable"
               : "Paper ledger failure"}
           </small>
-          {paper.mode === "PAPER_REPLAY_APPROVED_RESEARCH" && !p.halted && (
+          {allowPaperMutations && paper.mode === "PAPER_REPLAY_APPROVED_RESEARCH" && !p.halted && (
             <button onClick={() => void haltPaper()}>Halt paper entries</button>
           )}
         </div>
@@ -319,7 +352,7 @@ export default function PaperWorkspace({
                       ? "APPROVED FOR PAPER EVALUATION"
                       : "APPROVAL REQUIRED"}
                   </span>
-                  {paper.mode === "PAPER_REPLAY_APPROVED_RESEARCH" && (
+                  {allowPaperMutations && paper.mode === "PAPER_REPLAY_APPROVED_RESEARCH" && (
                     <button
                       disabled={busyId === instrument.security_id}
                       onClick={() =>

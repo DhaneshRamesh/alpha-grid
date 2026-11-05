@@ -2,17 +2,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import App from "./App";
 import { TradeDesk, type HistoricalCache } from "./TradingWorkspace";
+import type { WireEngineSnapshot } from "./generated/engine-snapshot";
 
+const engineState = vi.hoisted(() => ({ snapshot: null as unknown }));
 vi.mock("./stream", () => ({
   useEngineStream: () => ({
-    snapshot: null,
+    snapshot: engineState.snapshot,
     connection: "DISCONNECTED",
     messageLagMs: null,
     reconnects: 0,
   }),
 }));
+vi.mock("./Chart", () => ({ default: () => <div data-testid="chart-observations" /> }));
 
 beforeEach(() => {
+  engineState.snapshot = null;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (url: string, options?: RequestInit) => ({
@@ -34,6 +38,82 @@ beforeEach(() => {
 });
 
 describe("trading workspace", () => {
+  it("shows a genuine raw WebSocket price live without presenting it as a candle", () => {
+    const received = String(Date.now() * 1_000_000);
+    engineState.snapshot = { mode: "OBSERVE_ONLY", engine_running: true, feed_connected: true,
+      storage_status: "JOURNALED", session_id: "fixture", counters: { fsync_latency: {} }, audit: [],
+      no_trade_reasons: ["RAW_CAPTURE_VALIDATION_PENDING"], instruments: [{
+        instrument: { key: "NSE_EQ:2885:RELIANCE", security_id: "2885", symbol: "RELIANCE", exchange_segment: "NSE_EQ" },
+        candles: [], market: { packet_kind: "RAW_QUOTE", price_nanos: "100000000000",
+          cumulative_traded_volume: "500", source_receive_timestamp_ns: received,
+          source_last_trade_timestamp_ns: null, freshness: "FRESH", quality: { stale: false },
+          provenance: { raw_frame_sha256: "a".repeat(64), source_frame_id: "1" } },
+      }] };
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Candle workstation/ }));
+    expect(screen.getByText(/LIVE PRICE OBSERVATIONS \/ NO TRADE/)).toBeTruthy();
+    expect(screen.getByText(/RAW_CAPTURE_ONLY · NO LIVE BAR/)).toBeTruthy();
+    expect(screen.getByText(/LAST OBSERVED LTP/)).toBeTruthy();
+    expect(screen.getByTestId("chart-observations")).toBeTruthy();
+  });
+  it("separates live raw capture and REST quotes from unavailable candidates and account sync", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => ({
+      ok: url !== "/trade/account",
+      status: url === "/trade/account" ? 503 : 200,
+      json: async () => url === "/trade/status"
+        ? { execution: "UNAVAILABLE", account: "READ_ONLY", marketFeed: "ONLINE_REQUESTED",
+            research: "NOT_CONNECTED", reason: "Candidate output inactive" }
+        : { settings: null },
+    })));
+    const rawSnapshot = { mode: "OBSERVE_ONLY", feed_connected: true, journal_blocked: false,
+      no_trade_reasons: ["RAW_CAPTURE_VALIDATION_PENDING"], audit: [], instruments: [] } as unknown as WireEngineSnapshot;
+    render(<TradeDesk onSettings={() => {}} engineConnection="CONNECTED" historical={null}
+      engineSnapshot={rawSnapshot}
+      restSnapshot={{ source: "REST_SNAPSHOT", received_at: new Date().toISOString(),
+        sha256: "fixture-only", quotes: [{ symbol: "RELIANCE", security_id: "2885", last_price: 100 }] }} />);
+    await waitFor(() => expect(screen.getByText(/DHAN ACCOUNT: LOCAL_ACCOUNT_HTTP_503/)).toBeTruthy());
+    expect(screen.getByText(/RAW MARKET DATA AVAILABLE · SIMULATION PAUSED/)).toBeTruthy();
+    expect(screen.getByText(/MARKET DATA · RAW_CAPTURE \+ REST_SNAPSHOT/)).toBeTruthy();
+    expect(screen.getByText(/RELIANCE · 2885: ₹100/)).toBeTruthy();
+    expect(screen.getByText(/NO VALIDATED CANDIDATES · NO TRADE/)).toBeTruthy();
+  });
+  it("shows ten focused stocks and same-packet Full depth as observations", async () => {
+    const ids = ["2885", "1333", "4963", "1594", "11536", "10604", "3045", "5900", "11483", "5097"];
+    engineState.snapshot = {
+      mode: "OBSERVE_ONLY", engine_running: true, feed_connected: true,
+      storage_status: "JOURNALED", session_id: "fixture", counters: { fsync_latency: {} },
+      audit: [], no_trade_reasons: [],
+      instruments: ids.map((id) => ({ instrument: { key: `NSE_EQ:${id}:FIXTURE${id}`, security_id: id,
+        symbol: `FIXTURE${id}`, exchange_segment: "NSE_EQ" },
+      market: id === "2885" ? { freshness: "FRESH", quality: { stale: false }, source_receive_timestamp_ns: "1793763000000000000",
+        price_nanos: "100000000000", best_bid_price_nanos: "99000000000",
+        best_ask_price_nanos: "101000000000", packet_kind: "FULL" } : null,
+      depth: id === "2885" ? { source: "STANDARD_FULL", receive_timestamp_ns: "1793763000000000000",
+        bids: Array.from({ length: 5 }, (_, i) => ({ price_nanos: String((99 - i) * 1e9),
+          displayed_quantity: "100", order_count: 2, cumulative_visible_quantity: String((i + 1) * 100) })),
+        asks: Array.from({ length: 5 }, (_, i) => ({ price_nanos: String((101 + i) * 1e9),
+          displayed_quantity: "120", order_count: 3, cumulative_visible_quantity: String((i + 1) * 120) })),
+        book_metrics: { quoted_spread_bps: 200, bid_quantity: "500", ask_quantity: "600",
+          bid_orders: 10, ask_orders: 15, five_level_imbalance: -0.0909 } } : null })),
+    };
+    const rows = (engineState.snapshot as { instruments: Array<{ depth: Record<string, unknown> | null }> }).instruments;
+    rows[1].depth = { ...rows[0].depth, source: "STANDARD_FULL" };
+    rows[0].depth = { ...rows[0].depth, source: "STANDARD_FULL_RAW",
+      provenance: { raw_frame_sha256: "a".repeat(64), raw_durable_at_ns: "1793763000000000001" } };
+    (engineState.snapshot as { instruments: Array<{ market: unknown }> }).instruments[0].market = null;
+    render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Command Center/ }));
+    expect(screen.getByText("Ten-stock liquidity radar")).toBeTruthy();
+    expect(screen.getAllByRole("row").length).toBeGreaterThanOrEqual(11);
+    expect(screen.getAllByText(/STANDARD_FULL/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/500 \/ 600/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/RAW OBSERVATION · VALIDATION PENDING/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /Feature monitor/ }));
+    expect(screen.getByText("Five-level displayed book")).toBeTruthy();
+    expect(screen.getAllByText(/Descriptive only; no fill, signal or training eligibility/).length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: /Market intelligence/ }));
+    expect(screen.getAllByText(/RAW OBSERVATION \/ VALIDATION PENDING/).length).toBeGreaterThan(0);
+  });
   it("shows archived replay abstentions without presenting a live quote or fill", async () => {
     // UI contract fixture only; these values are never market evidence.
     const historical: HistoricalCache = {
@@ -95,10 +175,15 @@ describe("trading workspace", () => {
 
   it("starts with unavailable Dhan data and no fictional candidate", async () => {
     render(<App />);
+    expect(screen.getByRole("heading", { name: "Command Center." })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /Trade desk/ }));
     expect(screen.getByRole("heading", { name: "Trade desk." })).toBeTruthy();
     expect(screen.getAllByText(/DATA UNAVAILABLE/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/BUY 8 SHARES/)).toBeNull();
     expect(screen.queryByText(/sample price/)).toBeNull();
+    expect(
+      screen.getByText(/cockpit does not retry historical requests/),
+    ).toBeTruthy();
     await waitFor(() =>
       expect(screen.getByText(/Live services are unavailable/)).toBeTruthy(),
     );
@@ -159,6 +244,7 @@ describe("trading workspace", () => {
       })),
     );
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Trade desk/ }));
     await waitFor(() =>
       expect(screen.getByText(/MARKET DATA.*BLOCKED/)).toBeTruthy(),
     );
@@ -208,6 +294,7 @@ describe("trading workspace", () => {
       })),
     );
     render(<App />);
+    fireEvent.click(screen.getByRole("button", { name: /Trade desk/ }));
     await waitFor(() =>
       expect(
         screen.getByText(/DHAN ACCOUNT: VERIFIED LOCAL CACHE/),
