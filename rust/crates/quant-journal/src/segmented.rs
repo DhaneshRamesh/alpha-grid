@@ -41,7 +41,17 @@ pub struct SegmentConfig {
 }
 
 impl SegmentConfig {
-    fn validate(self) -> io::Result<()> {
+    pub fn default_for_policy(durability: DurabilityPolicy) -> Self {
+        Self {
+            max_bytes: 64 * 1024 * 1024,
+            max_age: Duration::from_secs(3600),
+            max_disk_bytes: 4 * 1024 * 1024 * 1024,
+            min_free_bytes: 512 * 1024 * 1024,
+            durability,
+        }
+    }
+
+    pub fn validate(self) -> io::Result<()> {
         self.durability.validate()?;
         if self.max_bytes == 0 || self.max_age.is_zero() || self.max_disk_bytes == 0 {
             return Err(io::Error::new(
@@ -236,6 +246,15 @@ impl SegmentedJournal {
     pub fn recovered_tail_bytes(&self) -> u64 {
         self.recovered_tail_bytes
     }
+    pub fn config(&self) -> &SegmentConfig {
+        &self.config
+    }
+    pub fn total_bytes(&self) -> io::Result<u64> {
+        Ok(self.sealed_bytes.saturating_add(self.active.estimated_bytes()?))
+    }
+    pub fn written_events(&self) -> usize {
+        self.active.written_events()
+    }
     pub fn manifest(&self) -> &Manifest {
         &self.manifest
     }
@@ -361,6 +380,10 @@ impl SegmentedReader {
             next_index: 0,
             current: None,
         })
+    }
+
+    pub fn recovered_tail_bytes(&self) -> u64 {
+        self.current.as_ref().map_or(0, |r| r.recovered_tail_bytes())
     }
 
     pub fn next_record(&mut self) -> io::Result<Option<JournalRecord>> {

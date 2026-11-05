@@ -634,6 +634,7 @@ dependencies = [
  "quant-journal",
  "quant-market-data",
  "quant-replay",
+ "rustls",
  "serde",
  "serde_json",
  "tempfile",

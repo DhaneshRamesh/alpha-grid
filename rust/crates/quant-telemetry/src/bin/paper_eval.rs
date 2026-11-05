@@ -84,6 +84,7 @@ fn p999(values: &[u64]) -> Option<u64> {
 fn event_type(event: &MarketEvent) -> &'static str {
     match event {
         MarketEvent::RawStandardFrame(_) => "raw_standard_frame",
+        MarketEvent::RawDepthFrame(_) => "raw_depth_frame",
         MarketEvent::Depth(_) => "depth",
         MarketEvent::DepthSide(_) => "depth_side",
         MarketEvent::Trade(_) => "trade",

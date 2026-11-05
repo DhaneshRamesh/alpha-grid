@@ -190,6 +190,8 @@ pub enum MarketEvent {
     Session(Box<MarketSessionEvent>),
     // Appended: historical QJ01/Postcard market-event tags stay unchanged.
     RawStandardFrame(Box<RawStandardFrame>),
+    // Append only: preserve all existing Postcard event discriminants.
+    RawDepthFrame(Box<RawStandardFrame>),
 }
 
 impl MarketEvent {
@@ -202,6 +204,7 @@ impl MarketEvent {
             Self::Quote(event) => event.price.metadata.receive_timestamp_ns,
             Self::Session(event) => event.metadata.receive_timestamp_ns,
             Self::RawStandardFrame(event) => event.receive_timestamp_ns,
+            Self::RawDepthFrame(event) => event.receive_timestamp_ns,
         }
     }
 }

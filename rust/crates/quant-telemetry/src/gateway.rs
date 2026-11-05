@@ -244,12 +244,84 @@ impl Gateway {
 
     /// Only an offline verifier may supply the pinned authentic Dhan archive.
     pub fn with_historical_cache(&mut self, cache: serde_json::Value) -> Result<(), &'static str> {
+        let source = cache.get("response_sha256").and_then(|v| v.as_str());
+        let bars = cache.get("bars").and_then(|v| v.as_array());
+        let coverage = cache.get("coverage");
+        let archive_ok = match (source, bars, coverage) {
+            (
+                Some("bcace97b4dfd1b1cbfe10481b4718b770368a50c5264fb1f61a50f9c325d9861"),
+                Some(bars),
+                Some(coverage),
+            ) => {
+                bars.len() == 720
+                    && *coverage == serde_json::json!({"2026-10-15": 360, "2026-10-16": 360})
+            }
+            (
+                Some("a4c61e3d5ad8ce3b9bf78317ac73ff15502bcefa52bd6a09c3771b866d2d8653"),
+                Some(bars),
+                Some(coverage),
+            ) => {
+                bars.len() == 1_800
+                    && *coverage
+                        == serde_json::json!({
+                            "2026-10-26": 360, "2026-10-27": 360,
+                            "2026-10-28": 360, "2026-10-29": 360,
+                            "2026-10-30": 360
+                        })
+            }
+            _ => false,
+        };
+        let replay = cache.get("replay");
+        let replay_ok = replay.is_some_and(|value| {
+            value.get("source_sha256").and_then(|v| v.as_str()) == source
+                && value.get("processed_bars").and_then(|v| v.as_u64())
+                    == bars.map(|items| items.len() as u64)
+                && value.get("no_trade_evaluations").and_then(|v| v.as_u64())
+                    == bars.map(|items| items.len() as u64)
+                && value.get("decision").and_then(|v| v.as_str()) == Some("NO_TRADE")
+                && value.get("baseline_eligibility").and_then(|v| v.as_str())
+                    == Some("DESCRIPTIVE_ONLY")
+                && value.get("paper_orders").and_then(|v| v.as_u64()) == Some(0)
+                && value.get("paper_fills").and_then(|v| v.as_u64()) == Some(0)
+                && value.get("qp01_records_written").and_then(|v| v.as_u64()) == Some(0)
+                && value.get("broker_orders").and_then(|v| v.as_str()) == Some("DISABLED")
+        });
+        let simulation_ok = cache.get("simulation").is_none_or(|value| {
+            source == Some("a4c61e3d5ad8ce3b9bf78317ac73ff15502bcefa52bd6a09c3771b866d2d8653")
+                && value.get("schema_version").and_then(|v| v.as_str())
+                    == Some("alpha-grid-simulation-v1")
+                && value.get("mode").and_then(|v| v.as_str()) == Some("SIMULATION_ONLY")
+                && value.get("eligibility").and_then(|v| v.as_str())
+                    == Some("EXPLORATORY_MECHANICS_ONLY")
+                && value
+                    .get("reference_prices_are_fills")
+                    .and_then(|v| v.as_bool())
+                    == Some(false)
+                && value.get("source_hashes").and_then(|v| v.get("RELIANCE"))
+                    == Some(&serde_json::json!([source.unwrap_or_default()]))
+                && value
+                    .get("sessions")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|days| days.len() == 5)
+                && value
+                    .get("trade_ledger")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(|rows| rows.len() <= 5)
+                && value
+                    .get("virtual_positions_end")
+                    .and_then(|v| v.as_array())
+                    .is_some_and(Vec::is_empty)
+                && value.get("paper_orders").and_then(|v| v.as_u64()) == Some(0)
+                && value.get("qp01_writes").and_then(|v| v.as_u64()) == Some(0)
+                && value.get("broker_orders").and_then(|v| v.as_u64()) == Some(0)
+        });
         if cache.get("schema_version").and_then(|v| v.as_str()) != Some("dhan-historical-cache-v1")
             || cache.get("status").and_then(|v| v.as_str()) != Some("AVAILABLE")
             || cache.get("source").and_then(|v| v.as_str()) != Some("DHAN_HISTORICAL")
             || cache.get("instrument").and_then(|v| v.as_str()) != Some("NSE_EQ:2885:RELIANCE")
-            || cache.get("response_sha256").and_then(|v| v.as_str())
-                != Some("bcace97b4dfd1b1cbfe10481b4718b770368a50c5264fb1f61a50f9c325d9861")
+            || !archive_ok
+            || !replay_ok
+            || !simulation_ok
             || cache.get("causal_eligibility").and_then(|v| v.as_str()) != Some("BLOCKED")
             || cache.get("production_eligibility").and_then(|v| v.as_str()) != Some("BLOCKED")
             || cache.get("source_integrity").and_then(|v| v.as_str()) != Some("VERIFIED")
@@ -257,10 +329,6 @@ impl Gateway {
                 .get("bar_timestamp_semantics")
                 .and_then(|v| v.as_str())
                 != Some("UNVERIFIED")
-            || cache
-                .get("bars")
-                .and_then(|v| v.as_array())
-                .is_none_or(|v| v.len() != 720)
         {
             return Err("verified cached historical source required");
         }

@@ -153,7 +153,8 @@ impl MarketEngine {
             // remain readable and are not reinterpreted as standard-feed quotes.
             MarketEvent::DepthSide(_)
             | MarketEvent::Trade(_)
-            | MarketEvent::RawStandardFrame(_) => {}
+            | MarketEvent::RawStandardFrame(_)
+            | MarketEvent::RawDepthFrame(_) => {}
         }
         Ok(output)
     }

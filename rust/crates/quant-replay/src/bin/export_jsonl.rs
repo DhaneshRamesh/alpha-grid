@@ -13,7 +13,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut index = 0_u64;
     while let Some(record) = reader.next_record()? {
         index += 1;
-        if matches!(record.event, MarketEvent::RawStandardFrame(_)) {
+        if matches!(
+            record.event,
+            MarketEvent::RawStandardFrame(_) | MarketEvent::RawDepthFrame(_)
+        ) {
             continue; // Raw binary evidence remains in QJ01, never in the research export.
         }
         serde_json::to_writer(

@@ -60,7 +60,7 @@ pub struct Envelope {
     pub payload: Value,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct WireQuality {
     pub source_time_unverified: bool,
     pub volume_interval_incomplete: bool,
@@ -86,6 +86,10 @@ impl From<MarketDataQuality> for WireQuality {
 pub struct WireProvenance {
     pub feed_session_id: String,
     pub arrival_ordinal: Option<String>,
+    pub source_frame_id: Option<String>,
+    pub packet_offset: Option<u32>,
+    pub raw_frame_sha256: Option<String>,
+    pub raw_durable_at_ns: Option<String>,
     pub source_protocol: String,
     pub source_last_trade_timestamp_ns: Option<String>,
     pub source_exchange_timestamp_ns: Option<String>,
@@ -95,6 +99,10 @@ impl From<&Provenance> for WireProvenance {
         Self {
             feed_session_id: value.feed_session_id.clone(),
             arrival_ordinal: value.arrival_ordinal.map(|n| n.to_string()),
+            source_frame_id: None,
+            packet_offset: None,
+            raw_frame_sha256: None,
+            raw_durable_at_ns: None,
             source_protocol: protocol_name(value.source_protocol).into(),
             source_last_trade_timestamp_ns: value
                 .source_last_trade_timestamp_ns
@@ -143,7 +151,7 @@ pub struct WireDepthLevel {
     pub order_count: Option<u32>,
     pub cumulative_visible_quantity: String,
 }
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WireDepth {
     pub receive_timestamp_ns: String,
     pub exchange_timestamp_ns: Option<String>,
@@ -151,6 +159,28 @@ pub struct WireDepth {
     pub atomic_exchange_snapshot_verified: bool,
     pub bids: Vec<WireDepthLevel>,
     pub asks: Vec<WireDepthLevel>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub book_metrics: Option<WireBookMetrics>,
+    #[serde(default)]
+    pub provenance: Option<WireProvenance>,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+pub struct WireBookMetrics {
+    pub quoted_spread_bps: f64,
+    pub bid_quantity: String,
+    pub ask_quantity: String,
+    pub bid_orders: u64,
+    pub ask_orders: u64,
+    pub five_level_imbalance: f64,
+    pub bid_quantity_change: Option<String>,
+    pub ask_quantity_change: Option<String>,
+    pub bid_depletion: Option<String>,
+    pub ask_depletion: Option<String>,
+    pub bid_replenishment: Option<String>,
+    pub ask_replenishment: Option<String>,
+    pub ofi_proxy_quantity: Option<String>,
 }
 fn wire_levels(levels: &[DepthLevel; 20]) -> Vec<WireDepthLevel> {
     let mut cumulative = 0_u64;
@@ -176,6 +206,9 @@ impl From<&DepthEvent> for WireDepth {
             atomic_exchange_snapshot_verified: false,
             bids: wire_levels(&value.bids),
             asks: wire_levels(&value.asks),
+            source: Some("DEPTH_20".into()),
+            book_metrics: None,
+            provenance: None,
         }
     }
 }
@@ -193,6 +226,8 @@ pub struct WireMarket {
     pub freshness: String,
     pub quality: WireQuality,
     pub provenance: WireProvenance,
+    #[serde(default)]
+    pub packet_kind: Option<String>,
 }
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct WireFeatures {
@@ -242,6 +277,7 @@ impl WireMarket {
             freshness: freshness_name(market.freshness).into(),
             quality: market.quality.into(),
             provenance: (&market.provenance).into(),
+            packet_kind: None,
         }
     }
 }

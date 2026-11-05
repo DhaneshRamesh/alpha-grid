@@ -1,11 +1,11 @@
 //! Offline-testable adapter from standard-feed frames to durable engine output.
 //! The transport must timestamp immediately on WebSocket frame receipt.
 use crate::pipeline::{EngineError, EngineOutput, MarketEngine};
-use quant_core::{Instrument, MarketEvent, PriceSource};
+use quant_core::{Instrument, MarketEvent, MarketSessionKind, PriceSource};
 use quant_journal::{JournalRecord, JournalWriter, encoded_record_bytes, raw_standard_record};
 use std::io;
 
-const MAX_SCOPED_JOURNAL_BYTES: u64 = 64 * 1024 * 1024;
+pub const MAX_SCOPED_JOURNAL_BYTES: u64 = 512 * 1024 * 1024;
 use quant_market_data::dhan_standard::{self, DecodedPacket};
 
 #[derive(Debug)]
@@ -38,7 +38,7 @@ pub struct StandardCapture {
     next_arrival_ordinal: u64,
     counters: CaptureCounters,
     poisoned: bool,
-    expected_instrument: Option<Instrument>,
+    expected_instruments: Vec<Instrument>,
 }
 
 impl Default for StandardCapture {
@@ -48,7 +48,7 @@ impl Default for StandardCapture {
             next_arrival_ordinal: 1,
             counters: CaptureCounters::default(),
             poisoned: false,
-            expected_instrument: None,
+            expected_instruments: Vec::new(),
         }
     }
 }
@@ -56,14 +56,31 @@ impl Default for StandardCapture {
 impl StandardCapture {
     /// Reject other securities before any record from the frame reaches QJ01.
     pub fn for_instrument(instrument: Instrument) -> Self {
+        Self::for_instruments(vec![instrument])
+    }
+
+    pub fn for_instruments(instruments: Vec<Instrument>) -> Self {
         Self {
-            expected_instrument: Some(instrument),
+            expected_instruments: instruments,
             ..Self::default()
         }
     }
 
     pub fn expected_instrument(&self) -> Option<&Instrument> {
-        self.expected_instrument.as_ref()
+        (self.expected_instruments.len() == 1).then(|| &self.expected_instruments[0])
+    }
+
+    pub fn expected_instruments(&self) -> &[Instrument] {
+        &self.expected_instruments
+    }
+
+    fn accepts(&self, actual: &Instrument) -> bool {
+        self.expected_instruments.is_empty()
+            || self.expected_instruments.iter().any(|expected| {
+                actual.venue == expected.venue
+                    && actual.exchange_segment == expected.exchange_segment
+                    && actual.security_id == expected.security_id
+            })
     }
 
     pub fn counters(&self) -> CaptureCounters {
@@ -86,6 +103,84 @@ impl StandardCapture {
             engine,
             |_, _| {},
         )
+    }
+
+    /// Preserve the original frame and validate its packet identity without
+    /// emitting normalized market events into research or simulation journals.
+    pub fn on_raw_frame_only(
+        &mut self,
+        frame: &[u8],
+        receive_timestamp_ns: i64,
+        feed_session_id: &str,
+        writer: &mut JournalWriter,
+    ) -> Result<Option<u16>, CaptureError> {
+        self.on_raw_frame_with_packets(frame, receive_timestamp_ns, feed_session_id, writer)
+            .map(|(disconnect, _)| disconnect)
+    }
+
+    /// Return validated decoded packets only after the original frame is
+    /// synced. Optional projections may use them without changing raw capture.
+    pub fn on_raw_frame_with_packets(
+        &mut self,
+        frame: &[u8],
+        receive_timestamp_ns: i64,
+        feed_session_id: &str,
+        writer: &mut JournalWriter,
+    ) -> Result<(Option<u16>, Vec<DecodedPacket>), CaptureError> {
+        if self.poisoned || self.expected_instruments.is_empty() {
+            return Err(CaptureError::Poisoned);
+        }
+        self.counters.frames_received += 1;
+        self.persist_raw_if_scoped(frame, receive_timestamp_ns, feed_session_id, writer)?;
+        let packets = dhan_standard::decode_frame(
+            frame,
+            receive_timestamp_ns,
+            feed_session_id,
+            self.next_frame_id,
+            self.next_arrival_ordinal,
+        )
+        .map_err(|error| {
+            self.counters.malformed_frames += 1;
+            self.poisoned = true;
+            CaptureError::Decode(error)
+        })?;
+        let mut disconnect = None;
+        for packet in &packets {
+            let actual = match packet {
+                DecodedPacket::Quote(quote)
+                    if matches!(quote.price.source, PriceSource::Quote | PriceSource::Full) =>
+                {
+                    Some(&quote.price.instrument)
+                }
+                DecodedPacket::Session(session) => {
+                    if let MarketSessionKind::Disconnected { reason_code } = &session.kind {
+                        disconnect = Some(*reason_code);
+                    }
+                    session.instrument.as_ref()
+                }
+                DecodedPacket::AuxiliaryOpenInterest { instrument, .. } => Some(instrument),
+                _ => {
+                    self.counters.unsupported_frames += 1;
+                    self.poisoned = true;
+                    return Err(CaptureError::UnsupportedCode(0));
+                }
+            };
+            if actual.is_some_and(|instrument| !self.accepts(instrument)) {
+                self.counters.identity_rejections += 1;
+                self.poisoned = true;
+                return Err(CaptureError::UnexpectedInstrument);
+            }
+        }
+        self.next_frame_id = self
+            .next_frame_id
+            .checked_add(1)
+            .ok_or(CaptureError::OrderingOverflow)?;
+        self.next_arrival_ordinal = self
+            .next_arrival_ordinal
+            .checked_add(packets.len() as u64)
+            .ok_or(CaptureError::OrderingOverflow)?;
+        self.counters.packets_decoded += packets.len() as u64;
+        Ok((disconnect, packets))
     }
 
     /// The observer sees each normalized record only after its file sync and
@@ -113,7 +208,7 @@ impl StandardCapture {
         )
         .map_err(|error| {
             self.counters.malformed_frames += 1;
-            if self.expected_instrument.is_some() {
+            if !self.expected_instruments.is_empty() {
                 self.poisoned = true;
             }
             CaptureError::Decode(error)
@@ -123,7 +218,7 @@ impl StandardCapture {
         for packet in packets {
             let event = match packet {
                 DecodedPacket::Price(price) => {
-                    if self.expected_instrument.is_some() {
+                    if !self.expected_instruments.is_empty() {
                         self.counters.unsupported_frames += 1;
                         self.poisoned = true;
                         return Err(CaptureError::UnsupportedCode(2));
@@ -131,7 +226,7 @@ impl StandardCapture {
                     MarketEvent::Price(price)
                 }
                 DecodedPacket::Quote(quote) => {
-                    if self.expected_instrument.is_some()
+                    if !self.expected_instruments.is_empty()
                         && quote.price.source != PriceSource::Quote
                     {
                         self.counters.unsupported_frames += 1;
@@ -142,11 +237,7 @@ impl StandardCapture {
                 }
                 DecodedPacket::Session(session) => MarketEvent::Session(Box::new(session)),
                 DecodedPacket::AuxiliaryOpenInterest { instrument, .. } => {
-                    if self.expected_instrument.as_ref().is_some_and(|expected| {
-                        instrument.venue != expected.venue
-                            || instrument.exchange_segment != expected.exchange_segment
-                            || instrument.security_id != expected.security_id
-                    }) {
+                    if !self.accepts(&instrument) {
                         self.counters.identity_rejections += 1;
                         self.poisoned = true;
                         return Err(CaptureError::UnexpectedInstrument);
@@ -155,22 +246,18 @@ impl StandardCapture {
                 }
                 DecodedPacket::Unsupported { code, .. } => {
                     self.counters.unsupported_frames += 1;
-                    self.poisoned = self.expected_instrument.is_some();
+                    self.poisoned = !self.expected_instruments.is_empty();
                     return Err(CaptureError::UnsupportedCode(code));
                 }
             };
-            if let Some(expected) = &self.expected_instrument {
+            if !self.expected_instruments.is_empty() {
                 let actual = match &event {
                     MarketEvent::Price(price) => Some(&price.instrument),
                     MarketEvent::Quote(quote) => Some(&quote.price.instrument),
                     MarketEvent::Session(session) => session.instrument.as_ref(),
                     _ => None,
                 };
-                if actual.is_some_and(|actual| {
-                    actual.venue != expected.venue
-                        || actual.exchange_segment != expected.exchange_segment
-                        || actual.security_id != expected.security_id
-                }) {
+                if actual.is_some_and(|actual| !self.accepts(actual)) {
                     self.counters.identity_rejections += 1;
                     self.poisoned = true;
                     return Err(CaptureError::UnexpectedInstrument);
@@ -193,7 +280,7 @@ impl StandardCapture {
                 session_id: feed_session_id.into(),
                 event,
             };
-            if self.expected_instrument.is_some() {
+            if !self.expected_instruments.is_empty() {
                 self.check_capacity(writer, &record)?;
             }
             match engine.append_and_process(writer, &record) {
@@ -230,7 +317,7 @@ impl StandardCapture {
             self.poisoned = true;
             CaptureError::Storage(error)
         })?;
-        if used.saturating_add(needed) > MAX_SCOPED_JOURNAL_BYTES {
+        if used.saturating_add(needed) > writer.max_allowed_bytes() {
             self.poisoned = true;
             return Err(CaptureError::Storage(io::Error::other(
                 "scoped raw journal byte cap reached",
@@ -260,7 +347,7 @@ impl StandardCapture {
         feed_session_id: &str,
         writer: &mut JournalWriter,
     ) -> Result<(), CaptureError> {
-        if self.poisoned || self.expected_instrument.is_none() {
+        if self.poisoned || self.expected_instruments.is_empty() {
             return Err(CaptureError::NotConnected);
         }
         self.counters.frames_received += 1;
@@ -277,7 +364,7 @@ impl StandardCapture {
         feed_session_id: &str,
         writer: &mut JournalWriter,
     ) -> Result<(), CaptureError> {
-        if self.expected_instrument.is_none() {
+        if self.expected_instruments.is_empty() {
             return Ok(());
         }
         let raw = raw_standard_record(
@@ -442,6 +529,108 @@ mod tests {
             rejected_raw.event,
             MarketEvent::RawStandardFrame(_)
         ));
+        assert!(reader.next_record().unwrap().is_none());
+    }
+
+    #[test]
+    fn scoped_three_instrument_capture_preserves_each_original_frame() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("three.qj");
+        let mut writer = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        let instruments = [(1333, "HDFCBANK"), (2885, "RELIANCE"), (1594, "INFY")]
+            .into_iter()
+            .map(|(id, symbol)| Instrument {
+                venue: "NSE".into(),
+                exchange_segment: "NSE_EQ".into(),
+                security_id: id.to_string(),
+                symbol: symbol.into(),
+            })
+            .collect();
+        let mut capture = StandardCapture::for_instruments(instruments);
+        let mut engine = engine();
+        for (index, id) in [1333, 2885, 1594].into_iter().enumerate() {
+            capture
+                .on_frame(
+                    &quote_packet_for(id),
+                    1_700_000_000_500_000_000 + index as i64 * 1_000_000_000,
+                    "three-session",
+                    &mut writer,
+                    &mut engine,
+                )
+                .unwrap();
+        }
+        writer.close().unwrap();
+        assert_eq!(capture.counters().raw_frames_durable, 3);
+        let mut reader = JournalReader::open(&path).unwrap();
+        for id in [1333, 2885, 1594] {
+            let raw = reader.next_record().unwrap().unwrap();
+            let MarketEvent::RawStandardFrame(raw) = raw.event else {
+                panic!("original frame required")
+            };
+            assert_eq!(raw.bytes, quote_packet_for(id));
+            let decoded = reader.next_record().unwrap().unwrap();
+            let MarketEvent::Quote(quote) = decoded.event else {
+                panic!("quote required")
+            };
+            assert_eq!(quote.price.instrument.security_id, id.to_string());
+        }
+    }
+
+    #[test]
+    fn raw_only_keeps_bytes_and_rejects_wrong_instrument_without_normalized_quote() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("raw-only.qj");
+        let instrument = Instrument {
+            venue: "NSE".into(),
+            exchange_segment: "NSE_EQ".into(),
+            security_id: "2885".into(),
+            symbol: "RELIANCE".into(),
+        };
+        let mut capture = StandardCapture::for_instrument(instrument);
+        let mut writer = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        capture
+            .on_raw_frame_only(
+                &quote_packet_for(2885),
+                1_700_000_000_500_000_000,
+                "raw-session",
+                &mut writer,
+            )
+            .unwrap();
+        let mut disconnect = vec![50, 10, 0, 0, 0, 0, 0, 0];
+        disconnect.extend(805_u16.to_le_bytes());
+        assert_eq!(
+            capture
+                .on_raw_frame_only(
+                    &disconnect,
+                    1_700_000_001_000_000_000,
+                    "raw-session",
+                    &mut writer,
+                )
+                .unwrap(),
+            Some(805)
+        );
+        assert!(matches!(
+            capture.on_raw_frame_only(
+                &quote_packet_for(1333),
+                1_700_000_001_500_000_000,
+                "raw-session",
+                &mut writer,
+            ),
+            Err(CaptureError::UnexpectedInstrument)
+        ));
+        writer.close().unwrap();
+        let mut reader = JournalReader::open(&path).unwrap();
+        for (id, expected) in [
+            (2885, quote_packet_for(2885)),
+            (0, disconnect),
+            (1333, quote_packet_for(1333)),
+        ] {
+            let record = reader.next_record().unwrap().unwrap();
+            let MarketEvent::RawStandardFrame(raw) = record.event else {
+                panic!("only original frames may be persisted")
+            };
+            assert_eq!(raw.bytes, expected, "raw frame {id}");
+        }
         assert!(reader.next_record().unwrap().is_none());
     }
 

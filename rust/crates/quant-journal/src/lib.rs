@@ -49,8 +49,21 @@ pub fn raw_standard_record(
     Ok(record)
 }
 
+pub fn raw_depth_record(
+    session_id: &str,
+    frame_id: u64,
+    receive_timestamp_ns: i64,
+    bytes: &[u8],
+) -> io::Result<JournalRecord> {
+    let mut record = raw_standard_record(session_id, frame_id, receive_timestamp_ns, bytes)?;
+    if let MarketEvent::RawStandardFrame(raw) = record.event {
+        record.event = MarketEvent::RawDepthFrame(raw);
+    }
+    Ok(record)
+}
+
 fn verify_raw_frame(record: &JournalRecord) -> io::Result<()> {
-    if let MarketEvent::RawStandardFrame(raw) = &record.event {
+    if let MarketEvent::RawStandardFrame(raw) | MarketEvent::RawDepthFrame(raw) = &record.event {
         if raw.feed_session_id != record.session_id
             || raw.feed_session_id.is_empty()
             || raw.frame_id == 0
@@ -104,22 +117,31 @@ pub struct Commit {
 }
 
 pub struct JournalWriter {
-    file: File,
+    file: Option<File>,
     policy: DurabilityPolicy,
     buffer: Vec<u8>,
     pending: usize,
     written_events: usize,
     poisoned: bool,
     recovered_tail_bytes: u64,
+    segmented: Option<Box<segmented::SegmentedJournal>>,
+    max_allowed_bytes: u64,
     #[cfg(test)]
-    fail_next_write: bool,
+    pub fail_next_write: bool,
     #[cfg(test)]
-    fail_next_sync: bool,
+    pub fail_next_sync: bool,
 }
 
 impl JournalWriter {
     pub fn open(path: &Path, policy: DurabilityPolicy) -> io::Result<Self> {
         policy.validate()?;
+        if path.is_dir()
+            || path.extension().is_none()
+            || path.extension().map_or(false, |ext| ext != "qj")
+        {
+            let config = segmented::SegmentConfig::default_for_policy(policy);
+            return Self::open_segmented(path, config);
+        }
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -136,13 +158,38 @@ impl JournalWriter {
         }
         file.seek(SeekFrom::End(0))?;
         Ok(Self {
-            file,
+            file: Some(file),
             policy,
             buffer: Vec::new(),
             pending: 0,
             written_events: 0,
             poisoned: false,
             recovered_tail_bytes,
+            segmented: None,
+            max_allowed_bytes: 512 * 1024 * 1024,
+            #[cfg(test)]
+            fail_next_write: false,
+            #[cfg(test)]
+            fail_next_sync: false,
+        })
+    }
+
+    pub fn open_segmented(root: &Path, config: segmented::SegmentConfig) -> io::Result<Self> {
+        config.validate()?;
+        let seg = segmented::SegmentedJournal::open(root, config)?;
+        let recovered_tail_bytes = seg.recovered_tail_bytes();
+        let max_disk_bytes = seg.config().max_disk_bytes;
+        let policy = config.durability;
+        Ok(Self {
+            file: None,
+            policy,
+            buffer: Vec::new(),
+            pending: 0,
+            written_events: 0,
+            poisoned: false,
+            recovered_tail_bytes,
+            segmented: Some(Box::new(seg)),
+            max_allowed_bytes: max_disk_bytes,
             #[cfg(test)]
             fail_next_write: false,
             #[cfg(test)]
@@ -153,6 +200,9 @@ impl JournalWriter {
     pub fn append(&mut self, record: &JournalRecord) -> io::Result<Option<Commit>> {
         if self.poisoned {
             return Err(io::Error::other("journal poisoned after storage error"));
+        }
+        if let Some(segmented) = &mut self.segmented {
+            return segmented.append(record);
         }
         verify_raw_frame(record)?;
         let payload = postcard::to_stdvec(record).map_err(io::Error::other)?;
@@ -188,19 +238,23 @@ impl JournalWriter {
         if self.poisoned {
             return Err(io::Error::other("journal poisoned after storage error"));
         }
+        if let Some(segmented) = &mut self.segmented {
+            return segmented.sync();
+        }
         if self.pending == 0 {
             return Ok(Commit::default());
         }
+        let file = self.file.as_mut().expect("file writer initialized");
         let started = Instant::now();
         #[cfg(test)]
         let write_result = if self.fail_next_write {
             self.fail_next_write = false;
             Err(io::Error::from_raw_os_error(28))
         } else {
-            self.file.write_all(&self.buffer)
+            file.write_all(&self.buffer)
         };
         #[cfg(not(test))]
-        let write_result = self.file.write_all(&self.buffer);
+        let write_result = file.write_all(&self.buffer);
         if let Err(error) = write_result {
             self.poisoned = true;
             return Err(error);
@@ -214,10 +268,10 @@ impl JournalWriter {
             self.fail_next_sync = false;
             Err(io::Error::from_raw_os_error(5))
         } else {
-            self.file.sync_data()
+            file.sync_data()
         };
         #[cfg(not(test))]
-        let sync_result = self.file.sync_data();
+        let sync_result = file.sync_data();
         if let Err(error) = sync_result {
             self.poisoned = true;
             return Err(error);
@@ -238,29 +292,59 @@ impl JournalWriter {
     }
 
     pub fn pending(&self) -> usize {
-        self.pending
+        if let Some(segmented) = &self.segmented {
+            segmented.pending()
+        } else {
+            self.pending
+        }
     }
 
     pub fn estimated_bytes(&self) -> io::Result<u64> {
-        Ok(self.file.metadata()?.len() + self.buffer.len() as u64)
+        if let Some(segmented) = &self.segmented {
+            segmented.total_bytes()
+        } else {
+            let file = self.file.as_ref().expect("file writer initialized");
+            Ok(file.metadata()?.len() + self.buffer.len() as u64)
+        }
     }
 
     pub fn written_events(&self) -> usize {
-        self.written_events
+        if let Some(segmented) = &self.segmented {
+            segmented.written_events()
+        } else {
+            self.written_events
+        }
     }
 
     pub fn recovered_tail_bytes(&self) -> u64 {
-        self.recovered_tail_bytes
+        if let Some(segmented) = &self.segmented {
+            segmented.recovered_tail_bytes()
+        } else {
+            self.recovered_tail_bytes
+        }
     }
 
     pub fn close(mut self) -> io::Result<Commit> {
-        self.sync()
+        if let Some(segmented) = self.segmented.take() {
+            segmented.close()
+        } else {
+            self.sync()
+        }
     }
+
     pub fn max_delay_ms(&self) -> Option<u64> {
         match self.policy {
             DurabilityPolicy::EveryEvent => None,
             DurabilityPolicy::Group { max_delay_ms, .. } => Some(max_delay_ms),
         }
+    }
+
+    pub fn max_allowed_bytes(&self) -> u64 {
+        self.max_allowed_bytes
+    }
+
+    pub fn is_segmented(&self) -> bool {
+        self.segmented.is_some()
     }
 }
 
@@ -284,13 +368,26 @@ impl Drop for JournalWriter {
     }
 }
 
+enum JournalReaderInner {
+    Flat {
+        file: File,
+        recovered_tail_bytes: u64,
+    },
+    Segmented(Box<segmented::SegmentedReader>),
+}
+
 pub struct JournalReader {
-    file: File,
-    recovered_tail_bytes: u64,
+    inner: JournalReaderInner,
 }
 
 impl JournalReader {
     pub fn open(path: &Path) -> io::Result<Self> {
+        if path.is_dir() {
+            let seg = segmented::SegmentedReader::open(path)?;
+            return Ok(Self {
+                inner: JournalReaderInner::Segmented(Box::new(seg)),
+            });
+        }
         let mut file = OpenOptions::new().read(true).write(true).open(path)?;
         let original_size = file.metadata()?.len();
         let recovered_tail_bytes = original_size - recover(&mut file)?;
@@ -299,22 +396,35 @@ impl JournalReader {
         }
         file.seek(SeekFrom::Start(0))?;
         Ok(Self {
-            file,
-            recovered_tail_bytes,
+            inner: JournalReaderInner::Flat {
+                file,
+                recovered_tail_bytes,
+            },
         })
     }
 
     pub fn recovered_tail_bytes(&self) -> u64 {
-        self.recovered_tail_bytes
+        match &self.inner {
+            JournalReaderInner::Flat {
+                recovered_tail_bytes,
+                ..
+            } => *recovered_tail_bytes,
+            JournalReaderInner::Segmented(seg) => seg.recovered_tail_bytes(),
+        }
     }
 
     pub fn next_record(&mut self) -> io::Result<Option<JournalRecord>> {
-        let Some(payload) = read_frame(&mut self.file)? else {
-            return Ok(None);
-        };
-        let record: JournalRecord = postcard::from_bytes(&payload).map_err(io::Error::other)?;
-        verify_raw_frame(&record)?;
-        Ok(Some(record))
+        match &mut self.inner {
+            JournalReaderInner::Flat { file, .. } => {
+                let Some(payload) = read_frame(file)? else {
+                    return Ok(None);
+                };
+                let record: JournalRecord = postcard::from_bytes(&payload).map_err(io::Error::other)?;
+                verify_raw_frame(&record)?;
+                Ok(Some(record))
+            }
+            JournalReaderInner::Segmented(seg) => seg.next_record(),
+        }
     }
 }
 
@@ -449,6 +559,38 @@ mod tests {
 
         let mut altered = record;
         let MarketEvent::RawStandardFrame(raw) = &mut altered.event else {
+            unreachable!()
+        };
+        raw.bytes[0] ^= 1;
+        let payload = postcard::to_stdvec(&altered).unwrap();
+        let mut file = File::create(&path).unwrap();
+        file.write_all(&MAGIC).unwrap();
+        file.write_all(&(payload.len() as u32).to_le_bytes())
+            .unwrap();
+        file.write_all(&crc32fast::hash(&payload).to_le_bytes())
+            .unwrap();
+        file.write_all(&payload).unwrap();
+        file.sync_all().unwrap();
+        assert_eq!(
+            JournalReader::open(&path).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+    }
+
+    #[test]
+    fn raw_depth_frame_sha256_rejects_crc_valid_tampering() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("depth.qj");
+        let bytes = [1_u8, 2, 3, 4];
+        let record = raw_depth_record("depth-one", 1, 123, &bytes).unwrap();
+        let mut writer = JournalWriter::open(&path, DurabilityPolicy::EveryEvent).unwrap();
+        writer.append(&record).unwrap();
+        writer.close().unwrap();
+        let mut reader = JournalReader::open(&path).unwrap();
+        assert_eq!(reader.next_record().unwrap(), Some(record.clone()));
+
+        let mut altered = record;
+        let MarketEvent::RawDepthFrame(raw) = &mut altered.event else {
             unreachable!()
         };
         raw.bytes[0] ^= 1;
@@ -711,6 +853,143 @@ mod tests {
         .unwrap();
         journal.append(&record(2)).unwrap();
         exit(37);
+    }
+
+    #[test]
+    fn journal_writer_segmented_rotation_and_recovery() {
+        use crate::segmented::{SegmentConfig, replay_segments};
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("segmented_journal");
+        let config = SegmentConfig {
+            max_bytes: 400, // Small segment limit to force rapid rotation
+            max_age: Duration::from_secs(3600),
+            max_disk_bytes: 10 * 1024 * 1024,
+            min_free_bytes: 1024,
+            durability: DurabilityPolicy::EveryEvent,
+        };
+
+        let mut writer = JournalWriter::open_segmented(&root, config).unwrap();
+        assert!(writer.is_segmented());
+        assert_eq!(writer.max_allowed_bytes(), 10 * 1024 * 1024);
+
+        // Append 6 records (each record is ~100+ bytes postcard encoded)
+        let mut expected = Vec::new();
+        for i in 0..6 {
+            let r = record(i);
+            expected.push(r.clone());
+            writer.append(&r).unwrap();
+        }
+        writer.close().unwrap();
+
+        // Verify rotation produced multiple segments in manifest
+        let manifest_path = root.join("manifest.json");
+        assert!(manifest_path.exists());
+        let manifest: crate::segmented::Manifest =
+            serde_json::from_reader(std::fs::File::open(&manifest_path).unwrap()).unwrap();
+        assert!(manifest.sealed.len() >= 1, "Expected at least 1 sealed rotated segment");
+
+        // Verify restart recovery: reopening detects tail without errors
+        let writer2 = JournalWriter::open_segmented(&root, config).unwrap();
+        assert_eq!(writer2.recovered_tail_bytes(), 0);
+        writer2.close().unwrap();
+
+        // Verify replay preserves exact record contents and ordering
+        let replayed = replay_segments(&root).unwrap();
+        assert_eq!(replayed, expected);
+    }
+
+    #[test]
+    fn journal_writer_directory_auto_detection() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal_dir = dir.path().join("auto_detected_dir");
+        std::fs::create_dir_all(&journal_dir).unwrap();
+
+        let writer = JournalWriter::open(&journal_dir, DurabilityPolicy::EveryEvent).unwrap();
+        assert!(writer.is_segmented());
+        assert_eq!(writer.max_allowed_bytes(), 4 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn journal_writer_nonexistent_dir_auto_segmented() {
+        let dir = tempfile::tempdir().unwrap();
+        // Path without .qj extension that does not exist yet
+        let segmented_path = dir.path().join("raw-standard-2026-11-05");
+
+        let writer = JournalWriter::open(&segmented_path, DurabilityPolicy::EveryEvent).unwrap();
+        assert!(writer.is_segmented());
+        assert_eq!(writer.max_allowed_bytes(), 4 * 1024 * 1024 * 1024);
+    }
+
+    #[test]
+    fn journal_reader_transparent_segmented_and_flat() {
+        let dir = tempfile::tempdir().unwrap();
+
+        // 1. Flat journal file
+        let flat_path = dir.path().join("flat.qj");
+        let mut flat_writer = JournalWriter::open(&flat_path, DurabilityPolicy::EveryEvent).unwrap();
+        assert!(!flat_writer.is_segmented());
+        let r0 = record(10);
+        let r1 = record(11);
+        flat_writer.append(&r0).unwrap();
+        flat_writer.append(&r1).unwrap();
+        flat_writer.close().unwrap();
+
+        let mut flat_reader = JournalReader::open(&flat_path).unwrap();
+        assert_eq!(flat_reader.next_record().unwrap(), Some(r0.clone()));
+        assert_eq!(flat_reader.next_record().unwrap(), Some(r1.clone()));
+        assert_eq!(flat_reader.next_record().unwrap(), None);
+
+        // 2. Segmented journal directory
+        let seg_dir = dir.path().join("segmented_read_test");
+        let mut seg_writer = JournalWriter::open(&seg_dir, DurabilityPolicy::EveryEvent).unwrap();
+        assert!(seg_writer.is_segmented());
+        seg_writer.append(&r0).unwrap();
+        seg_writer.append(&r1).unwrap();
+        seg_writer.close().unwrap();
+
+        let mut seg_reader = JournalReader::open(&seg_dir).unwrap();
+        assert_eq!(seg_reader.next_record().unwrap(), Some(r0));
+        assert_eq!(seg_reader.next_record().unwrap(), Some(r1));
+        assert_eq!(seg_reader.next_record().unwrap(), None);
+    }
+
+    #[test]
+    fn journal_writer_rotation_and_fd_hygiene() {
+        use crate::segmented::SegmentConfig;
+        use std::time::Duration;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("fd_hygiene_test");
+        let config = SegmentConfig {
+            max_bytes: 350, // Rapid rotation
+            max_age: Duration::from_secs(3600),
+            max_disk_bytes: 10 * 1024 * 1024,
+            min_free_bytes: 1024,
+            durability: DurabilityPolicy::EveryEvent,
+        };
+
+        let mut writer = JournalWriter::open_segmented(&root, config).unwrap();
+        for i in 0..10 {
+            writer.append(&record(i)).unwrap();
+        }
+        writer.close().unwrap();
+
+        // Check manifest has multiple rotated sealed segments
+        let manifest_path = root.join("manifest.json");
+        let manifest: crate::segmented::Manifest =
+            serde_json::from_reader(std::fs::File::open(&manifest_path).unwrap()).unwrap();
+        assert!(manifest.sealed.len() >= 2, "Expected multiple sealed segments");
+
+        // Verify all segments can be sequentially read and closed cleanly
+        let mut reader = JournalReader::open(&root).unwrap();
+        let mut count = 0;
+        while let Some(r) = reader.next_record().unwrap() {
+            assert_eq!(r, record(count));
+            count += 1;
+        }
+        assert_eq!(count, 10);
     }
 
     #[cfg(target_os = "linux")]

@@ -63,20 +63,23 @@ pub enum DecodedPacket {
     Unsupported { code: u8, declared_length: u16 },
 }
 
-fn read_i16(p: &[u8], at: usize) -> i16 {
-    i16::from_le_bytes([p[at], p[at + 1]])
+fn read_u16(p: &[u8], at: usize) -> u16 {
+    u16::from_le_bytes([p[at], p[at + 1]])
 }
 fn read_i32(p: &[u8], at: usize) -> i32 {
     i32::from_le_bytes(p[at..at + 4].try_into().expect("packet length checked"))
 }
+fn read_u32(p: &[u8], at: usize) -> u32 {
+    u32::from_le_bytes(p[at..at + 4].try_into().expect("packet length checked"))
+}
 fn read_f32(p: &[u8], at: usize) -> f32 {
     f32::from_le_bytes(p[at..at + 4].try_into().expect("packet length checked"))
 }
-fn nonnegative_i32(p: &[u8], at: usize, offset: usize) -> Result<u64, DecodeError> {
-    u64::try_from(read_i32(p, at)).map_err(|_| DecodeError::InvalidQuantity { offset })
+fn quantity_u32(p: &[u8], at: usize) -> u64 {
+    u64::from(read_u32(p, at))
 }
-fn nonnegative_i16(p: &[u8], at: usize, offset: usize) -> Result<u64, DecodeError> {
-    u64::try_from(read_i16(p, at)).map_err(|_| DecodeError::InvalidQuantity { offset })
+fn quantity_u16(p: &[u8], at: usize) -> u64 {
+    u64::from(read_u16(p, at))
 }
 fn price(p: &[u8], at: usize, offset: usize, optional: bool) -> Result<Option<i64>, DecodeError> {
     let value = read_f32(p, at);
@@ -95,11 +98,8 @@ fn price(p: &[u8], at: usize, offset: usize, optional: bool) -> Result<Option<i6
         Some(scaled as i64)
     })
 }
-fn ltt(p: &[u8], at: usize, offset: usize) -> Result<Option<i64>, DecodeError> {
-    let seconds = read_i32(p, at);
-    if seconds < 0 {
-        return Err(DecodeError::InvalidTimestamp { offset });
-    }
+fn ltt(p: &[u8], at: usize, _offset: usize) -> Result<Option<i64>, DecodeError> {
+    let seconds = read_u32(p, at);
     Ok((seconds > 0).then_some(i64::from(seconds) * 1_000_000_000))
 }
 fn instrument(p: &[u8], offset: usize) -> Result<Instrument, DecodeError> {
@@ -162,11 +162,11 @@ fn quote(
     meta: SourceTimestampMetadata,
     full: bool,
 ) -> Result<QuoteObservation, DecodeError> {
-    let last_trade_quantity = nonnegative_i16(packet, 12, offset)?;
+    let last_trade_quantity = quantity_u16(packet, 12);
     let average_trade_price_nanos = price(packet, 18, offset, true)?;
-    let cumulative_traded_volume = nonnegative_i32(packet, 22, offset)?;
-    let total_sell_quantity = nonnegative_i32(packet, 26, offset)?;
-    let total_buy_quantity = nonnegative_i32(packet, 30, offset)?;
+    let cumulative_traded_volume = quantity_u32(packet, 22);
+    let total_sell_quantity = quantity_u32(packet, 26);
+    let total_buy_quantity = quantity_u32(packet, 30);
     let (
         open_interest,
         day_high_open_interest,
@@ -174,32 +174,51 @@ fn quote(
         daily_offset,
         five_level_book,
     ) = if full {
-        let oi = nonnegative_i32(packet, 34, offset)?;
-        let oi_high = nonnegative_i32(packet, 38, offset)?;
-        let oi_low = nonnegative_i32(packet, 42, offset)?;
+        let oi = quantity_u32(packet, 34);
+        let oi_high = quantity_u32(packet, 38);
+        let oi_low = quantity_u32(packet, 42);
         let mut levels = [FiveLevelQuote::default(); 5];
+        let mut numeric_depth_valid = true;
         for (index, level) in levels.iter_mut().enumerate() {
             let at = 62 + 20 * index;
+            let bid_price = price(packet, at + 12, offset, true);
+            let ask_price = price(packet, at + 16, offset, true);
+            numeric_depth_valid &= bid_price.is_ok() && ask_price.is_ok();
             *level = FiveLevelQuote {
                 bid: DepthLevel {
-                    quantity: nonnegative_i32(packet, at, offset)?,
-                    order_count: Some(u32::from(
-                        u16::try_from(nonnegative_i16(packet, at + 8, offset)?)
-                            .expect("u16 source"),
-                    )),
-                    price_nanos: price(packet, at + 12, offset, true)?.unwrap_or(0),
+                    quantity: quantity_u32(packet, at),
+                    order_count: Some(u32::from(read_u16(packet, at + 8))),
+                    price_nanos: bid_price.ok().flatten().unwrap_or(0),
                 },
                 ask: DepthLevel {
-                    quantity: nonnegative_i32(packet, at + 4, offset)?,
-                    order_count: Some(u32::from(
-                        u16::try_from(nonnegative_i16(packet, at + 10, offset)?)
-                            .expect("u16 source"),
-                    )),
-                    price_nanos: price(packet, at + 16, offset, true)?.unwrap_or(0),
+                    quantity: quantity_u32(packet, at + 4),
+                    order_count: Some(u32::from(read_u16(packet, at + 10))),
+                    price_nanos: ask_price.ok().flatten().unwrap_or(0),
                 },
             };
         }
-        (Some(oi), Some(oi_high), Some(oi_low), 46, Some(levels))
+        let valid_book = numeric_depth_valid
+            && levels.iter().enumerate().all(|(i, level)| {
+                let bid = level.bid;
+                let ask = level.ask;
+                bid.price_nanos > 0
+                    && ask.price_nanos > 0
+                    && bid.quantity > 0
+                    && ask.quantity > 0
+                    && bid.order_count.unwrap_or(0) > 0
+                    && ask.order_count.unwrap_or(0) > 0
+                    && bid.price_nanos < ask.price_nanos
+                    && (i == 0
+                        || (levels[i - 1].bid.price_nanos > bid.price_nanos
+                            && levels[i - 1].ask.price_nanos < ask.price_nanos))
+            });
+        (
+            Some(oi),
+            Some(oi_high),
+            Some(oi_low),
+            46,
+            valid_book.then_some(levels),
+        )
     } else {
         (None, None, None, 34, None)
     };
@@ -321,7 +340,7 @@ pub fn decode_frame(
             }
             5 => DecodedPacket::AuxiliaryOpenInterest {
                 instrument: instrument(packet, offset)?,
-                value: nonnegative_i32(packet, 8, offset)?,
+                value: quantity_u32(packet, 8),
             },
             6 => {
                 let inst = instrument(packet, offset)?;
@@ -338,7 +357,7 @@ pub fn decode_frame(
                     metadata: meta,
                     kind: MarketSessionKind::PreviousClose {
                         price_nanos: price(packet, 8, offset, false)?.expect("required price"),
-                        previous_open_interest: nonnegative_i32(packet, 12, offset)?,
+                        previous_open_interest: quantity_u32(packet, 12),
                     },
                 })
             }
@@ -419,13 +438,13 @@ mod tests {
             p.extend_from_slice(&v.to_le_bytes());
         }
         if full {
-            for _ in 0..5 {
+            for index in 0..5 {
                 p.extend_from_slice(&10_i32.to_le_bytes());
                 p.extend_from_slice(&11_i32.to_le_bytes());
                 p.extend_from_slice(&2_i16.to_le_bytes());
                 p.extend_from_slice(&3_i16.to_le_bytes());
-                p.extend_from_slice(&101.0_f32.to_le_bytes());
-                p.extend_from_slice(&102.0_f32.to_le_bytes());
+                p.extend_from_slice(&(101.0_f32 - index as f32).to_le_bytes());
+                p.extend_from_slice(&(102.0_f32 + index as f32).to_le_bytes());
             }
         }
         p
@@ -478,6 +497,27 @@ mod tests {
             })
         ));
     }
+
+    #[test]
+    fn invalid_full_book_isolated_without_losing_other_packets() {
+        let mut invalid = quote_packet(8);
+        invalid[62 + 16..62 + 20].copy_from_slice(&100.0_f32.to_le_bytes());
+        let mut frame = invalid;
+        let mut valid_other_stock = quote_packet(8);
+        valid_other_stock[4..8].copy_from_slice(&2885_i32.to_le_bytes());
+        frame.extend(valid_other_stock);
+        let rows = parse(&frame).unwrap();
+        let DecodedPacket::Quote(first) = &rows[0] else {
+            panic!("first full")
+        };
+        let DecodedPacket::Quote(second) = &rows[1] else {
+            panic!("second full")
+        };
+        assert!(first.five_level_book.is_none());
+        assert!(second.five_level_book.is_some());
+        assert_eq!(second.price.instrument.security_id, "2885");
+        assert_eq!(second.price.metadata.packet_offset, 162);
+    }
     #[test]
     fn malformed_and_unknown_are_explicit() {
         assert!(matches!(
@@ -507,12 +547,6 @@ mod tests {
         let mut p = ticker();
         p[8..12].copy_from_slice(&f32::NAN.to_le_bytes());
         assert!(matches!(parse(&p), Err(DecodeError::InvalidPrice { .. })));
-        let mut p = quote_packet(4);
-        p[22..26].copy_from_slice(&(-1_i32).to_le_bytes());
-        assert!(matches!(
-            parse(&p),
-            Err(DecodeError::InvalidQuantity { .. })
-        ));
         let mut p = ticker();
         p.extend([1, 2]);
         assert!(matches!(
@@ -535,6 +569,19 @@ mod tests {
             parse(&oi).unwrap()[0],
             DecodedPacket::AuxiliaryOpenInterest { value: 0, .. }
         ));
+    }
+
+    #[test]
+    fn quote_quantities_follow_dhan_unsigned_wire_contract() {
+        let mut p = quote_packet(4);
+        p[12..14].copy_from_slice(&48_142_u16.to_le_bytes());
+        p[22..26].copy_from_slice(&3_000_000_000_u32.to_le_bytes());
+        let rows = parse(&p).unwrap();
+        let DecodedPacket::Quote(quote) = &rows[0] else {
+            panic!("quote")
+        };
+        assert_eq!(quote.last_trade_quantity, 48_142);
+        assert_eq!(quote.cumulative_traded_volume, 3_000_000_000);
     }
     #[test]
     fn disconnect_and_arbitrary_input() {
