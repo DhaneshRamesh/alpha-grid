@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime, time as dt_time, timedelta
+from decimal import Decimal
+import argparse
 import hashlib
 import json
 import math
 import os
-from pathlib import Path
-import stat
 import sys
+from pathlib import Path
+
+_SRC = Path(__file__).resolve().parent.parent / "src"
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 import time
 from typing import Any
 import urllib.error
@@ -147,6 +152,68 @@ CORPORATE_ACTIONS: dict[str, list[dict[str, Any]]] = {
         {"type": "BONUS", "ratio": "4:1", "factor": 5.0, "ex_date": "2026-03-09", "intraday_back_adjusted": True},
     ],
 }
+
+# Exchange records for actions whose factors can be used to restore a
+# contemporaneous cash-equity price. The Dhan adjustment itself must also be
+# recorded for the exact source window; an exchange action alone is insufficient.
+NSE_PRICE_BASIS_EVIDENCE: dict[tuple[str, str], tuple[str, Decimal]] = {
+    ("RELIANCE", "2024-10-28"): ("https://nsearchives.nseindia.com/content/circulars/FAOP64621.pdf", Decimal(2)),
+    ("HDFCBANK", "2025-08-26"): ("https://nsearchives.nseindia.com/content/circulars/FAOP69840.pdf", Decimal(2)),
+    ("BAJFINANCE", "2025-06-16"): ("https://nsearchives.nseindia.com/content/circulars/FAOP68547.pdf", Decimal(10)),
+    ("BSE", "2025-05-23"): ("https://nsearchives.nseindia.com/content/circulars/FAOP67987.pdf", Decimal(3)),
+    ("SHRIRAMFIN", "2025-01-10"): ("https://nsearchives.nseindia.com/content/circulars/FAOP66059.pdf", Decimal(5)),
+    ("MCX", "2026-01-02"): ("https://nsearchives.nseindia.com/content/circulars/CMPT71998.pdf", Decimal(5)),
+    ("CUPID", "2026-03-09"): ("https://nsearchives.nseindia.com/corporate/ixbrl/INTEGRATED_FILING_INDAS_158054_15052026184802_iXBRL_WEB.html", Decimal(5)),
+}
+
+
+class HistoricalValuationIneligible(ValueError):
+    """An original source is usable for returns but not rupee/share economics."""
+
+
+def contemporaneous_price(raw_price: Decimal, symbol: str, day: str, row: dict[str, Any]) -> Decimal:
+    """Restore a cash price only when the source adjustment and exchange action agree."""
+    parts = row.get("key", "").split("-")
+    if (len(parts) != 8 or row.get("symbol") != symbol or
+            str(row.get("security_id")) != parts[0] or
+            not "-".join(parts[2:5]) <= day < "-".join(parts[5:8]) or
+            raw_price <= 0):
+        raise HistoricalValuationIneligible("PRICE_SOURCE_IDENTITY_OR_DATE_UNVERIFIED")
+    status = row.get("ca_status")
+    if status == "EX_DATE_SPANNED_WITHIN_WINDOW":
+        raise HistoricalValuationIneligible("ACTION_SPANS_SOURCE_WINDOW")
+    if status == "VERIFIED_BACK_ADJUSTED":
+        factor = Decimal(1)
+        for action in CORPORATE_ACTIONS.get(symbol, []):
+            ex_day = action["ex_date"]
+            if "-".join(parts[2:5]) < ex_day < "-".join(parts[5:8]):
+                raise HistoricalValuationIneligible("ACTION_SPANS_SOURCE_WINDOW")
+            if day < ex_day and action.get("intraday_back_adjusted"):
+                proof = NSE_PRICE_BASIS_EVIDENCE.get((symbol, ex_day))
+                if proof is None or proof[1] != Decimal(str(action["factor"])):
+                    raise HistoricalValuationIneligible("INDEPENDENT_ACTION_FACTOR_MISSING")
+                factor *= proof[1]
+        if factor <= 1 or row.get("ca_factor") is None or factor != Decimal(str(row["ca_factor"])):
+            raise HistoricalValuationIneligible("SOURCE_ADJUSTMENT_FACTOR_MISMATCH")
+        return raw_price * factor
+    if status in ("VERIFIED_UNADJUSTED_EMPIRICAL", "VERIFIED_UNADJUSTED_POST_ACTION",
+                  "NO_KNOWN_BONUS_OR_SPLIT_RECORDED") and row.get("ca_factor") == 1.0:
+        if any(day < action["ex_date"] and action.get("intraday_back_adjusted")
+               for action in CORPORATE_ACTIONS.get(symbol, [])):
+            raise HistoricalValuationIneligible("SOURCE_ACTION_CLASSIFICATION_MISMATCH")
+        return raw_price
+    raise HistoricalValuationIneligible("PRICE_BASIS_UNVERIFIED")
+
+
+def unreconstructed_price_windows(manifest: dict[str, Any], start: str, end: str,
+                                  excluded: set[str]) -> list[str]:
+    """Identify source windows an evaluator cannot value at raw bar prices."""
+    return sorted(row["key"] for row in manifest["files"]
+                  if row["symbol"] not in excluded and row["bars"] > 0
+                  and "-".join(row["key"].split("-")[2:5]) <= end
+                  and "-".join(row["key"].split("-")[5:8]) > start
+                  and row.get("ca_status") in ("VERIFIED_BACK_ADJUSTED",
+                                               "EX_DATE_SPANNED_WITHIN_WINDOW"))
 
 
 def get_available_space(path: Path) -> int:
@@ -1193,20 +1260,79 @@ def generate_summary_report(target_dir: Path, manifest_path: Path | None = None)
     return report
 
 
-def main() -> int:
-    volume = Path("/Volumes/AlphaGrid Data")
-    if not volume.is_mount():
-        print("FAIL-CLOSED: Encrypted Alpha Grid data volume is not mounted.")
-        return 1
-    target_dir = volume / "Live/offline-dev/historical-raw-dhan"
-    target_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    os.chmod(target_dir, 0o700)
+def verify_external_mount(path: Path) -> bool:
+    """Ensure path resides on a physically mounted volume under /Volumes/."""
+    resolved = path.resolve()
+    parts = resolved.parts
+    if len(parts) >= 3 and parts[1] == "Volumes":
+        vol = Path(parts[0], parts[1], parts[2])
+        return vol.is_mount()
+    return False
 
-    print("=== Alpha Grid: Executing Complete 3-Year Historical Acquisition ===")
-    res = run_acquisition(target_dir, delay_seconds=1.5)
+
+def default_target_dir() -> Path:
+    env_target = os.environ.get("ALPHA_GRID_STORAGE_TARGET")
+    if env_target:
+        p = Path(env_target)
+        return p if p.name == "raw-dhan" else p / "historical/raw-dhan"
+    plain_hdd = Path("/Volumes/Danny\x27s HDD/AlphaGrid-Plain/historical/raw-dhan")
+    if plain_hdd.parent.parent.exists():
+        return plain_hdd
+    return Path("/Volumes/AlphaGrid Data/Live/offline-dev/historical-raw-dhan")
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Alpha Grid 3-Year Historical Acquisition Tool")
+    parser.add_argument("--target-dir", type=Path, default=None, help="Target directory for raw responses")
+    parser.add_argument("--manifest", type=Path, default=None, help="Path to historical manifest")
+    parser.add_argument("--checkpoint", type=Path, default=None, help="Path to checkpoint file")
+    parser.add_argument("--verify-only", action="store_true", help="Audit existing files without making API calls")
+    parser.add_argument("--max-requests", type=int, default=None, help="Maximum requests to execute this run")
+    parser.add_argument("--delay-seconds", type=float, default=1.5, help="Delay between API calls in seconds")
+    args = parser.parse_args(argv)
+
+    target_dir = args.target_dir or default_target_dir()
+
+    if not verify_external_mount(target_dir):
+        print(f"FAIL-CLOSED: Target directory {target_dir} is not on a mounted external volume.")
+        return 1
+
+    target_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+    try:
+        os.chmod(target_dir, 0o700)
+    except OSError:
+        pass
+
+    manifest_file = args.manifest or (target_dir / "historical-manifest-2023-2026.json")
+    if not manifest_file.exists():
+        manifest_alt = target_dir.parent / "manifests" / "historical-manifest-2023-2026.json"
+        if manifest_alt.exists():
+            manifest_file = manifest_alt
+        else:
+            print(f"FAIL-CLOSED: Missing manifest at {manifest_file}")
+            return 1
+
+    mode_label = "VERIFY_ONLY (No API Calls)" if args.verify_only else "ACQUISITION (Authenticated Dhan Backfill)"
+    print("=== Alpha Grid: 3-Year Historical Acquisition ===")
+    print(f"Target Directory: {target_dir}")
+    print(f"Manifest File:    {manifest_file}")
+    print(f"Mode:             {mode_label}")
+
+    res = run_acquisition(
+        target_dir,
+        manifest_path=manifest_file,
+        checkpoint_path=args.checkpoint,
+        max_requests=args.max_requests,
+        delay_seconds=args.delay_seconds,
+        verify_only=args.verify_only,
+    )
     print(f"\nAcquisition run finished: {res['executed']} requests executed, {res['errors']} errors, total completed: {res['total_completed']}/{res['total_planned']}")
 
-    generate_summary_report(target_dir)
+    generate_summary_report(target_dir, manifest_path=manifest_file)
+
+    if args.verify_only:
+        print(f"Verification pass complete: {res['total_completed']}/{res['total_planned']} completed windows verified.")
+        return 0
 
     # Fail closed: exit code 0 ONLY IF 100% complete and 0 errors and not fatal
     is_complete = (res["total_completed"] == res["total_planned"] and res["errors"] == 0 and not res["fatal"])

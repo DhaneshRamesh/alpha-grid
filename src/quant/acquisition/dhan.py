@@ -326,6 +326,16 @@ def _write_private_bytes(path: Path, data: bytes) -> None:
         os.fsync(stream.fileno())
 
 
+def _link_or_replace_atomic(temporary: Path, path: Path) -> None:
+    try:
+        os.link(temporary, path)
+    except OSError:
+        # Fallback for filesystems lacking hardlink support (e.g. exFAT)
+        if path.exists():
+            raise FileExistsError(f"Target file {path} already exists")
+        os.replace(temporary, path)
+
+
 def _sync_directory(path: Path) -> None:
     if os.name == "nt":
         # File flushes and atomic publication work on NTFS, but Python cannot
@@ -453,7 +463,7 @@ def recover_quarantined_response(
         temporary = output_dir / f".{path.stem}.{uuid.uuid4().hex}.partial"
         try:
             _write_private_bytes(temporary, raw)
-            os.link(temporary, path)
+            _link_or_replace_atomic(temporary, path)
         finally:
             temporary.unlink(missing_ok=True)
     checksum = path.with_suffix(".sha256")
@@ -619,7 +629,7 @@ def run_backfill(
                 temporary = output_dir / f".{label}.{uuid.uuid4().hex}.partial"
                 try:
                     _write_private_bytes(temporary, raw)
-                    os.link(temporary, path)
+                    _link_or_replace_atomic(temporary, path)
                 finally:
                     temporary.unlink(missing_ok=True)
                 checksum = path.with_suffix(".sha256")
