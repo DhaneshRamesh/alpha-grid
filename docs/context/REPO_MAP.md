@@ -1,5 +1,74 @@
 # Alpha Grid context map
 
+## Restored 3-year historical dataset & plain snapshot v2 — 2026-11-10 IST
+
+The 25-stock, 3-year Dhan 1-minute historical dataset (Nov 1, 2023 – Nov 1, 2026) is fully restored on unencrypted storage at `/Volumes/Danny's HDD/AlphaGrid-Plain/historical/raw-dhan/`:
+- **325 Windows Restored**: 100% of planned windows across all 25 NSE cash equities completed with 0 errors and 0 missing files. Total 6,545,612 1-minute candles across 312.84 MB (312,842,513 bytes).
+- **Snapshot Manifest v2**: `alpha-grid-snapshot-2026-11-10-plain-v1` created at `/Volumes/Danny's HDD/AlphaGrid-Plain/historical/manifests/research_snapshot_manifest_plain_v2.json` and mirrored to `data/research_snapshot_manifest_plain_v2.json`. Deterministic binary Merkle root SHA-256: `06f3124a842109b42d0bf508fc30ab662b895d32c692c23fcbeba903176d90b3` using custom pairwise hex-SHA256 tree with odd-leaf duplication (`ALPHA_GRID_PAIRWISE_HEX_SHA256_V1`).
+- **Opportunity Evaluation Pathway**: `OpportunityRecord` and `evaluate_opportunity_record()` in `src/quant/apps/execution_safety.py` enforce fail-closed checks across provenance, quote freshness, Stage 3 validation, past volatility, execution costs, and uncertainty lower bounds. Missing quotes, unestablished gross payoff models, and absent confidence intervals are cleanly represented as `UNKNOWN` rather than synthetic zeros. Bound to verified snapshot ID (`alpha-grid-snapshot-2026-11-10-plain-v1`) and Merkle root (`06f3124a842109b42d0bf508fc30ab662b895d32c692c23fcbeba903176d90b3`). Integrated into `tools/offline_end_to_end_replay.py` and Cockpit `/trade/simulation/decisions`.
+- **Dataset Parity**: 0 candle delta vs legacy snapshot (6,545,612 bars). Preserves August 2026 NSE closing auction change (360 bars vs 375 bars post 2026-08-03) and 8 corporate action discontinuities with unresolved pricing bases.
+- **Reader & Cockpit Access**: `tools/train_m1_model.py::load_raw_bars` loads all 180 development/calibration windows seamlessly in 12.68s. Cockpit shared evidence API (`/trade/evidence`) verifies 325/325 windows and 6,545,612 bars.
+- **Preservation & Holdout Gates**: Reserved holdout stocks (`TCS`, `KOTAKBANK`, `MARUTI`, `BHEL`, `DIVISLAB`) and temporal holdouts (post 2025-10-31) remain strictly untouched. M1 model artifacts, simulation ledgers, and original RELIANCE experiments remain immutable.
+
+
+## Plain HDD storage target & unencrypted data restoration — 2026-11-10 IST
+
+Alpha Grid supports direct unencrypted external storage on the connected HDD (`/Volumes/Danny's HDD/AlphaGrid-Plain/`), bypassing the locked encrypted sparsebundle (`AlphaGridData-2026-11-05-v2.sparsebundle`):
+- **Plain Directory Structure**: Standard unencrypted directories for `historical/raw-dhan/`, `historical/manifests/`, `market-feed/quotes/`, `market-feed/depth/`, `journals/qj01/`, `journals/qp01/`, `research/`, `models/`, `checkpoints/`, and `reports/` with 0700 permissions. Requires no disk-image mounting or encryption passphrases; directly browseable in macOS Finder.
+- **Fail-Closed External Volume Guards**: `tools/execute_full_3yr_acquisition.py` includes `verify_external_mount(path)` ensuring raw historical downloads only target active `/Volumes/` mount points. Auto-detects plain HDD target, exposes `--verify-only` mode, and fails closed against internal SSD paths.
+- **Cockpit & Service Integration**: `web/server/trading-service.mjs` (`resolveStorageTargetPath`) and `tools/start-cockpit-macos.sh` auto-detect `/Volumes/Danny's HDD/AlphaGrid-Plain` as the primary storage target, verifying capacity and mount status.
+- **Restored Local Artifacts**: Re-established byte-exact SHA-256 for RELIANCE 1-minute historical raw responses (45,945 candles across 2.23 MB), 19 instrument master/manifest files (including 325-window 2023–2026 manifest), 5 QP01 ledgers, QJ01 demo journal, 7 research reports, M1 model pickle and metadata, and offline simulation replay checkpoints.
+- **Zero Live/Backfill Calls**: Historical 3-year backfill (325 windows) is validated offline as pending (`0/325` completed) without initiating unauthorized Dhan API requests. Preserves `DATA_ONLY / SIMULATION_ONLY / NO TRADE`.
+
+
+## Evidence-Driven Live Monitor — 2026-11-09 IST
+
+`web/src/LiveMonitor.tsx` implements an evidence-driven observer view making actual market data and simulator processing visible without prediction or trading claims:
+- **Strict Source Isolation**: Enforces explicit labels (`LIVE_WS`, `HISTORICAL_ARCHIVE`, `REST_SNAPSHOT`) without blending, fabricating, or relabeling sources. Live WS observations render as genuine received ticks, archived OHLCV renders from verified Dhan 1-minute bars, and REST snapshots render point-in-time quotes.
+- **Observer Avatar**: Compact animated avatar advancing ONLY on real timestamps and durable events. Displays state bubbles for Watching quote (`👀`), Computing volatility (`📊`), Reading Standard Full book (`📚`), Lookback unavailable (`⏳`), NO TRADE (`🚫`), Virtual decision evaluated (`🧪`), and Feed stale/closed (`🛑`).
+- **5-Step Evidence Pipeline**: Visualizes genuine timestamps and hashes across: Frame Received → Raw Frame Durably Persisted (QJ01 fsync) → Decoded (quant-engine) → Freshness/Provenance Check → Simulator Decision (virtual reference only, never a fill).
+- **Observed Depth & Touch Details**: Beside chart, displays observed bid/ask, quoted spread (bps), 5-level displayed depth table, freshness age (ms), source-frame SHA-256 prefix, receipt time, and depth source status.
+- **Scrollable Decision Timeline**: Displays chronological virtual decisions, rejections, size-policy results, and explicit `VIRTUAL REFERENCE · NEVER A FILL` warnings. Supports offline historical replay stepping through 6,840 slots.
+- **Backend-Owned Listeners**: Zero additional browser sockets created; reuses single backend telemetry gateway stream and REST endpoints. Preserves `DATA_ONLY / SIMULATION_ONLY / NO TRADE`.
+`web/server/trading-service.mjs` exposes `GET /trade/simulation/decisions` and offline replay fallback in `GET /trade/simulation`. Focused tests in `web/src/LiveMonitor.test.tsx` (8/8 passed) and `web/server/trading-service.test.mjs` (27/27 passed).
+
+## Cockpit Storage and Evidence Workflow — 2026-11-09 IST
+
+`web/server/trading-service.mjs` exposes a shared evidence and inspection API:
+- `GET /trade/evidence`: Reports observed backend metrics for external storage volume, QJ01 live/captured journal status, historical 3-year archive manifest, virtual simulation ledger, and research model artifacts. Automatically strips sensitive tokens, client IDs, secrets, and auth headers using `redactSensitive()`.
+- `GET /trade/evidence/inspect?target=storage|qj01|historical|simulation|research`: Returns underlying diagnostic metadata and recent records with a clear security redaction banner.
+- `POST /trade/storage/action`: Handles 6 operator workflow actions: `connect`, `verify`, `start-services`, `arm-capture`, `stop-safely`, and `replay`. Enforces fail-closed precondition gating (`503 DRIVE_UNMOUNTED`) when target storage is unmounted or unwritable.
+`tools/start-cockpit-macos.sh` targets an unencrypted owner-private data volume (`ALPHA_GRID_DATA_VOLUME="${ALPHA_GRID_DATA_VOLUME:-/Volumes/AlphaGrid Data}"`) without requiring disk images, verifying owner-private permissions (0700) and writable mount state.
+`web/src/StorageSessionPanel.tsx` implements the evidence-first "Storage & Session" control panel, integrated in CommandCenter and available as a dedicated navigation tab (`views` icon `⛁`). Displays live mount state, capacity, QJ01 records, archive status, virtual cash, and research provenance, with explicit failure reasons (`DRIVE_UNMOUNTED`, `JOURNAL_MISSING`) and modal inspection drawers. Preserves strict `DATA_ONLY / SIMULATION_ONLY / NO TRADE` posture.
+
+## Opt-in paired paper sizing — 2026-11-08 IST
+
+`src/quant/apps/live_simulation.py --portfolio-v2 --sizing-comparison` runs the existing 25-stock virtual portfolio twice against one local snapshot stream, with separate hash-chained baseline and `DYNAMIC_V1` ledgers. The fixed dynamic rule only shrinks positions using a fresh same-packet Standard Full five-level ask, observed spread and trailing 15-minute mid-quote volatility; invalid or insufficient inputs abstain. `--report-sizing-comparison` verifies paired source/opportunity streams and reference accounting, then reports session-grouped uncertainty without claiming fills or activating a strategy. The mode is opt-in and is not launched by the Mac startup script. `tests/test_live_simulation.py` covers sizing, abstention, risk accounting, recovery and session rollover; 22 tests passed offline. No genuine prospective pair ledgers exist yet.
+
+## AlphaGrid M1 forecasting model & inference pipeline — 2026-11-07 IST
+
+`src/quant/research/m1_pipeline.py` implements Alpha Grid's offline dual gradient-boosted forecasting model (`alpha-grid-m1-20261107-v1`). Predicts separate favorable ($R_{\text{fwd}} \ge +30\text{ bps}$) and adverse ($R_{\text{fwd}} \le -10\text{ bps} \lor \text{MAE} \le -25\text{ bps}$) outcome probabilities across 15-minute forward horizons using 5 past-bar features. Uses chronological Train (Nov 2023–Apr 2025, 133,200 non-overlapping samples) and Calibration (May 2025–Oct 2025, 47,880 samples) partitions while excluding the 5 reserved holdouts (`TCS`, `KOTAKBANK`, `MARUTI`, `BHEL`, `DIVISLAB`) and post-October-2025 test observations. Outperforms Null and Logistic baselines in Brier score and log loss on calibration data, but remains NO-GO for trading due to negative net reference returns and unverified candle availability. Exports artifacts with SHA-256 sidecars to `data/models/` and `/Volumes/AlphaGrid Data/Live/offline-dev/training-artifacts/`. Exposes `M1Predictor` (read-only snapshot inference) and `M1ShadowLogger` (append-only JSONL shadow logger); neither is wired to orders. Training runner in `tools/train_m1_model.py`; focused unit tests in `tests/test_m1_pipeline.py`.
+
+The November 7 independent review found that M1's saved favorable threshold (0.10) previously reloaded as the 0.12 default; the resulting 26-trade audit was a different policy from the saved 117-trade run. The loader now restores the saved threshold. Training and audit loaders now verify each consumed source file's byte length and SHA-256 against the snapshot manifest; they do not recompute its declared Merkle root. Entry fills are now formally required at bar T open rather than unrealizable bar T-1 close. Stage 2 of the frozen 60-minute bracketed opportunity protocol (`docs/exp-60m-bracketed-opportunity-protocol-v1.md`) evaluated across 180 verified development files (163,476 candidate slots) confirmed that realizable bracket exits (+25/-20 bps) and maker entries remain net negative (-13 to -20 bps) against the ~15.5 bps friction floor. Predeclared stop criteria triggered; directional intraday cash equity ML research track is terminated. Minimum offline execution safety path implemented in `src/quant/apps/execution_safety.py` enforces fail-closed order lifecycle and risk boundaries (`test_execution_safety.py`). `tools/offline_end_to_end_replay.py` executes chronological deterministic replay across October 2025 Dhan observations through M1, verifying causal timing, model parity, 7/7 fault-injection scenarios, and fail-closed NO_TRADE abstentions, exporting read-only telemetry to `data/telemetry/offline_simulation_status.json`. System status is OFFLINE-GO / TRADE-STOP. See `DECISIONS.md` for full metrics.
+
+## Auditable fail-closed 3-year historical acquisition tool — 2026-11-05 IST
+
+`tools/execute_full_3yr_acquisition.py` executes and audits the 25-equity, 3-year (2023-2026, 325 windows) 1-minute historical acquisition. Enforces fail-closed semantics: atomic checkpoint persistence, strict nonzero exit on incomplete runs, offline resume-verification of raw SHA-256 digests against `.sha256` sidecars and request metadata without overwriting, and strict candle validation (shape, ordering, non-finite values, OHLCV consistency, and session bounds). Decouples source integrity, exploratory return-model eligibility (invariant to scalar splits), and historical execution-model eligibility (distinguishing back-adjusted, unadjusted, and unverified price bases). Report classifications derive purely from validated window records rather than hardcoded symbol assumptions. Comprehensive offline unit test suite in `tests/test_full_3yr_acquisition.py`.
+
+The November 5 offline audit additionally checks receipt/HTTP metadata, actual attempt budgets, parser agreement, continuous-minute counts, and raw-derived reporting. As of November 7, all 325 manifest windows (6,545,612 candles, 312.8 MB) are verified complete on `/Volumes/AlphaGrid Data/Live/offline-dev/historical-raw-dhan` with 0 missing files and 0 hash errors. The research dataset is sealed under `data/research_snapshot_manifest_v1.json` (`alpha-grid-snapshot-2026-11-07-v1`, Merkle root SHA-256 `d1974a10450b85555fc83ce33d8b5191eddfd011a77ffbff78d82a3d7e7badec`). See `DECISIONS.md` for research audit findings, masks, and baseline specifications.
+
+## Cross-equity ML research model & sufficiency audit — 2026-11-05 IST
+
+`src/quant/research/cross_equity_model.py` implements Alpha Grid's minimal, reproducible cross-equity opportunity research framework (`alpha-grid-cross-equity-ml-v1`). Features 5 causal point-in-time metrics (past 5m return, 30m breakout distance, 15m relative volume, realized volatility, normalized time-of-day), fixed 15m outcome horizons, and pure NumPy regularized logistic regression. Evaluates 5 comparative arms (Null, Momentum, Breakout, ML, NO TRADE) with realistic Dhan/NSE statutory fee modeling and portfolio capital competition. Unit tests in `tests/test_cross_equity_model.py`. Sufficiency audit confirms local data is limited to 5 sessions (Oct 26–30), requiring operator authorization for 2–3 year historical backfill.
+
+## Momentum lookback misclassification correction — 2026-11-05 IST
+
+`src/quant/apps/live_simulation.py` `_old()` requires exact feed session continuity and observations strictly within `[lookback_ns, lookback_ns + 60s]`. Truncated lookback buffers (< 15m) return `None`, cleanly routing into `PAST_LOOKBACK_UNAVAILABLE` abstention rather than spuriously evaluating 30–60s returns against 15m friction hurdles. `ingest()` history purge retains `lookback_ns + 60s`.
+
+## Mac external data location — 2026-11-05 IST
+
+The Mac launcher keeps current private app data, QJ01 captures, saved REST/account responses, training artifacts, and simulation ledgers in `/Volumes/AlphaGrid Data/Live/offline-dev` on an encrypted image backed by the connected HDD. It mounts with a saved Keychain item when available, otherwise prompts for the image passphrase in an interactive Terminal or macOS SecurityAgent; it stops local services on disconnection. The HDD archive at `Archive/old-workspace-2026-10-09.tar` is a verified byte-preserving copy of the removed 11 GB older workspace. Code, credentials, and the existing ignored `data/historical` and `data/instruments` source evidence remain on the Mac; use the active launcher for new runtime data. See `DECISIONS.md` for verification and the HDD no-deletion constraint.
+
 ## Targeted capture reliability and order-book amendment v3 — 2026-11-04 IST
 
 `rust/crates/quant-journal` extends `JournalWriter` with automatic directory detection and seamless delegation to `SegmentedJournal` (4 GB capacity, 64 MB chunk rotation) alongside single-file journal capacity raised to 512 MB. This resolves the QJ01 raw capture halt observed on November 4 at 15:06 IST when `STANDARD_FULL` (packet code 8, 5-level book) reached the legacy 128 MB ceiling, preserving frame hashes, durability, and recovery guarantees. Python preflight (`dhan_quote_preflight.py`) and Rust telemetry (`quant-telemetry`, `quant-engine`) inspect active writer capacities accordingly.
@@ -281,10 +350,7 @@ same-day NSE/Dhan/calendar/storage evidence and a 100 ms clock gate. Rust's
 standard subscription is constrained to the frozen 25-ID manifest; depth is
 disabled for this quote-only rule. With no approved scope, the launcher and
 saved history stay offline and NO TRADE. See `docs/live-simulation-macos.md`.
-`apps/live_feed_credentials.py` verifies the existing private OAuth token,
-its hash and expiry, and supplies it only to the live Rust gateway. The
-approval names exact IDs, feed and expiry; the launcher publishes a non-secret
-gate status and supervises the gateway through that expiry.
+`apps/live_feed_credentials.py` verifies the existing private token (OAuth, DhanHQ API access token, or renewed web token), its SHA-256 hash, client ID integrity, and expiry, supports atomic renewal via `/v2/RenewToken`, and supplies it only to the live Rust gateway. The approval names exact IDs, feed and expiry; the launcher publishes a non-secret gate status and supervises the gateway through that expiry.
 
 ## November 2 Mac live pilot preflight
 

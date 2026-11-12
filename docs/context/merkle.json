@@ -4,8 +4,8 @@
     "blob_rule": "SHA256(UTF8(\"blob\\0\" + content_sha256))",
     "tree_rule": "SHA256(UTF8(\"tree\\0\" + concat(kind + \"\\0\" + name + \"\\0\" + sha256 + \"\\n\")))",
     "scope": "Existing Git-tracked working files plus explicit supportFiles; excludes this manifest",
-    "root_sha256": "f8f0b0c162750c8e0fb2064337ddc742e99152fc3d04c5c29acde3514d42ae37",
-    "file_count": 321,
+    "root_sha256": "a003e7470c8c662584cb35f68de1ab4814e994ebbe73d1376a7a9a7380c87616",
+    "file_count": 351,
     "files": {
         ".env.example": {
             "content_sha256": "e3ccefdde3e2ff6f8c304d936dcb6022aafc7e8fa879c3e22a8d5ab14f94fbc2",
@@ -32,8 +32,8 @@
             "sha256": "347e4cbaf21287ffe4cfc1c5fc1f4b622883699e633148f450e5f28d6566454e"
         },
         "data/config/calendar.json": {
-            "content_sha256": "cf0a9465d883a20bb73dc7afae0a548e0ecbf37287e0dd34cd4215918359be77",
-            "sha256": "62b25c5a0a4341a0345477c23fc1fcb97cc60d3585e90fb5c9f47f380e801642"
+            "content_sha256": "b6f0d0614ceb3ec73f7d788c24d91f3c5cb940f25c084db8b67ad85ccd8f639e",
+            "sha256": "de919b09644a83704a6b0e1318d64326495d6061bb13142b735847847de02775"
         },
         "data/config/registry.json": {
             "content_sha256": "3bc1e82852bac7b23213cb3abd3219c5a96e2d1b0fff4407a131d6bb7bed5868",
@@ -176,12 +176,12 @@
             "sha256": "05f5e6910bc6757eae365a4a1393430af768fa65ec1989be59ac636d3140b145"
         },
         "docs/context/DECISIONS.md": {
-            "content_sha256": "71c4ef494cbddfa24a3029c210efb493463c6b75702bcd90ab1ca2a6b8d32415",
-            "sha256": "b86fe54e9bf8beb0fec8e52ab45d76180c13dead07357b13177721e88eaa32e7"
+            "content_sha256": "96edc993a4a548a0901323a2f8400e40fb5717c43fa77db467276295c5028a53",
+            "sha256": "99d2a16ecd46d49905c2f7ac45e557db5dc0bc0880d91bce3b31e8cd4295f100"
         },
         "docs/context/REPO_MAP.md": {
-            "content_sha256": "05a11712e48e4a1532f50e7f829324590c545fc251d855549f1cb0ebbc7165fa",
-            "sha256": "189042cc44b77ee8ae6aff259a6c2ba3b858e8dd4cab5c90f83d47e9b281794d"
+            "content_sha256": "1212ec287215dd1750a1366be4b359c268c791233ebd65e6113ea513f7ca35cf",
+            "sha256": "e86be98a9b6072f26797d1e6519ca957c7191d7579769840dd1f08955a41e169"
         },
         "docs/cross-equity-adaptive-v2-2026-11-03.md": {
             "content_sha256": "f378be1e97de311bc533cfd86139b6531c7938410b4bc2428595c7dcc2c34d2e",
@@ -210,6 +210,18 @@
         "docs/engineering-fixes-2026-11-04.md": {
             "content_sha256": "c1d676fd2ab39936ac4408265f8bb4f50b825b8fa74b21096692c26e2ab00b73",
             "sha256": "308321012e57779cd0302c18100d2133b1546b5f1a66169e8e8375dabd71cb67"
+        },
+        "docs/exp-60m-bracketed-opportunity-protocol-v1.md": {
+            "content_sha256": "62b6c25ce033df2cc7cd72c37a70a2d44a4f24998d0d71242fd8db0d06fc697d",
+            "sha256": "e7128b7c4bbd642256ac1610e094f2fe0b8558201dd11aa268302e89a58c5f93"
+        },
+        "docs/exp-opening-sell-pressure-reversal-v1.md": {
+            "content_sha256": "25bb1bedacbb8b641958461f25ecad09bdee62d61a4ab003eaa20e3706262952",
+            "sha256": "df83db41851cdad8c00d6b996acac3f4ea18933624fce3f779efef81d7ff0b4d"
+        },
+        "docs/exp-weekly-relative-strength-v1.md": {
+            "content_sha256": "8e3837c3fdfd253b6323dac125e26d086c2dfc8890a53e59244c9b24942bae16",
+            "sha256": "aafb53e4f5c083f6fc1d086f662df94bdd2722cd1739b173a69920b2f6f5ff7d"
         },
         "docs/forward-observations.md": {
             "content_sha256": "43c53460d8359a43470e1a8c388b0109904afdb13e24b0b50d42361cfc9d613d",
@@ -388,8 +400,8 @@
             "sha256": "1fda2345ef4c6a90269532684462a5923e9ed86556ac2c695b66dd4e175cadf5"
         },
         "pyproject.toml": {
-            "content_sha256": "ce446577335dd3115d444f8bdcd4fb5baf3a6e6df8f6a95a0caabade770ce4fc",
-            "sha256": "4b3b90d8121bd7470d1d89e8ae17a1e877ea5ffa2656f129a5c495f4f6a5ef0f"
+            "content_sha256": "e2dea7d4cc949997a36b2608fc56a26f752097e492570ec1fe169c5636c979ad",
+            "sha256": "1c00284e2fe57d61cd2d8d5ec763a299ddbda699dbd7dd7f5359bdc2ed4a4f46"
         },
         "rust-toolchain.toml": {
             "content_sha256": "b2c19d86958ed6810741488db5cd352856f303c53bcf0ea774e72f94ee4d201e",
@@ -600,8 +612,8 @@
             "sha256": "a76319d6abc608cca13db966c79f99622505f6a93fef513fe17c44f0b4662717"
         },
         "rust/crates/quant-telemetry/src/bin/telemetry_local.rs": {
-            "content_sha256": "ac0774588912e7fe185c951c9c2715477dd7d946dfbf836bf3da005b488be9cb",
-            "sha256": "2d196d2bb9e30578186a1ca1c5332b5a29b2d5aa2cf9893fbd21300560b5ae40"
+            "content_sha256": "dd7249440cf572351606dad52d25d4b37e5c0f6aff2f866bc7c7de8bb742c971",
+            "sha256": "9227473149e02dab16b4384c3cf4d855c15839299565c4b204b6e1dd0f0c003f"
         },
         "rust/crates/quant-telemetry/src/gateway.rs": {
             "content_sha256": "e961623e8a1e2952c5ce310c52b18a3666a7594a76bc4551b6817ce980f47f3a",
@@ -616,8 +628,8 @@
             "sha256": "cff8e4f6cbf8341b6a31899ddaf73067c2bbcaeebcf1c82890598a0c61d857fc"
         },
         "rust/crates/quant-telemetry/src/read_model.rs": {
-            "content_sha256": "8e0648af4cb7da6f7edb5524d98ee9b14425e5e54fd4ddabfed11c9c56cf034c",
-            "sha256": "783511859c47c558e8ac6a0e745ad37925cf1d11f409c70db674e3ab22b059d3"
+            "content_sha256": "7ba16ccfa210c735ea5721fce3d63548ec27c6cff5d51b38e2094ac151a0a7e1",
+            "sha256": "44895a1f6ec1d7e302cd06cde166beb9e121c6fc8a20ba27323a0e91698447b5"
         },
         "rust/depth-subscriptions.example.json": {
             "content_sha256": "94515578b10570cead1d117aad9a91ae0e3c9ba586dca6a5935a9b32a289a5e1",
@@ -668,8 +680,8 @@
             "sha256": "3816cf124a046ee66212c42af4265a79b0592f6e4c638ebe4d512e8031c523b2"
         },
         "src/quant/acquisition/dhan.py": {
-            "content_sha256": "bfbb5f796c3f069cb46b9213de69b800ba91dd4164be6fd0def99f822eff4573",
-            "sha256": "b3b1bef4d31c97eaaf4808ede2cdf4aadb06ab76225c5b56c5a7d4c55677c13b"
+            "content_sha256": "dec17b660d1d391ebfad46ca45d2bae976cdf54e687de07148e513890c37f9c6",
+            "sha256": "b0e46314e64e01a3d367e44dcbd73012c1e3158705ccfbb70383ae6576fa379f"
         },
         "src/quant/acquisition/dhan_instruments.py": {
             "content_sha256": "a76c6ff3ccb670dd2b5d4b52c3eb51e5933477d35b48b8f6da2dbf0945d38beb",
@@ -732,8 +744,8 @@
             "sha256": "18a860643ea5cda8c31e8ba16ddf7afe11c79209787416c68ff272e5d22eb23d"
         },
         "src/quant/apps/dhan_account_cache.py": {
-            "content_sha256": "3729b6cb9f352954e236f4ec23c51bf6b998ef0a40378a821fd0218fd7c056ca",
-            "sha256": "4f68ce33e63a576b7329b81b1459a7421b136fc24ead5cb098afaa0332faa5c0"
+            "content_sha256": "336f5c70788fecf457afe8e0a5768ff84dd921df8e70391ae14b8d697db802a0",
+            "sha256": "c133955586bfced6c3d6655d26491ec8b96aa4ef82a7b1ad221aae88b11d918f"
         },
         "src/quant/apps/dhan_candle_availability.py": {
             "content_sha256": "f9b2e3b016617aa5872449e1d70ac0b14d14d441dc673a33afba3a4b84bcbffe",
@@ -750,6 +762,10 @@
         "src/quant/apps/estimate_capture.py": {
             "content_sha256": "67abf5a633b467db45937e72bd9e8bd719bad0e47a3484c5489d2e8f653b927a",
             "sha256": "1f430c327e583724e40e9690d8b3866d91ea357a65111e1f04d341e88437313a"
+        },
+        "src/quant/apps/execution_safety.py": {
+            "content_sha256": "481965a14f64d3f3cb4009c0537e30d624ea610a6e24c76a68fc49080e29a53a",
+            "sha256": "2a33d252b8525c72f931c532048d7d57638fbf6b144ab4c50d57c64684a7ea6e"
         },
         "src/quant/apps/exploratory_dhan_timing.py": {
             "content_sha256": "2b05ea8c12da2f1a69ab227c0b2a4033f8bfa02208ffbf2642de0a2840f35041",
@@ -780,16 +796,16 @@
             "sha256": "4f787c811cf2da2c11f8636bd26d0d6474e45af9f371507d13987e1209a1f7f8"
         },
         "src/quant/apps/live_feed_credentials.py": {
-            "content_sha256": "26581b2167985ff67f0e97bff1188e1c20b5cef60f23d6f6aac9ec49b87a370a",
-            "sha256": "afe0ca0953ebcfae06f6c52983421b597ec3b96f57f2c2169db156dc05b964ce"
+            "content_sha256": "34ea8c7d2f4e625a8968d9bed7c1cbc18c48493b2b947c793b0578b465ed8d69",
+            "sha256": "ffdec1c7672e949cff6c045375464b465ee8b943f0ce025e40fe0320d32ea71b"
         },
         "src/quant/apps/live_feed_scope.py": {
-            "content_sha256": "4d65e69831c56a2ba21055c5965a285f6fbd23a3e5c161aebc36f82668bb825f",
-            "sha256": "f4f76dc0530a3dc3b4f147db756aa475942a1b1e652c65a388283457f575dca6"
+            "content_sha256": "3391882a26e56dc91d7cf064f7917873d87dd120cfacabd9aae81b23346fb3dc",
+            "sha256": "237356dacf6b5c48f86e8cb74b072ceec950f265f719c3f95b3a421c8f1f4353"
         },
         "src/quant/apps/live_simulation.py": {
-            "content_sha256": "8e581bb3efaec2715e18742a290519c47fea5233b025f8fe8754388bbd89ba6d",
-            "sha256": "b4c2b5e0a34be8dbbf124a66a5e7d567cad04b16141fed079f8a85d6072e43d3"
+            "content_sha256": "a266cdf43b81cb534c7370bc53ae5e508ec181227d7745e5c02311ce7d3bc960",
+            "sha256": "49f193990cbf299ce6dedf2300deebe4822be00a87c37578cfb5e86e8dec216b"
         },
         "src/quant/apps/local_training_worker.py": {
             "content_sha256": "6587502c1f429f77c31a1d484bfe9815591c2bbb59c533e23adbeb06405be0d6",
@@ -855,6 +871,10 @@
             "content_sha256": "fe37dd6bf473515a3a80305966cbf34da700fa86975048c08c0f1d39a796d874",
             "sha256": "0fc24bb7c6aea0e5bdb81815ac96089955776521c1ba497a32fe4c7b52736e47"
         },
+        "src/quant/research/cross_equity_model.py": {
+            "content_sha256": "71091ce149cbd706ff8a79562a20952995896d3079815fad517c1f077938eaa1",
+            "sha256": "3a9fe5d121f06a8cdeb2ac5da0954d55e1759866af7481d5f051bca09e02c469"
+        },
         "src/quant/research/dataset.py": {
             "content_sha256": "3e624e90b037fd8fce789fb457fefe63c17a6b3b6f65e6deb38e052c4c08ed4f",
             "sha256": "9437c54d31da1f419750f38353c993315d534108115354682b4232b2e75afb56"
@@ -883,9 +903,13 @@
             "content_sha256": "7e4880ad70f1bdc5f69346854d0e6c9669560570fe7b37be074dd9fc75e987dd",
             "sha256": "a0eab5c0aabd1f8b9c380441f86165f26a7054f8984af89e525879ab72737914"
         },
+        "src/quant/research/m1_pipeline.py": {
+            "content_sha256": "83801b6b6e156a29e314e0a935b32bdeff8d1b9b46df6ea6ae946f874899df33",
+            "sha256": "87e07d261ac1faa8ccab3f47568f2b411d3202f943d56421719a50115a1cb629"
+        },
         "src/quant/research/order_book_imbalance.py": {
-            "content_sha256": "5c0b98e04b1bc44fee9a10304e5dbe491a20d2e8842d07c6b6600e2d62226520",
-            "sha256": "1912eed0bfdd4a8757cebbcad55dcbe61547e5167b4d6762257f1686846045e7"
+            "content_sha256": "d2fc928abad15472c585d1ddba210c1f66eedffaadf3f35f4e25c6e2a5b2d4ee",
+            "sha256": "1ec61e25852f5789aaed37485c6f4130f8e7244aa33d0146417c4b4c8f2c000d"
         },
         "src/quant/research/prospective.py": {
             "content_sha256": "f57d261121062dfb9f88c856f4a0ae065708d14cfd6b81f6cd8e0d4164e48ef4",
@@ -971,6 +995,10 @@
             "content_sha256": "295bcff40774be99c8b5ddcf8b0138fc09b3fb1857e0c2da07ff006ecc4d4de7",
             "sha256": "b9fc1edd12cdbad2b169651f50458f6c8ead7aa64869313a32ae3da99a5e7b0f"
         },
+        "tests/test_cross_equity_model.py": {
+            "content_sha256": "77b19cfb8ffe2e4bf474de7da46fba4367a5480adafe9b4ca796b44f2d8c5a71",
+            "sha256": "f9951f9e978550218fd321d35b3b47d27b403922973fbb79cabd5b90301b11b9"
+        },
         "tests/test_descriptive_dhan_opportunities.py": {
             "content_sha256": "178bbde79a728cc226837f827b2d29069dd48c276ab8e7d004921e714e1a894c",
             "sha256": "eae2db69ef7e383e74c29c9cef40b95db6742793c2196df32809c3c428134866"
@@ -1007,6 +1035,14 @@
             "content_sha256": "6fc94bb350aeca328182ed0237ba0603cb2c44ff3b746c9abcce8c4349a9ec06",
             "sha256": "0bfef532dcd2f9b56d3789c9478faa0b819ab91523c17aa5e045e94f794df3e8"
         },
+        "tests/test_evaluate_60m_stage2.py": {
+            "content_sha256": "9f3d73c664eea36144e67be52afb3bff7429dff5937b2d45eb6fee38b27c72cb",
+            "sha256": "a6f462beeffc0f1013f4fe11f3ef77b62e5a5de18f3e42c333ceab896b1c208d"
+        },
+        "tests/test_execution_safety.py": {
+            "content_sha256": "61b132e11189372cd911ff216f3c3e433859750c0768e0015073d89acf9b4ee9",
+            "sha256": "4c2636b2007d2bba07b8438710187623586207fbd7c5dc97648c7e4e06cb0a63"
+        },
         "tests/test_exploratory_dhan_timing.py": {
             "content_sha256": "88da88cff78957ec86ee4e0d69e6354c6cf8f7434c800b13a2dfa0df5c4e90d6",
             "sha256": "d8130347e587663154cb4d85bad33b0e7026c71418ba63ba35c0293904d6b54f"
@@ -1018,6 +1054,10 @@
         "tests/test_forward_observations.py": {
             "content_sha256": "d8e911c17da4362b512c49cf635dce4914538a57985d38e0de866980518f6b4d",
             "sha256": "3513d9a37cab87ed1cdd074e927b8dcc9be7028cb1e345222d59e6dc4307efc0"
+        },
+        "tests/test_full_3yr_acquisition.py": {
+            "content_sha256": "937d19cc515a4df9fb10200e2c0aafd388940324ed2461c9629a24732f30b3a6",
+            "sha256": "5a881e1ad6e8007dea3f58813e39fc26f0bfc91cdb8fd34c2a5fb0e887a66d88"
         },
         "tests/test_health_logging.py": {
             "content_sha256": "0669a2fb4c9c065551ee73d19f3ca7045eae4754435084538d73f6215c86a60f",
@@ -1044,20 +1084,24 @@
             "sha256": "025c30cd8044894ffc51198ae85cbe77e67569a874485f96104bb5bf38f62747"
         },
         "tests/test_live_feed_credentials.py": {
-            "content_sha256": "359a450b35cf31abd454254e7f8928ccc618044fdb645617f68590ebedb3979f",
-            "sha256": "8cc5e8e3fd75a5e5f12de5b98ea62c132e4d18809831a13f6eadf0d66fc53939"
+            "content_sha256": "4c53baabbbb9ea8cded2877cb69e69717e331cf3ad8a3b21bb3645785da3468c",
+            "sha256": "e69816071eca9b93b4ba93b262db5e2592bd0369d5c77daaa2c6c4bed40081e2"
         },
         "tests/test_live_feed_scope.py": {
-            "content_sha256": "1f6afedfec60a2da73d9705846e243581a902f3c04755258e8c9777a112753e4",
-            "sha256": "f8d2ad504fdcbaf1d72eeb2d3890644d92a6c59faee3b4d4f3af9da745a42268"
+            "content_sha256": "3c4379dba41fed8a6e18aa9ef345d9149d0da64dc9b5133a6b690c999266feda",
+            "sha256": "c6dedcbf09c5ad34baba970c2e2ee2f68f1401fa81b7f9713e4287a421fcbd4e"
         },
         "tests/test_live_simulation.py": {
-            "content_sha256": "e2f4482fbf4212d9be1778634f1a1b0079170f7d369aed8dde971bdcb228ff5e",
-            "sha256": "062cc7a1383c30ed4c357b19a533f21dae86d364422b122f566b2d08259dbd7a"
+            "content_sha256": "c1dece5807d560e6f7507c513f0500c75860816f362162624a7bb38e8b61e478",
+            "sha256": "890fdd21cccedfc2ecfc019d60e0fbd981d26023bf342f989d70b084a20d14ad"
         },
         "tests/test_local_training_worker.py": {
             "content_sha256": "66de20bc5eb1e6eb8481bf0866c491e3dbd8caf11bdfc546316c63e2e9aa8886",
             "sha256": "faf5e9b1f4a81bb527a43f168a5b6abf9239c58f9f3cddd6a761b275dab34fca"
+        },
+        "tests/test_m1_pipeline.py": {
+            "content_sha256": "4c9ed655efd1e922b3336b163fc6f8181f8910af2b05b26c983d5749275de52d",
+            "sha256": "1b948d9159a4c20c99a0548bb6d50e0284d0b0000939df1a1393faa39b0f110e"
         },
         "tests/test_noise_reduction.py": {
             "content_sha256": "5efa1175ed3d54aab3b41f945e0007e7fe0d30ec9a5930f3a9c900b370e38fb2",
@@ -1067,13 +1111,25 @@
             "content_sha256": "72a442cd38cfca29e69a201478c71fbd36f4199ce6032f186ce4d0f9be6502b7",
             "sha256": "485d6d2eeb66be30c47a46e13cfa745becefe99114f68add7d09517398b640d7"
         },
+        "tests/test_opening_reversal_v1.py": {
+            "content_sha256": "c54dd08cd406cbdb5ae2de483024a29da24629943a1b45d0c9c06df3cdd4fdef",
+            "sha256": "de2b7cf8d61664f9ba53fc13a22a69da0ad43f99b7a95b87cc1c771a838d47f7"
+        },
+        "tests/test_opportunity_evaluation.py": {
+            "content_sha256": "ed7d4e7d79b0c406c7a6294ddb651802d22d957b1d988573164a76421cb4540f",
+            "sha256": "7ba13d25a4b4de9c9c67d84b556aa3501342cd850578b1bba1a6d6d352a5055f"
+        },
         "tests/test_order_book_imbalance.py": {
-            "content_sha256": "8d357adb25e51e9cb4ab89306ef2602f8e9009928f065c294d51ae10b660d6fe",
-            "sha256": "ffc1054de45cd440ef791542122e90c44c0b682578a585fa6d66f94100f14243"
+            "content_sha256": "4454d4295e6dcc2ef1e8a4be3fb6a41e4ee82e08bdf69bb595871cb9ce3d10f6",
+            "sha256": "d62bcc011237b539f3c5e24a5b64a0910d423ff965f5d338da74cc3168b29fcc"
         },
         "tests/test_parquet.py": {
             "content_sha256": "11bd6611fde898dc92ea5bdadeb56a7fd941785acb33a22302f5862a4207f1eb",
             "sha256": "8e2c1eab973d874e2c577b93c7fba440e46d3399d3b13e677d32890c29dece77"
+        },
+        "tests/test_plain_hdd_storage.py": {
+            "content_sha256": "80eee2bd9ef451d5b5b0f7fffcbfc7855357d4bd5ca50950da62e830787ba372",
+            "sha256": "c5c0f9c50d4b36287ab10085daffa4c8916cbb7c0c85999f5aee291a16ca96bf"
         },
         "tests/test_prospective.py": {
             "content_sha256": "d314b570983095c6ab15976c1888fe115ded30a9e0dd867a8f7254029218e3af",
@@ -1111,29 +1167,77 @@
             "content_sha256": "c6f43acfd756ed54ae513911fa2c25dad3dd8e4a082e5a3b56c0f21c9e87cc37",
             "sha256": "b4bdb701c34080c973e4c5620e5e5d257eaadf43e6290f2ff32db8d68e1347b6"
         },
+        "tests/test_weekly_relative_strength_v1.py": {
+            "content_sha256": "b035df854d6542b6989f493f15224648a3bb05db33b6f7927534363d4ba62e0f",
+            "sha256": "40fd9c70cdf4e8d9863b39ba693620b49a7ee962a067e82a4a3b26e46a111307"
+        },
+        "tools/audit_m1_model.py": {
+            "content_sha256": "aa13e1df953b7ac380e74652452d7b93fd8bb351b3ffb9185db317401fd7726b",
+            "sha256": "cf3846562204c3268c1337eb4f501f50cf48be37457d62175fa10191a65cdf95"
+        },
+        "tools/build_plain_snapshot_manifest.py": {
+            "content_sha256": "83c25a4fa4949e70c453755d6f8647b391999ea13c7ed8bd302c79ddbd14d15a",
+            "sha256": "8d2dee4ca03149b88d3a2c049f055039e2bc482924692e3e52e2a82914222a2a"
+        },
         "tools/dhan_oauth_callback.py": {
             "content_sha256": "1220b68ead7fdd7658413f11cae6a938c108755a8610c5571d8c3e2c11e011de",
             "sha256": "69eaed2f637af31431961934544a030fb5d200acedbbc7e869b375a76b76c3ba"
+        },
+        "tools/evaluate_60m_stage2.py": {
+            "content_sha256": "4b36e1fd8983af4090a0411231729124f6c31996c22dcb070d94faeacdaa2b04",
+            "sha256": "4d71cc4cbc8c2ab36ad1d66e1557a22d739dd25c33628e0a32d1a22976d4de8b"
+        },
+        "tools/evaluate_opening_reversal_v1.py": {
+            "content_sha256": "395a923b8372bbb837d841440808fb59ec997bcd92270e6f607e45f30802d910",
+            "sha256": "6ac358a6d5954f3d4f5b3106ee03aa804b1fd24855c99648647869789b77959d"
+        },
+        "tools/evaluate_weekly_relative_strength_v1.py": {
+            "content_sha256": "b1407208438a30aec6cdc63f47024a3281e68f04d6628cff07fe0d5a8ea82d39",
+            "sha256": "4634dd7c1f173f39f0952a2c0ddcefe5ddcac9d5b18100fb915d3838f833ae9e"
+        },
+        "tools/execute_cross_equity_acquisition.py": {
+            "content_sha256": "a51a3984f80d68636b8fa2bce48793b89ba98ea4cf4b83ef0cf44fa5813301d4",
+            "sha256": "3163b0c569db0b7c6a417ca6eacdc9d381b88e22f90856178c482d50f3cdbd04"
+        },
+        "tools/execute_full_3yr_acquisition.py": {
+            "content_sha256": "81367d58c6d49f3d107d9e5d9ad42f2adaec5ba5b1419daf80ec761a01f29f0b",
+            "sha256": "0ad91662057465eb676c3a06460c00255a810d48e4c13a0f98dd8e6e21b87eff"
+        },
+        "tools/execute_reliance_pilot.py": {
+            "content_sha256": "9300482ab4df735ecda8a0e19da13d91ffbd777823e96524657056e934645bd2",
+            "sha256": "e38b6a1e947759f7d1732861ec53e250fb7dc8c97a4d6f822ba8f0f061df9ade"
+        },
+        "tools/offline_end_to_end_replay.py": {
+            "content_sha256": "e8c08ab61561d7ca573ae5d13e15c3bcbca92ad543138c2d80ba0b5c6a054877",
+            "sha256": "5ea8d8810e1f4461049f335d68244f9e1ab1632203a2470f00b4923a5ee68fa9"
         },
         "tools/repo-context.ps1": {
             "content_sha256": "695222abcfff4a76dad8204c6a8697e7913169420d409e3e2ae1af87e5befa67",
             "sha256": "ada29752577763fb699aa62011d1a45ea4b3ddd9b658ae1448ad476baedc9d34"
         },
         "tools/repo_context.py": {
-            "content_sha256": "36b67b066bdb8b49ad69b3007f5ea9287c8664e55994b661c590f204e35377e9",
-            "sha256": "8d360338be85fa71815ecd16c0eb4439be3bc967fef75ad9abd77be47663aca9"
+            "content_sha256": "5e3e40bf5a88b1134ef7af131fae5b5d2d0463377b86a9a4604309d5d56721ba",
+            "sha256": "0d145f4bb369a62979bbd7c28e51bbd35e2f8c65ddd895e9cb0772e27b035f38"
         },
         "tools/start-cockpit-macos.sh": {
-            "content_sha256": "4e109569243ebc09776c9b20bf53b1930ba472aa87dec9f5c7ff923edf4687b9",
-            "sha256": "cf64f9bfc5742542e37ccf72a9038f49362fe12a43eaae9377eca952f6f0ecaa"
+            "content_sha256": "93e64b70e47fe74142a5b93b324a9b787e4c4192c63576caf140a0829e0eeb70",
+            "sha256": "1673c4d5eb13505409a62592c5a4c527c258d5225bb50917080b141a06f07a18"
         },
         "tools/start-cockpit.ps1": {
             "content_sha256": "d5646dee09884153370bccf279e6821a64066298371ddea1420e60fbc368ee38",
             "sha256": "30ce416907017b13fe440706aef65df1511973f03328ada97b5cd996a7dc08d1"
         },
+        "tools/train_m1_model.py": {
+            "content_sha256": "89b7e969b5ffd9d727722a5178073bec32313cff36160b79bfbee1dcf25cb540",
+            "sha256": "094177097ceacacc60621758a3b25a72548163217dbf4de1db858af0a88d5a5b"
+        },
+        "tools/verify_ml_readiness.py": {
+            "content_sha256": "3a1401e0df1cf18190410d99fff4739dd933de2d575cec418928c49bdcf49eb6",
+            "sha256": "76e90cc0388e307b6db3829e06aa935424259c874a401b9d647eeee7d7094cfd"
+        },
         "uv.lock": {
-            "content_sha256": "27b99d2810f04030d1bfe1acd788278a442c20cac5fcb3a1960b97237b939ecf",
-            "sha256": "4eb7c8683b2698a5040e1809604b5c02453f47db6860de2038eb74eeb376ec11"
+            "content_sha256": "a6c1e6a1a2aaf9be15c7810c2490060150d09fbcf4facd7e4d4c15a6563b05e3",
+            "sha256": "6306460b31915d629b9638b8e6fdcfad851df0e755877d4f40ba3bcbdbbf6eb5"
         },
         "web/.prettierignore": {
             "content_sha256": "63aa0f4ddf42389d6383e5c992a93dd5f05c6803d753fd9a1efd7839233ff84f",
@@ -1192,20 +1296,20 @@
             "sha256": "e0e145238e3ecb053bd58bade3d6784bd1a27a70016417161766a1a11067fbd4"
         },
         "web/server/trading-service.mjs": {
-            "content_sha256": "4e2c45b38a8de1d2dfaae9784f856ddfe0f7ec7b050f5c83ba1203e8520c8fb8",
-            "sha256": "0201edc8b2431ec1a0065e284767a8e806be9d5cf0b6930d6185985a9d02ba2a"
+            "content_sha256": "6b78221cdcd9e0164de2c9de91eb7950eb3ec74107d108d909e0718a2e424d80",
+            "sha256": "48766c66deefde18f87319a07931c081e4376e64eb6b95d7fc8d3f030a42db74"
         },
         "web/server/trading-service.test.mjs": {
-            "content_sha256": "78e4453f9acaa619f60215b3a9ac69220d4d601ae71cbaceea7394bb8d286de6",
-            "sha256": "c8f0a0cf75b851058457cce1c1eee3d956ad701ef153c87fb20a68a86d0fa34a"
+            "content_sha256": "30280bda2c2d8b8d0601df7d75a7272faefe54cd9b4ef4dca99e35a80ca397e5",
+            "sha256": "92be3448eb1365caf3a6d7acbb85706c4f355f59be6a4ea7420bb3482566e3c2"
         },
         "web/src/App.test.tsx": {
             "content_sha256": "a54ea712c00774fcb53a44ae58ef43d1cb768a43c2a3d25cad32f112e4be93c9",
             "sha256": "63b1871602fba828fc1b7be5594a00afe16c4fe94a68318bdb84d4332a6db6b2"
         },
         "web/src/App.tsx": {
-            "content_sha256": "c97632b8d07520cd472fea3e7a8f61b0be737cc9da26ccd520244096da5e87a5",
-            "sha256": "f7c63ed521f6734ee7b20296084ff4781029dfc531c4939c274ae6c0ff185f6e"
+            "content_sha256": "8143c80ae9d4261c16dcfbe3b07b64dfec1126074e29ee78ac8113d7c1589f50",
+            "sha256": "88493a7b4eca41b868504f70fb29d1805a367f8ee45584142e0101468325dbda"
         },
         "web/src/Chart.test.ts": {
             "content_sha256": "b9aeaa7040a64fb65121d8d86ec58ce620855293a02928e304ad0b9b39612577",
@@ -1220,8 +1324,16 @@
             "sha256": "ec354681987caa501b76ebca9eb3b81cfcc04bb39125df0ce5c7c53aa7bc6520"
         },
         "web/src/CommandCenter.tsx": {
-            "content_sha256": "0ae43d7865b3a42bafd0ea7765ce2e1f6bab22b1599a0d6a481a8ccf7cb76a8c",
-            "sha256": "055f3e9bcc3bbc8be915b5485ba5cd2f8af6421216f97ae7c9af2c3646170fed"
+            "content_sha256": "b4ee20d81687597cc1dd5823b21ebf5a41689e1af68c880f69c5aef72022ccec",
+            "sha256": "4221af8096c0930a1b07f3a60cbf07984d25fae528407fb50666678a58db6e3a"
+        },
+        "web/src/LiveMonitor.test.tsx": {
+            "content_sha256": "cca3838aa5ab95864acbcfdf4f698f1e7a11e41b972395453d12b8d578aaec73",
+            "sha256": "323fce42b4b362abcba4a28934ec3077d279ff5476afb2bec2a482abbd28d516"
+        },
+        "web/src/LiveMonitor.tsx": {
+            "content_sha256": "0847bb61f2b8f1de5866fae8f4391d4add09ff83aef8739e6ec817fdb3695589",
+            "sha256": "8dd19d9bd764e8a342acc794394dfe514f04cf4f667f9de0f9bc12cf378969b3"
         },
         "web/src/PaperWorkspace.test.tsx": {
             "content_sha256": "48752d9d41ecebe79e29380aac8fadb44b179dd918e9a712a372df555ca00d3a",
@@ -1244,12 +1356,20 @@
             "sha256": "48fa959e037ba19540996db1ed3ea8fea79347289bf4653d02068357c73ab021"
         },
         "web/src/SimulationWorkspace.tsx": {
-            "content_sha256": "729702888119ea697413952b02883f6196ec6b75dc5f95c9d881de09397752eb",
-            "sha256": "4fa1a763eeb6f8099df811cdf735e5336c4a651345495f938642a51f69ec340c"
+            "content_sha256": "7aea3fb77d640b420f6f78d8c67a2bdac106851ece28dabafc0c465ed6891955",
+            "sha256": "c40df3d1657bd46232650bec6be3b45caff63d4f1560b3b3c0d8d4253bed2974"
+        },
+        "web/src/StorageSessionPanel.test.tsx": {
+            "content_sha256": "624ed10ea2f0c97f8dd62c995977568bfee7fc27c29903a2d5fc6acdaf8adb04",
+            "sha256": "e02819e82255c4c44d71792190e2be0891e0ff89e91989a35fcd9cc465117334"
+        },
+        "web/src/StorageSessionPanel.tsx": {
+            "content_sha256": "41abe3ee5d76e69064e02dcab93c33e899e9ba4e730ef466cef060d85d6a2232",
+            "sha256": "08118cd0b59a12e92c93828c81ea207e818180520936ce3cec2fac5f973ed8dd"
         },
         "web/src/TradingWorkspace.tsx": {
-            "content_sha256": "7bf8556eb9212e1ac09475fb90b608e352de8cedee2aa9bdce6bd0a454da213c",
-            "sha256": "3461f42a9b60371b2888e3e9f4e7df5a51eb5047f92863535d02344f1c2b1cbb"
+            "content_sha256": "4a5cca8b27b4ab872837d4ecc77af85eebf3337085f69ea8c29520d3324cf900",
+            "sha256": "4525acecf579a94f873973de61f9d1a63021a3679962e8978484986e5f447e17"
         },
         "web/src/format.ts": {
             "content_sha256": "0f9c1114b65c83ec7a22856ea3cb86511271df08e6feb6a52b2a46e285b697af",
@@ -1280,8 +1400,8 @@
             "sha256": "945ef9a6c2ee1172ba378094e9309386c1f2082d46d7e656becdf833e7e4d31f"
         },
         "web/src/styles.css": {
-            "content_sha256": "814046ea4f96f423c3d0c834d46d12ae6d56c67706e93896b0cf2bc08ed4428c",
-            "sha256": "36795b2f197a385002318b6f9a10f72d155e0dcbe9963c710e699ff7c5fee05a"
+            "content_sha256": "5aa456a33eb4f90e4d29d7bc4b81df2e30ba05d779906f4b39066ec4b49e1036",
+            "sha256": "1695c65315b92b3338c27b3e7ab65845fab4b47f3725786f53c9620fd0e6b217"
         },
         "web/tsconfig.json": {
             "content_sha256": "ca5e7e9a941ee305dfc0f3a13cf01c4ef79afb309a04d27eeb7a0aafb1c61dcb",
@@ -1294,7 +1414,7 @@
     },
     "directories": {
         ".": {
-            "sha256": "f8f0b0c162750c8e0fb2064337ddc742e99152fc3d04c5c29acde3514d42ae37",
+            "sha256": "a003e7470c8c662584cb35f68de1ab4814e994ebbe73d1376a7a9a7380c87616",
             "children": [
                 {
                     "name": ".env.example",
@@ -1329,12 +1449,12 @@
                 {
                     "name": "data",
                     "kind": "tree",
-                    "sha256": "9fb90de5aca32cff66678fdb7f8049ec77f3f3c9b5e10811187cde00a995beb0"
+                    "sha256": "66b6f76930a5b0aa07235e3f4fa64bfecc72a7740a25ad04f1a42df0efe7afe9"
                 },
                 {
                     "name": "docs",
                     "kind": "tree",
-                    "sha256": "bd0a1f0f3c300dd988f6920fab1ac518983ac7632609e218e2323a4cb45db466"
+                    "sha256": "51e1b9db734f62f00267e3d43cbf59c75a682a702b71f10e4e2dc771e4a29772"
                 },
                 {
                     "name": "infra",
@@ -1344,12 +1464,12 @@
                 {
                     "name": "pyproject.toml",
                     "kind": "blob",
-                    "sha256": "4b3b90d8121bd7470d1d89e8ae17a1e877ea5ffa2656f129a5c495f4f6a5ef0f"
+                    "sha256": "1c00284e2fe57d61cd2d8d5ec763a299ddbda699dbd7dd7f5359bdc2ed4a4f46"
                 },
                 {
                     "name": "rust",
                     "kind": "tree",
-                    "sha256": "953a64e0b3c059c4b5913219704f1aad8e6886c234718a1ee0fa928ce2aaad6b"
+                    "sha256": "1a4d497eb41f783966c03366a55d2c343a6c1ce8f1ca4e2b93542951ce54ab77"
                 },
                 {
                     "name": "rust-toolchain.toml",
@@ -1359,27 +1479,27 @@
                 {
                     "name": "src",
                     "kind": "tree",
-                    "sha256": "fd60f91e7962247dd5f77005845f760808139e1ba80e562cacf3ec117925505a"
+                    "sha256": "dc8c0ae595dda82b819ca431e31c119e14c8877371c1700f7e1b481af38e3ae3"
                 },
                 {
                     "name": "tests",
                     "kind": "tree",
-                    "sha256": "a87938671135dd3a035add398e108fdc7ed767a71723f0e0af201d73c184299c"
+                    "sha256": "b28db0d53dfe80e3661910289b3ac72087bf40f42a8869cb76154cde27c1e395"
                 },
                 {
                     "name": "tools",
                     "kind": "tree",
-                    "sha256": "dd65c30745fdc9aa8f55accd4bfcd805e2b378e9f7e3c6bbcf41a47e61250208"
+                    "sha256": "8acdec30931a83253e9246415fae29c2bcd4c5155ce70f12c5c5e11934341461"
                 },
                 {
                     "name": "uv.lock",
                     "kind": "blob",
-                    "sha256": "4eb7c8683b2698a5040e1809604b5c02453f47db6860de2038eb74eeb376ec11"
+                    "sha256": "6306460b31915d629b9638b8e6fdcfad851df0e755877d4f40ba3bcbdbbf6eb5"
                 },
                 {
                     "name": "web",
                     "kind": "tree",
-                    "sha256": "adac1a8a336e3a7f2148ae223444ca90531659f613eb0fa8adfcf268e8b19fd8"
+                    "sha256": "b71cf549522878bad65dc547c9b01ae7e68aeabbc2395e7917db020d57188f80"
                 }
             ]
         },
@@ -1414,22 +1534,22 @@
             ]
         },
         "data": {
-            "sha256": "9fb90de5aca32cff66678fdb7f8049ec77f3f3c9b5e10811187cde00a995beb0",
+            "sha256": "66b6f76930a5b0aa07235e3f4fa64bfecc72a7740a25ad04f1a42df0efe7afe9",
             "children": [
                 {
                     "name": "config",
                     "kind": "tree",
-                    "sha256": "b799c07eb4f0632141c8b55542ac2a3eb8b8319e5b1eea167ebb5a79c681286f"
+                    "sha256": "a1577e1171c167e513851f607acfb0a661b5b8ac6c00318e82adc7d8ec969f89"
                 }
             ]
         },
         "data/config": {
-            "sha256": "b799c07eb4f0632141c8b55542ac2a3eb8b8319e5b1eea167ebb5a79c681286f",
+            "sha256": "a1577e1171c167e513851f607acfb0a661b5b8ac6c00318e82adc7d8ec969f89",
             "children": [
                 {
                     "name": "calendar.json",
                     "kind": "blob",
-                    "sha256": "62b25c5a0a4341a0345477c23fc1fcb97cc60d3585e90fb5c9f47f380e801642"
+                    "sha256": "de919b09644a83704a6b0e1318d64326495d6061bb13142b735847847de02775"
                 },
                 {
                     "name": "registry.json",
@@ -1439,7 +1559,7 @@
             ]
         },
         "docs": {
-            "sha256": "bd0a1f0f3c300dd988f6920fab1ac518983ac7632609e218e2323a4cb45db466",
+            "sha256": "51e1b9db734f62f00267e3d43cbf59c75a682a702b71f10e4e2dc771e4a29772",
             "children": [
                 {
                     "name": "benchmarks",
@@ -1449,7 +1569,7 @@
                 {
                     "name": "context",
                     "kind": "tree",
-                    "sha256": "d6777efca6a048156b1c5437c5f44a3bdd9bea7241aff2884d554b4634822d05"
+                    "sha256": "00b32be0d560d721c93da1f43c615c282a155c35a1d38d3124acd1fc2607aee9"
                 },
                 {
                     "name": "cross-equity-adaptive-v2-2026-11-03.md",
@@ -1485,6 +1605,21 @@
                     "name": "engineering-fixes-2026-11-04.md",
                     "kind": "blob",
                     "sha256": "308321012e57779cd0302c18100d2133b1546b5f1a66169e8e8375dabd71cb67"
+                },
+                {
+                    "name": "exp-60m-bracketed-opportunity-protocol-v1.md",
+                    "kind": "blob",
+                    "sha256": "e7128b7c4bbd642256ac1610e094f2fe0b8558201dd11aa268302e89a58c5f93"
+                },
+                {
+                    "name": "exp-opening-sell-pressure-reversal-v1.md",
+                    "kind": "blob",
+                    "sha256": "df83db41851cdad8c00d6b996acac3f4ea18933624fce3f779efef81d7ff0b4d"
+                },
+                {
+                    "name": "exp-weekly-relative-strength-v1.md",
+                    "kind": "blob",
+                    "sha256": "aafb53e4f5c083f6fc1d086f662df94bdd2722cd1739b173a69920b2f6f5ff7d"
                 },
                 {
                     "name": "forward-observations.md",
@@ -1824,17 +1959,17 @@
             ]
         },
         "docs/context": {
-            "sha256": "d6777efca6a048156b1c5437c5f44a3bdd9bea7241aff2884d554b4634822d05",
+            "sha256": "00b32be0d560d721c93da1f43c615c282a155c35a1d38d3124acd1fc2607aee9",
             "children": [
                 {
                     "name": "DECISIONS.md",
                     "kind": "blob",
-                    "sha256": "b86fe54e9bf8beb0fec8e52ab45d76180c13dead07357b13177721e88eaa32e7"
+                    "sha256": "99d2a16ecd46d49905c2f7ac45e557db5dc0bc0880d91bce3b31e8cd4295f100"
                 },
                 {
                     "name": "REPO_MAP.md",
                     "kind": "blob",
-                    "sha256": "189042cc44b77ee8ae6aff259a6c2ba3b858e8dd4cab5c90f83d47e9b281794d"
+                    "sha256": "e86be98a9b6072f26797d1e6519ca957c7191d7579769840dd1f08955a41e169"
                 }
             ]
         },
@@ -1974,7 +2109,7 @@
             ]
         },
         "rust": {
-            "sha256": "953a64e0b3c059c4b5913219704f1aad8e6886c234718a1ee0fa928ce2aaad6b",
+            "sha256": "1a4d497eb41f783966c03366a55d2c343a6c1ce8f1ca4e2b93542951ce54ab77",
             "children": [
                 {
                     "name": "Cargo.lock",
@@ -1994,7 +2129,7 @@
                 {
                     "name": "crates",
                     "kind": "tree",
-                    "sha256": "842c7ab2b171668036ad304f06dc14caf3aae91524b58794c0a0ded1b59d49dd"
+                    "sha256": "b8bce024aeb9ca5147c7935e3ade3d8782fae11865492c3e62651144693ac2bc"
                 },
                 {
                     "name": "depth-subscriptions.example.json",
@@ -2009,7 +2144,7 @@
             ]
         },
         "rust/crates": {
-            "sha256": "842c7ab2b171668036ad304f06dc14caf3aae91524b58794c0a0ded1b59d49dd",
+            "sha256": "b8bce024aeb9ca5147c7935e3ade3d8782fae11865492c3e62651144693ac2bc",
             "children": [
                 {
                     "name": "quant-bench",
@@ -2064,7 +2199,7 @@
                 {
                     "name": "quant-telemetry",
                     "kind": "tree",
-                    "sha256": "c6ee472f571a7816690e46268da0ef30dbe6f9f12b4a5e029a7c8f78936af4ab"
+                    "sha256": "764483107b7036d489912e0495e4a4c3094e981f995110c8f51224da36619e7d"
                 }
             ]
         },
@@ -2474,7 +2609,7 @@
             ]
         },
         "rust/crates/quant-telemetry": {
-            "sha256": "c6ee472f571a7816690e46268da0ef30dbe6f9f12b4a5e029a7c8f78936af4ab",
+            "sha256": "764483107b7036d489912e0495e4a4c3094e981f995110c8f51224da36619e7d",
             "children": [
                 {
                     "name": "Cargo.toml",
@@ -2484,17 +2619,17 @@
                 {
                     "name": "src",
                     "kind": "tree",
-                    "sha256": "d4ea43e47c0c7913810babafe51cb4b6dafeb63b943ca7f54d60beec9a4208b3"
+                    "sha256": "ef24f5d70ed5c536d7f3358f4638fbff48124bde05368dfeae2545e147757c71"
                 }
             ]
         },
         "rust/crates/quant-telemetry/src": {
-            "sha256": "d4ea43e47c0c7913810babafe51cb4b6dafeb63b943ca7f54d60beec9a4208b3",
+            "sha256": "ef24f5d70ed5c536d7f3358f4638fbff48124bde05368dfeae2545e147757c71",
             "children": [
                 {
                     "name": "bin",
                     "kind": "tree",
-                    "sha256": "b2b869a4baca6cbf42b63717a44b09376cace8b05be648854ae5d29f93cf8926"
+                    "sha256": "d440c5a62e37f7182529f3a59ce57e3df452af58fcd1bc7077d09fa8ae65cc88"
                 },
                 {
                     "name": "gateway.rs",
@@ -2514,12 +2649,12 @@
                 {
                     "name": "read_model.rs",
                     "kind": "blob",
-                    "sha256": "783511859c47c558e8ac6a0e745ad37925cf1d11f409c70db674e3ab22b059d3"
+                    "sha256": "44895a1f6ec1d7e302cd06cde166beb9e121c6fc8a20ba27323a0e91698447b5"
                 }
             ]
         },
         "rust/crates/quant-telemetry/src/bin": {
-            "sha256": "b2b869a4baca6cbf42b63717a44b09376cace8b05be648854ae5d29f93cf8926",
+            "sha256": "d440c5a62e37f7182529f3a59ce57e3df452af58fcd1bc7077d09fa8ae65cc88",
             "children": [
                 {
                     "name": "paper_eval.rs",
@@ -2544,7 +2679,7 @@
                 {
                     "name": "telemetry_local.rs",
                     "kind": "blob",
-                    "sha256": "2d196d2bb9e30578186a1ca1c5332b5a29b2d5aa2cf9893fbd21300560b5ae40"
+                    "sha256": "9227473149e02dab16b4384c3cf4d855c15839299565c4b204b6e1dd0f0c003f"
                 }
             ]
         },
@@ -2579,17 +2714,17 @@
             ]
         },
         "src": {
-            "sha256": "fd60f91e7962247dd5f77005845f760808139e1ba80e562cacf3ec117925505a",
+            "sha256": "dc8c0ae595dda82b819ca431e31c119e14c8877371c1700f7e1b481af38e3ae3",
             "children": [
                 {
                     "name": "quant",
                     "kind": "tree",
-                    "sha256": "1f535ef397888774b4eef1da5e25f6ea3f24f3b02b842ad48e4a0fe58bb597c1"
+                    "sha256": "25c3336f542a573ea57734f52cf564b4bf96193a9fd5bb717c9845a2b23c4044"
                 }
             ]
         },
         "src/quant": {
-            "sha256": "1f535ef397888774b4eef1da5e25f6ea3f24f3b02b842ad48e4a0fe58bb597c1",
+            "sha256": "25c3336f542a573ea57734f52cf564b4bf96193a9fd5bb717c9845a2b23c4044",
             "children": [
                 {
                     "name": "__init__.py",
@@ -2599,12 +2734,12 @@
                 {
                     "name": "acquisition",
                     "kind": "tree",
-                    "sha256": "714fccfb2d6404a6f4f487d8ed7196022ed1e1881139c6e119d0b1943b8da7d5"
+                    "sha256": "b39699f228cbf5c69c1002af43a1adf39a3e98c54689f607daa843e16f8fdfeb"
                 },
                 {
                     "name": "apps",
                     "kind": "tree",
-                    "sha256": "7075cef5b88cd98683cec81e6f3e04f58cfc20fc5adcbf95b5f1192dd6246acf"
+                    "sha256": "ede9d32698f257caa3499f84b0ee1eb81fcc2ac6de81cec09b0959ca2e1747c4"
                 },
                 {
                     "name": "config.py",
@@ -2634,7 +2769,7 @@
                 {
                     "name": "research",
                     "kind": "tree",
-                    "sha256": "026b923f700c6858c1bf1ffb18ab0d8603a1a2b992283f357f66d9e2e7d8b820"
+                    "sha256": "d347fd05e0a9e32b0909176e6d04b760d2beaded1649057105ee7ed6ee929942"
                 },
                 {
                     "name": "storage",
@@ -2644,7 +2779,7 @@
             ]
         },
         "src/quant/acquisition": {
-            "sha256": "714fccfb2d6404a6f4f487d8ed7196022ed1e1881139c6e119d0b1943b8da7d5",
+            "sha256": "b39699f228cbf5c69c1002af43a1adf39a3e98c54689f607daa843e16f8fdfeb",
             "children": [
                 {
                     "name": "__init__.py",
@@ -2674,7 +2809,7 @@
                 {
                     "name": "dhan.py",
                     "kind": "blob",
-                    "sha256": "b3b1bef4d31c97eaaf4808ede2cdf4aadb06ab76225c5b56c5a7d4c55677c13b"
+                    "sha256": "b0e46314e64e01a3d367e44dcbd73012c1e3158705ccfbb70383ae6576fa379f"
                 },
                 {
                     "name": "dhan_instruments.py",
@@ -2719,7 +2854,7 @@
             ]
         },
         "src/quant/apps": {
-            "sha256": "7075cef5b88cd98683cec81e6f3e04f58cfc20fc5adcbf95b5f1192dd6246acf",
+            "sha256": "ede9d32698f257caa3499f84b0ee1eb81fcc2ac6de81cec09b0959ca2e1747c4",
             "children": [
                 {
                     "name": "__init__.py",
@@ -2759,7 +2894,7 @@
                 {
                     "name": "dhan_account_cache.py",
                     "kind": "blob",
-                    "sha256": "4f68ce33e63a576b7329b81b1459a7421b136fc24ead5cb098afaa0332faa5c0"
+                    "sha256": "c133955586bfced6c3d6655d26491ec8b96aa4ef82a7b1ad221aae88b11d918f"
                 },
                 {
                     "name": "dhan_candle_availability.py",
@@ -2780,6 +2915,11 @@
                     "name": "estimate_capture.py",
                     "kind": "blob",
                     "sha256": "1f430c327e583724e40e9690d8b3866d91ea357a65111e1f04d341e88437313a"
+                },
+                {
+                    "name": "execution_safety.py",
+                    "kind": "blob",
+                    "sha256": "2a33d252b8525c72f931c532048d7d57638fbf6b144ab4c50d57c64684a7ea6e"
                 },
                 {
                     "name": "exploratory_dhan_timing.py",
@@ -2819,17 +2959,17 @@
                 {
                     "name": "live_feed_credentials.py",
                     "kind": "blob",
-                    "sha256": "afe0ca0953ebcfae06f6c52983421b597ec3b96f57f2c2169db156dc05b964ce"
+                    "sha256": "ffdec1c7672e949cff6c045375464b465ee8b943f0ce025e40fe0320d32ea71b"
                 },
                 {
                     "name": "live_feed_scope.py",
                     "kind": "blob",
-                    "sha256": "f4f76dc0530a3dc3b4f147db756aa475942a1b1e652c65a388283457f575dca6"
+                    "sha256": "237356dacf6b5c48f86e8cb74b072ceec950f265f719c3f95b3a421c8f1f4353"
                 },
                 {
                     "name": "live_simulation.py",
                     "kind": "blob",
-                    "sha256": "b4c2b5e0a34be8dbbf124a66a5e7d567cad04b16141fed079f8a85d6072e43d3"
+                    "sha256": "49f193990cbf299ce6dedf2300deebe4822be00a87c37578cfb5e86e8dec216b"
                 },
                 {
                     "name": "local_training_worker.py",
@@ -2899,7 +3039,7 @@
             ]
         },
         "src/quant/research": {
-            "sha256": "026b923f700c6858c1bf1ffb18ab0d8603a1a2b992283f357f66d9e2e7d8b820",
+            "sha256": "d347fd05e0a9e32b0909176e6d04b760d2beaded1649057105ee7ed6ee929942",
             "children": [
                 {
                     "name": "__init__.py",
@@ -2910,6 +3050,11 @@
                     "name": "baselines.py",
                     "kind": "blob",
                     "sha256": "0fc24bb7c6aea0e5bdb81815ac96089955776521c1ba497a32fe4c7b52736e47"
+                },
+                {
+                    "name": "cross_equity_model.py",
+                    "kind": "blob",
+                    "sha256": "3a9fe5d121f06a8cdeb2ac5da0954d55e1759866af7481d5f051bca09e02c469"
                 },
                 {
                     "name": "dataset.py",
@@ -2947,9 +3092,14 @@
                     "sha256": "a0eab5c0aabd1f8b9c380441f86165f26a7054f8984af89e525879ab72737914"
                 },
                 {
+                    "name": "m1_pipeline.py",
+                    "kind": "blob",
+                    "sha256": "87e07d261ac1faa8ccab3f47568f2b411d3202f943d56421719a50115a1cb629"
+                },
+                {
                     "name": "order_book_imbalance.py",
                     "kind": "blob",
-                    "sha256": "1912eed0bfdd4a8757cebbcad55dcbe61547e5167b4d6762257f1686846045e7"
+                    "sha256": "1ec61e25852f5789aaed37485c6f4130f8e7244aa33d0146417c4b4c8f2c000d"
                 },
                 {
                     "name": "prospective.py",
@@ -3014,7 +3164,7 @@
             ]
         },
         "tests": {
-            "sha256": "a87938671135dd3a035add398e108fdc7ed767a71723f0e0af201d73c184299c",
+            "sha256": "b28db0d53dfe80e3661910289b3ac72087bf40f42a8869cb76154cde27c1e395",
             "children": [
                 {
                     "name": "test_acquisition_cli.py",
@@ -3067,6 +3217,11 @@
                     "sha256": "b9fc1edd12cdbad2b169651f50458f6c8ead7aa64869313a32ae3da99a5e7b0f"
                 },
                 {
+                    "name": "test_cross_equity_model.py",
+                    "kind": "blob",
+                    "sha256": "f9951f9e978550218fd321d35b3b47d27b403922973fbb79cabd5b90301b11b9"
+                },
+                {
                     "name": "test_descriptive_dhan_opportunities.py",
                     "kind": "blob",
                     "sha256": "eae2db69ef7e383e74c29c9cef40b95db6742793c2196df32809c3c428134866"
@@ -3112,6 +3267,16 @@
                     "sha256": "0bfef532dcd2f9b56d3789c9478faa0b819ab91523c17aa5e045e94f794df3e8"
                 },
                 {
+                    "name": "test_evaluate_60m_stage2.py",
+                    "kind": "blob",
+                    "sha256": "a6f462beeffc0f1013f4fe11f3ef77b62e5a5de18f3e42c333ceab896b1c208d"
+                },
+                {
+                    "name": "test_execution_safety.py",
+                    "kind": "blob",
+                    "sha256": "4c2636b2007d2bba07b8438710187623586207fbd7c5dc97648c7e4e06cb0a63"
+                },
+                {
                     "name": "test_exploratory_dhan_timing.py",
                     "kind": "blob",
                     "sha256": "d8130347e587663154cb4d85bad33b0e7026c71418ba63ba35c0293904d6b54f"
@@ -3125,6 +3290,11 @@
                     "name": "test_forward_observations.py",
                     "kind": "blob",
                     "sha256": "3513d9a37cab87ed1cdd074e927b8dcc9be7028cb1e345222d59e6dc4307efc0"
+                },
+                {
+                    "name": "test_full_3yr_acquisition.py",
+                    "kind": "blob",
+                    "sha256": "5a881e1ad6e8007dea3f58813e39fc26f0bfc91cdb8fd34c2a5fb0e887a66d88"
                 },
                 {
                     "name": "test_health_logging.py",
@@ -3159,22 +3329,27 @@
                 {
                     "name": "test_live_feed_credentials.py",
                     "kind": "blob",
-                    "sha256": "8cc5e8e3fd75a5e5f12de5b98ea62c132e4d18809831a13f6eadf0d66fc53939"
+                    "sha256": "e69816071eca9b93b4ba93b262db5e2592bd0369d5c77daaa2c6c4bed40081e2"
                 },
                 {
                     "name": "test_live_feed_scope.py",
                     "kind": "blob",
-                    "sha256": "f8d2ad504fdcbaf1d72eeb2d3890644d92a6c59faee3b4d4f3af9da745a42268"
+                    "sha256": "c6dedcbf09c5ad34baba970c2e2ee2f68f1401fa81b7f9713e4287a421fcbd4e"
                 },
                 {
                     "name": "test_live_simulation.py",
                     "kind": "blob",
-                    "sha256": "062cc7a1383c30ed4c357b19a533f21dae86d364422b122f566b2d08259dbd7a"
+                    "sha256": "890fdd21cccedfc2ecfc019d60e0fbd981d26023bf342f989d70b084a20d14ad"
                 },
                 {
                     "name": "test_local_training_worker.py",
                     "kind": "blob",
                     "sha256": "faf5e9b1f4a81bb527a43f168a5b6abf9239c58f9f3cddd6a761b275dab34fca"
+                },
+                {
+                    "name": "test_m1_pipeline.py",
+                    "kind": "blob",
+                    "sha256": "1b948d9159a4c20c99a0548bb6d50e0284d0b0000939df1a1393faa39b0f110e"
                 },
                 {
                     "name": "test_noise_reduction.py",
@@ -3187,14 +3362,29 @@
                     "sha256": "485d6d2eeb66be30c47a46e13cfa745becefe99114f68add7d09517398b640d7"
                 },
                 {
+                    "name": "test_opening_reversal_v1.py",
+                    "kind": "blob",
+                    "sha256": "de2b7cf8d61664f9ba53fc13a22a69da0ad43f99b7a95b87cc1c771a838d47f7"
+                },
+                {
+                    "name": "test_opportunity_evaluation.py",
+                    "kind": "blob",
+                    "sha256": "7ba13d25a4b4de9c9c67d84b556aa3501342cd850578b1bba1a6d6d352a5055f"
+                },
+                {
                     "name": "test_order_book_imbalance.py",
                     "kind": "blob",
-                    "sha256": "ffc1054de45cd440ef791542122e90c44c0b682578a585fa6d66f94100f14243"
+                    "sha256": "d62bcc011237b539f3c5e24a5b64a0910d423ff965f5d338da74cc3168b29fcc"
                 },
                 {
                     "name": "test_parquet.py",
                     "kind": "blob",
                     "sha256": "8e2c1eab973d874e2c577b93c7fba440e46d3399d3b13e677d32890c29dece77"
+                },
+                {
+                    "name": "test_plain_hdd_storage.py",
+                    "kind": "blob",
+                    "sha256": "c5c0f9c50d4b36287ab10085daffa4c8916cbb7c0c85999f5aee291a16ca96bf"
                 },
                 {
                     "name": "test_prospective.py",
@@ -3240,16 +3430,66 @@
                     "name": "test_research_validation.py",
                     "kind": "blob",
                     "sha256": "b4bdb701c34080c973e4c5620e5e5d257eaadf43e6290f2ff32db8d68e1347b6"
+                },
+                {
+                    "name": "test_weekly_relative_strength_v1.py",
+                    "kind": "blob",
+                    "sha256": "40fd9c70cdf4e8d9863b39ba693620b49a7ee962a067e82a4a3b26e46a111307"
                 }
             ]
         },
         "tools": {
-            "sha256": "dd65c30745fdc9aa8f55accd4bfcd805e2b378e9f7e3c6bbcf41a47e61250208",
+            "sha256": "8acdec30931a83253e9246415fae29c2bcd4c5155ce70f12c5c5e11934341461",
             "children": [
+                {
+                    "name": "audit_m1_model.py",
+                    "kind": "blob",
+                    "sha256": "cf3846562204c3268c1337eb4f501f50cf48be37457d62175fa10191a65cdf95"
+                },
+                {
+                    "name": "build_plain_snapshot_manifest.py",
+                    "kind": "blob",
+                    "sha256": "8d2dee4ca03149b88d3a2c049f055039e2bc482924692e3e52e2a82914222a2a"
+                },
                 {
                     "name": "dhan_oauth_callback.py",
                     "kind": "blob",
                     "sha256": "69eaed2f637af31431961934544a030fb5d200acedbbc7e869b375a76b76c3ba"
+                },
+                {
+                    "name": "evaluate_60m_stage2.py",
+                    "kind": "blob",
+                    "sha256": "4d71cc4cbc8c2ab36ad1d66e1557a22d739dd25c33628e0a32d1a22976d4de8b"
+                },
+                {
+                    "name": "evaluate_opening_reversal_v1.py",
+                    "kind": "blob",
+                    "sha256": "6ac358a6d5954f3d4f5b3106ee03aa804b1fd24855c99648647869789b77959d"
+                },
+                {
+                    "name": "evaluate_weekly_relative_strength_v1.py",
+                    "kind": "blob",
+                    "sha256": "4634dd7c1f173f39f0952a2c0ddcefe5ddcac9d5b18100fb915d3838f833ae9e"
+                },
+                {
+                    "name": "execute_cross_equity_acquisition.py",
+                    "kind": "blob",
+                    "sha256": "3163b0c569db0b7c6a417ca6eacdc9d381b88e22f90856178c482d50f3cdbd04"
+                },
+                {
+                    "name": "execute_full_3yr_acquisition.py",
+                    "kind": "blob",
+                    "sha256": "0ad91662057465eb676c3a06460c00255a810d48e4c13a0f98dd8e6e21b87eff"
+                },
+                {
+                    "name": "execute_reliance_pilot.py",
+                    "kind": "blob",
+                    "sha256": "e38b6a1e947759f7d1732861ec53e250fb7dc8c97a4d6f822ba8f0f061df9ade"
+                },
+                {
+                    "name": "offline_end_to_end_replay.py",
+                    "kind": "blob",
+                    "sha256": "5ea8d8810e1f4461049f335d68244f9e1ab1632203a2470f00b4923a5ee68fa9"
                 },
                 {
                     "name": "repo-context.ps1",
@@ -3259,22 +3499,32 @@
                 {
                     "name": "repo_context.py",
                     "kind": "blob",
-                    "sha256": "8d360338be85fa71815ecd16c0eb4439be3bc967fef75ad9abd77be47663aca9"
+                    "sha256": "0d145f4bb369a62979bbd7c28e51bbd35e2f8c65ddd895e9cb0772e27b035f38"
                 },
                 {
                     "name": "start-cockpit-macos.sh",
                     "kind": "blob",
-                    "sha256": "cf64f9bfc5742542e37ccf72a9038f49362fe12a43eaae9377eca952f6f0ecaa"
+                    "sha256": "1673c4d5eb13505409a62592c5a4c527c258d5225bb50917080b141a06f07a18"
                 },
                 {
                     "name": "start-cockpit.ps1",
                     "kind": "blob",
                     "sha256": "30ce416907017b13fe440706aef65df1511973f03328ada97b5cd996a7dc08d1"
+                },
+                {
+                    "name": "train_m1_model.py",
+                    "kind": "blob",
+                    "sha256": "094177097ceacacc60621758a3b25a72548163217dbf4de1db858af0a88d5a5b"
+                },
+                {
+                    "name": "verify_ml_readiness.py",
+                    "kind": "blob",
+                    "sha256": "76e90cc0388e307b6db3829e06aa935424259c874a401b9d647eeee7d7094cfd"
                 }
             ]
         },
         "web": {
-            "sha256": "adac1a8a336e3a7f2148ae223444ca90531659f613eb0fa8adfcf268e8b19fd8",
+            "sha256": "b71cf549522878bad65dc547c9b01ae7e68aeabbc2395e7917db020d57188f80",
             "children": [
                 {
                     "name": ".prettierignore",
@@ -3309,12 +3559,12 @@
                 {
                     "name": "server",
                     "kind": "tree",
-                    "sha256": "e27c6055a550a2eda077ba64c113b26df249d8a1a26177366643c5c47f4aa4a0"
+                    "sha256": "b48ce7f3e4e4cede4767546ef52f1cf1e6ee68e0fd1b3728989dcf090f144905"
                 },
                 {
                     "name": "src",
                     "kind": "tree",
-                    "sha256": "014b81210d96f3c860563a0f14f8d2349265fa25bbf79d417189ddde5a6f93f8"
+                    "sha256": "881890b43dae6110d12dcf7a5acf793ffe357b9bea47120ffc53c3fd2e99bd58"
                 },
                 {
                     "name": "tsconfig.json",
@@ -3359,7 +3609,7 @@
             ]
         },
         "web/server": {
-            "sha256": "e27c6055a550a2eda077ba64c113b26df249d8a1a26177366643c5c47f4aa4a0",
+            "sha256": "b48ce7f3e4e4cede4767546ef52f1cf1e6ee68e0fd1b3728989dcf090f144905",
             "children": [
                 {
                     "name": "dhan-account.mjs",
@@ -3384,17 +3634,17 @@
                 {
                     "name": "trading-service.mjs",
                     "kind": "blob",
-                    "sha256": "0201edc8b2431ec1a0065e284767a8e806be9d5cf0b6930d6185985a9d02ba2a"
+                    "sha256": "48766c66deefde18f87319a07931c081e4376e64eb6b95d7fc8d3f030a42db74"
                 },
                 {
                     "name": "trading-service.test.mjs",
                     "kind": "blob",
-                    "sha256": "c8f0a0cf75b851058457cce1c1eee3d956ad701ef153c87fb20a68a86d0fa34a"
+                    "sha256": "92be3448eb1365caf3a6d7acbb85706c4f355f59be6a4ea7420bb3482566e3c2"
                 }
             ]
         },
         "web/src": {
-            "sha256": "014b81210d96f3c860563a0f14f8d2349265fa25bbf79d417189ddde5a6f93f8",
+            "sha256": "881890b43dae6110d12dcf7a5acf793ffe357b9bea47120ffc53c3fd2e99bd58",
             "children": [
                 {
                     "name": "App.test.tsx",
@@ -3404,7 +3654,7 @@
                 {
                     "name": "App.tsx",
                     "kind": "blob",
-                    "sha256": "f7c63ed521f6734ee7b20296084ff4781029dfc531c4939c274ae6c0ff185f6e"
+                    "sha256": "88493a7b4eca41b868504f70fb29d1805a367f8ee45584142e0101468325dbda"
                 },
                 {
                     "name": "Chart.test.ts",
@@ -3424,7 +3674,17 @@
                 {
                     "name": "CommandCenter.tsx",
                     "kind": "blob",
-                    "sha256": "055f3e9bcc3bbc8be915b5485ba5cd2f8af6421216f97ae7c9af2c3646170fed"
+                    "sha256": "4221af8096c0930a1b07f3a60cbf07984d25fae528407fb50666678a58db6e3a"
+                },
+                {
+                    "name": "LiveMonitor.test.tsx",
+                    "kind": "blob",
+                    "sha256": "323fce42b4b362abcba4a28934ec3077d279ff5476afb2bec2a482abbd28d516"
+                },
+                {
+                    "name": "LiveMonitor.tsx",
+                    "kind": "blob",
+                    "sha256": "8dd19d9bd764e8a342acc794394dfe514f04cf4f667f9de0f9bc12cf378969b3"
                 },
                 {
                     "name": "PaperWorkspace.test.tsx",
@@ -3454,12 +3714,22 @@
                 {
                     "name": "SimulationWorkspace.tsx",
                     "kind": "blob",
-                    "sha256": "4fa1a763eeb6f8099df811cdf735e5336c4a651345495f938642a51f69ec340c"
+                    "sha256": "c40df3d1657bd46232650bec6be3b45caff63d4f1560b3b3c0d8d4253bed2974"
+                },
+                {
+                    "name": "StorageSessionPanel.test.tsx",
+                    "kind": "blob",
+                    "sha256": "e02819e82255c4c44d71792190e2be0891e0ff89e91989a35fcd9cc465117334"
+                },
+                {
+                    "name": "StorageSessionPanel.tsx",
+                    "kind": "blob",
+                    "sha256": "08118cd0b59a12e92c93828c81ea207e818180520936ce3cec2fac5f973ed8dd"
                 },
                 {
                     "name": "TradingWorkspace.tsx",
                     "kind": "blob",
-                    "sha256": "3461f42a9b60371b2888e3e9f4e7df5a51eb5047f92863535d02344f1c2b1cbb"
+                    "sha256": "4525acecf579a94f873973de61f9d1a63021a3679962e8978484986e5f447e17"
                 },
                 {
                     "name": "format.ts",
@@ -3489,7 +3759,7 @@
                 {
                     "name": "styles.css",
                     "kind": "blob",
-                    "sha256": "36795b2f197a385002318b6f9a10f72d155e0dcbe9963c710e699ff7c5fee05a"
+                    "sha256": "1695c65315b92b3338c27b3e7ab65845fab4b47f3725786f53c9620fd0e6b217"
                 }
             ]
         },

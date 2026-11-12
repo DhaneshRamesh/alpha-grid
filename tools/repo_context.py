@@ -21,6 +21,8 @@ SUPPORT_FILES = [
     "AGENTS.md",
     "docs/context/REPO_MAP.md",
     "docs/context/DECISIONS.md",
+    "docs/exp-opening-sell-pressure-reversal-v1.md",
+    "docs/exp-weekly-relative-strength-v1.md",
     "docs/forward-observations.md",
     "docs/trading-product-brief.md",
     "docs/dhan-api-key-callbacks.md",
@@ -83,6 +85,8 @@ SUPPORT_FILES = [
     "tests/test_dhan_oauth_callback.py",
     "tests/test_ingest_nse_evidence.py",
     "tests/test_repo_context.py",
+    "tests/test_opening_reversal_v1.py",
+    "tests/test_weekly_relative_strength_v1.py",
     "tests/test_cross_equity_adaptive.py",
     "tests/test_descriptive_dhan_opportunities.py",
     "tests/test_exploratory_dhan_timing.py",
@@ -92,6 +96,8 @@ SUPPORT_FILES = [
     "tools/dhan_oauth_callback.py",
     "tools/repo-context.ps1",
     "tools/repo_context.py",
+    "tools/evaluate_opening_reversal_v1.py",
+    "tools/evaluate_weekly_relative_strength_v1.py",
 ]
 
 
