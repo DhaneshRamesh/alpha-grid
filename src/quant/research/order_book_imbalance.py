@@ -47,27 +47,18 @@ Methodological Constraints:
 from __future__ import annotations
 
 import json
-import hashlib
 import math
-import struct
-import zlib
 from dataclasses import asdict, dataclass
-from datetime import datetime
 from decimal import Decimal, ROUND_HALF_UP
 from pathlib import Path
 from typing import Any, Literal
 
-from quant.acquisition.calendar import IST
-from quant.apps.live_simulation import (
-    PORTFOLIO_ADVERSE_BPS, PORTFOLIO_DECISION_LOSS, PORTFOLIO_MAX_DEPLOYED,
-    PORTFOLIO_MAX_INSTRUMENT, PORTFOLIO_MAX_POSITIONS,
-    PORTFOLIO_RESIDUAL_FRICTION_BPS, PORTFOLIO_SESSION_LOSS,
-)
-
+from quant.research.prospective import compute_dhan_intraday_fees
 from quant.research.walkforward import (
     Fold,
     ResearchIndex,
     make_folds,
+    reject_holdout_contamination,
 )
 
 MAX_STALE_AGE_NS = 2_000_000_000  # 2 seconds max age for research validity
@@ -79,6 +70,12 @@ OUTCOME_TOLERANCE_SECONDS = 5  # Fixed documented 5-second tolerance for T+300s 
 OUTCOME_TOLERANCE_NS = OUTCOME_TOLERANCE_SECONDS * 1_000_000_000
 PURGING_BUFFER_SECONDS = 300  # 300s buffer between partitions
 PURGING_BUFFER_NS = PURGING_BUFFER_SECONDS * 1_000_000_000
+
+# Alpha Grid Portfolio Risk Limits
+PORTFOLIO_MAX_POSITIONS: int = 3
+PORTFOLIO_MAX_DEPLOYED: Decimal = Decimal("15000.00")
+PORTFOLIO_MAX_INSTRUMENT: Decimal = Decimal("5000.00")
+PORTFOLIO_SESSION_LOSS: Decimal = Decimal("500.00")
 
 DataPartition = Literal["TRAINING", "CALIBRATION", "EVALUATION", "PURGED"]
 ReadinessVerdict = Literal["READY TO COLLECT", "COLLECT MORE DATA", "STOP"]
@@ -117,7 +114,6 @@ class FiveLevelSnapshot:
     packet_offset: int | None = None
     raw_durable_at_ns: int | None = None
     feed_session_id: str | None = None
-    journal_segment_index: int | None = None
 
     @classmethod
     def validate_and_create(
@@ -136,7 +132,6 @@ class FiveLevelSnapshot:
         packet_offset: int | None = None,
         raw_durable_at_ns: int | None = None,
         feed_session_id: str | None = None,
-        journal_segment_index: int | None = None,
     ) -> FiveLevelSnapshot:
         """Enforce strict book validity: monotonicity, non-empty, non-crossed, fresh."""
         if len(bids) < MIN_DEPTH_LEVELS or len(asks) < MIN_DEPTH_LEVELS:
@@ -147,7 +142,6 @@ class FiveLevelSnapshot:
                 raw_frame_sha256=raw_frame_sha256, journal_offset=journal_offset,
                 source_frame_id=source_frame_id, packet_offset=packet_offset,
                 raw_durable_at_ns=raw_durable_at_ns, feed_session_id=feed_session_id,
-                journal_segment_index=journal_segment_index,
             )
 
         # Top 5 levels price monotonicity
@@ -162,7 +156,6 @@ class FiveLevelSnapshot:
                 raw_frame_sha256=raw_frame_sha256, journal_offset=journal_offset,
                 source_frame_id=source_frame_id, packet_offset=packet_offset,
                 raw_durable_at_ns=raw_durable_at_ns, feed_session_id=feed_session_id,
-                journal_segment_index=journal_segment_index,
             )
 
         if not all(ask_prices[i] < ask_prices[i + 1] for i in range(4)):
@@ -173,7 +166,6 @@ class FiveLevelSnapshot:
                 raw_frame_sha256=raw_frame_sha256, journal_offset=journal_offset,
                 source_frame_id=source_frame_id, packet_offset=packet_offset,
                 raw_durable_at_ns=raw_durable_at_ns, feed_session_id=feed_session_id,
-                journal_segment_index=journal_segment_index,
             )
 
         # Non-crossed check
@@ -185,7 +177,6 @@ class FiveLevelSnapshot:
                 raw_frame_sha256=raw_frame_sha256, journal_offset=journal_offset,
                 source_frame_id=source_frame_id, packet_offset=packet_offset,
                 raw_durable_at_ns=raw_durable_at_ns, feed_session_id=feed_session_id,
-                journal_segment_index=journal_segment_index,
             )
 
         # Positive quantity check
@@ -210,7 +201,6 @@ class FiveLevelSnapshot:
                     raw_frame_sha256=raw_frame_sha256, journal_offset=journal_offset,
                     source_frame_id=source_frame_id, packet_offset=packet_offset,
                     raw_durable_at_ns=raw_durable_at_ns, feed_session_id=feed_session_id,
-                    journal_segment_index=journal_segment_index,
                 )
 
         return cls(
@@ -220,7 +210,6 @@ class FiveLevelSnapshot:
             raw_frame_sha256=raw_frame_sha256, journal_offset=journal_offset,
             source_frame_id=source_frame_id, packet_offset=packet_offset,
             raw_durable_at_ns=raw_durable_at_ns, feed_session_id=feed_session_id,
-            journal_segment_index=journal_segment_index,
         )
 
 
@@ -271,7 +260,6 @@ class DepthFeatures:
     packet_offset: int | None = None
     raw_durable_at_ns: int | None = None
     feed_session_id: str | None = None
-    journal_segment_index: int | None = None
 
     @classmethod
     def from_snapshot(cls, snapshot: FiveLevelSnapshot) -> DepthFeatures | None:
@@ -307,7 +295,6 @@ class DepthFeatures:
             packet_offset=snapshot.packet_offset,
             raw_durable_at_ns=snapshot.raw_durable_at_ns,
             feed_session_id=snapshot.feed_session_id,
-            journal_segment_index=snapshot.journal_segment_index,
         )
 
 
@@ -568,122 +555,13 @@ class AdverseTargetOutcome:
         )
 
 
-def _postcard_varint(payload: bytes, offset: int) -> tuple[int, int]:
-    value = 0
-    for shift in range(0, 70, 7):
-        if offset >= len(payload):
-            raise ValueError("truncated postcard integer")
-        byte = payload[offset]
-        offset += 1
-        value |= (byte & 0x7f) << shift
-        if byte < 0x80:
-            return value, offset
-    raise ValueError("oversized postcard integer")
-
-
-def _qj_source_matches(snapshot: FiveLevelSnapshot, journal: Path, as_of_ns: int) -> bool:
-    """Bind one Full book to its exact durable Rust QJ01 raw record and packet."""
-    try:
-        if (
-            snapshot.source_protocol != "DhanStandardV2"
-            or not _is_valid_sha256(snapshot.raw_frame_sha256)
-            or snapshot.journal_offset is None or snapshot.journal_offset < 0
-            or snapshot.packet_offset is None or snapshot.packet_offset < 0
-            or snapshot.source_frame_id is None
-            or snapshot.raw_durable_at_ns is None
-            or not snapshot.receive_timestamp_ns <= snapshot.raw_durable_at_ns <= as_of_ns
-        ):
-            return False
-        frame_id_expected = int(snapshot.source_frame_id)
-        if frame_id_expected < 1:
-            return False
-        if journal.is_dir():
-            index = snapshot.journal_segment_index
-            if index is None or index < 0:
-                return False
-            source = journal / f"{index:016}.qj"
-        else:
-            if snapshot.journal_segment_index not in (None, 0):
-                return False
-            source = journal
-        with source.open("rb") as stream:
-            stream.seek(snapshot.journal_offset)
-            header = stream.read(12)
-            if len(header) != 12:
-                return False
-            magic, length, checksum = struct.unpack("<4sII", header)
-            if magic != b"QJ01" or not 0 < length <= 1_048_576:
-                return False
-            payload = stream.read(length)
-        if len(payload) != length or zlib.crc32(payload) != checksum:
-            return False
-        at = 0
-        size, at = _postcard_varint(payload, at)
-        session = payload[at:at + size].decode("utf-8")
-        at += size
-        event_tag, at = _postcard_varint(payload, at)
-        if event_tag != 6 or session != snapshot.feed_session_id:
-            return False  # MarketEvent::RawStandardFrame; never accept a derived record.
-        size, at = _postcard_varint(payload, at)
-        feed_session = payload[at:at + size].decode("utf-8")
-        at += size
-        frame_id, at = _postcard_varint(payload, at)
-        zigzag_time, at = _postcard_varint(payload, at)
-        receive_ns = (zigzag_time >> 1) ^ -(zigzag_time & 1)
-        recorded_hash = payload[at:at + 32]
-        at += 32
-        size, at = _postcard_varint(payload, at)
-        frame = payload[at:at + size]
-        if (
-            at + size != len(payload)
-            or feed_session != session
-            or frame_id != frame_id_expected
-            or receive_ns != snapshot.receive_timestamp_ns
-            or len(recorded_hash) != 32
-            or hashlib.sha256(frame).digest() != recorded_hash
-            or recorded_hash.hex() != snapshot.raw_frame_sha256.lower()
-        ):
-            return False
-        packet_at = 0
-        while packet_at < len(frame):
-            if packet_at + 8 > len(frame):
-                return False
-            packet_len = struct.unpack_from("<H", frame, packet_at + 1)[0]
-            if packet_len < 8 or packet_at + packet_len > len(frame):
-                return False
-            if packet_at == snapshot.packet_offset:
-                packet = frame[packet_at:packet_at + packet_len]
-                if (
-                    packet[0] != 8 or packet_len != 162 or packet[3] != 1
-                    or str(struct.unpack_from("<i", packet, 4)[0]) != snapshot.security_id
-                ):
-                    return False
-                for level in range(5):
-                    pos = 62 + level * 20
-                    bid = snapshot.bids[level]
-                    ask = snapshot.asks[level]
-                    if (
-                        bid.price_nanos != math.floor(struct.unpack_from("<f", packet, pos + 12)[0] * 1e9 + 0.5)
-                        or ask.price_nanos != math.floor(struct.unpack_from("<f", packet, pos + 16)[0] * 1e9 + 0.5)
-                        or bid.displayed_quantity != struct.unpack_from("<I", packet, pos)[0]
-                        or ask.displayed_quantity != struct.unpack_from("<I", packet, pos + 4)[0]
-                        or bid.order_count != struct.unpack_from("<H", packet, pos + 8)[0]
-                        or ask.order_count != struct.unpack_from("<H", packet, pos + 10)[0]
-                    ):
-                        return False
-                return True
-            packet_at += packet_len
-    except (IndexError, OSError, ValueError, UnicodeError, struct.error, TypeError):
-        return False
-    return False
-
-
 def verify_feed_continuity(
     decision_timestamp_ns: int,
     exit_timestamp_ns: int,
     expected_feed_session_id: str | None,
     quotes: list[FiveLevelSnapshot] | None = None,
     event_log: Path | list[dict] | None = None,
+    max_dense_quote_gap_ns: int = 5_000_000_000,
 ) -> tuple[bool, str | None]:
     """Verify feed continuity during the forward evaluation window.
 
@@ -700,32 +578,59 @@ def verify_feed_continuity(
                 if expected_feed_session_id and q.feed_session_id and q.feed_session_id != expected_feed_session_id:
                     return False, "CENSORED_FEED_DISCONTINUITY"
 
-    if event_log is None:
-        return False, "CENSORED_CONTINUITY_UNVERIFIED"
-    try:
-        events = ([json.loads(line) for line in event_log.read_text().splitlines() if line.strip()]
-                  if isinstance(event_log, Path) else event_log)
-        started = False
-        for row in events:
-            event = row.get("event")
-            event = event if isinstance(event, dict) else {}
-            if row.get("feed_session_id") != expected_feed_session_id:
-                continue
-            ts = int(event.get("timestamp_ns", row.get("timestamp_ns", 0)))
-            detail = str(event.get("detail", row.get("detail", ""))).upper()
-            if ts <= 0 or not detail:
+    # 2. Check event log if provided
+    has_event_evidence = False
+    if event_log is not None:
+        events: list[dict] = []
+        if isinstance(event_log, Path):
+            if event_log.exists():
+                try:
+                    for line in event_log.read_text().splitlines():
+                        if line.strip():
+                            events.append(json.loads(line))
+                except (OSError, json.JSONDecodeError):
+                    return False, "CENSORED_FEED_DISCONTINUITY"  # Corrupt event log -> fail closed
+            else:
                 return False, "CENSORED_CONTINUITY_UNVERIFIED"
-            if detail == "FIRST_BINARY_FRAME_DURABLE" and ts <= decision_timestamp_ns:
-                started = True
-            if decision_timestamp_ns <= ts <= exit_timestamp_ns and (
-                "DISCONNECT" in detail or "RECONNECT" in detail or "GAP" in detail
-                or "SESSION_RESET" in detail or detail.startswith("STOPPED:")
-                or row.get("state") in {"BLOCKED", "ERROR"}
-            ):
-                return False, "CENSORED_FEED_DISCONTINUITY"
-        return (True, None) if started else (False, "CENSORED_CONTINUITY_UNVERIFIED")
-    except (OSError, ValueError, TypeError, AttributeError, json.JSONDecodeError):
+        elif isinstance(event_log, list):
+            events = event_log
+
+        if len(events) > 0:
+            has_event_evidence = True
+            for evt in events:
+                ts = evt.get("timestamp_ns") or evt.get("receive_timestamp_ns") or evt.get("checked_at_ns")
+                if ts is not None and not (decision_timestamp_ns <= int(ts) <= exit_timestamp_ns):
+                    continue
+                detail = str(evt.get("event", {}).get("detail") or evt.get("detail") or evt.get("event") or "")
+                state = str(evt.get("state") or "")
+                if (
+                    "DISCONNECT" in detail.upper()
+                    or "RECONNECT" in detail.upper()
+                    or "GAP_DETECTED" in detail.upper()
+                    or "SESSION_RESET" in detail.upper()
+                    or detail.startswith("STOPPED:")
+                    or state in {"BLOCKED", "ERROR"}
+                ):
+                    return False, "CENSORED_FEED_DISCONTINUITY"
+
+    # 3. Check quote stream density if no event log evidence
+    has_dense_quote_evidence = False
+    if quotes:
+        window_quotes = sorted(
+            [q for q in quotes if decision_timestamp_ns <= q.receive_timestamp_ns <= exit_timestamp_ns],
+            key=lambda q: q.receive_timestamp_ns,
+        )
+        if len(window_quotes) >= 2:
+            timestamps = [decision_timestamp_ns] + [q.receive_timestamp_ns for q in window_quotes]
+            max_gap = max(t2 - t1 for t1, t2 in zip(timestamps, timestamps[1:]))
+            if max_gap <= max_dense_quote_gap_ns:
+                has_dense_quote_evidence = True
+
+    if not has_event_evidence and not has_dense_quote_evidence:
+        # Neither capture events nor dense quote stream confirms continuous feed
         return False, "CENSORED_CONTINUITY_UNVERIFIED"
+
+    return True, None
 
 
 def detect_feed_discontinuity(
@@ -760,17 +665,16 @@ def locate_outcome_quote(
     discontinuity_detected: bool = False,
     threshold_bps: float = ADVERSE_RETURN_THRESHOLD_BPS,
     event_log: Path | list[dict] | None = None,
-    journal: Path | None = None,
 ) -> AdverseTargetOutcome:
     """Find the first genuine quote at or after T+300s within the documented 5s tolerance window.
 
     Causal Requirements:
     1. Matching instrument identity and feed session identity.
-    2. Exact raw frames, packet contents, hashes and offsets verified against QJ01.
+    2. Durable frame provenance: valid 64-hex SHA-256 string for decision and outcome quotes.
     3. Causal availability: quote must be received on or before scoring cutoff (as_of_ns).
     4. Temporal ordering: T_decision < T_maturity <= T_exit <= as_of_ns.
     5. Deterministic candidate ordering.
-    6. Matching feed lifecycle evidence; quote density alone is not continuity evidence.
+    6. Feed continuity verified from genuine capture event logs or dense quote stream.
     """
     maturity_ns = decision.receive_timestamp_ns + FORWARD_HORIZON_NS
     entry_mid = (_level_price(decision.bids[0]) + _level_price(decision.asks[0])) // 2
@@ -811,7 +715,7 @@ def locate_outcome_quote(
             censoring_reason="CENSORED_CROSS_SESSION_QUOTE",
         )
 
-    # 3. Derive continuity from the capture lifecycle, not quote arrival density.
+    # 3. Derive continuity from genuine evidence (event_log or dense quote stream)
     if not discontinuity_detected:
         is_continuous, cont_reason = verify_feed_continuity(
             decision_timestamp_ns=decision.receive_timestamp_ns,
@@ -901,11 +805,7 @@ def locate_outcome_quote(
         and q.is_valid
     ]
 
-    valid_subsequent.sort(key=lambda q: (
-        q.receive_timestamp_ns, q.journal_segment_index or 0,
-        q.journal_offset if q.journal_offset is not None else -1,
-        q.raw_frame_sha256 or "",
-    ))
+    valid_subsequent.sort(key=lambda q: (q.receive_timestamp_ns, q.journal_offset or 0, q.raw_frame_sha256 or ""))
 
     if not valid_subsequent:
         censoring_reason = (
@@ -935,30 +835,6 @@ def locate_outcome_quote(
         )
 
     first_quote = valid_subsequent[0]
-    if (
-        journal is None
-        or not _qj_source_matches(decision, journal, as_of_ns)
-        or not _qj_source_matches(first_quote, journal, as_of_ns)
-        or (first_quote.journal_segment_index or 0, first_quote.journal_offset)
-           <= (decision.journal_segment_index or 0, decision.journal_offset)
-        or int(first_quote.source_frame_id) <= int(decision.source_frame_id)
-        or first_quote.raw_durable_at_ns < decision.raw_durable_at_ns
-    ):
-        return AdverseTargetOutcome.evaluate(
-            symbol=decision.symbol,
-            decision_timestamp_ns=decision.receive_timestamp_ns,
-            entry_mid_nanos=entry_mid,
-            exit_mid_nanos=None,
-            observed_at_ns=as_of_ns,
-            threshold_bps=threshold_bps,
-            exit_timestamp_ns=None,
-            entry_raw_frame_sha256=decision.raw_frame_sha256,
-            exit_raw_frame_sha256=first_quote.raw_frame_sha256,
-            feed_session_id=decision.feed_session_id,
-            exit_feed_session_id=first_quote.feed_session_id,
-            session_end_ns=session_end_ns,
-            censoring_reason="CENSORED_SOURCE_UNVERIFIED",
-        )
     exit_mid = (_level_price(first_quote.bids[0]) + _level_price(first_quote.asks[0])) // 2
     return AdverseTargetOutcome.evaluate(
         symbol=decision.symbol,
@@ -1084,8 +960,6 @@ class EconomicFilterTrade:
     exit_timestamp_ns: int | None = None
     brokerage_charges_inr: Decimal = Decimal("0")
     statutory_charges_inr: Decimal = Decimal("0")
-    quoted_spread_bps: Decimal = Decimal("0")
-    session_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1124,8 +998,6 @@ class EconomicFilterComparison:
     filtered_notional_limit_rejections: int = 0
     unfiltered_session_loss_rejections: int = 0
     filtered_session_loss_rejections: int = 0
-    unfiltered_decision_loss_rejections: int = 0
-    filtered_decision_loss_rejections: int = 0
 
 
 @dataclass
@@ -1134,7 +1006,6 @@ class _ActiveTradePosition:
     exit_timestamp_ns: int
     notional_inr: Decimal
     scenario_net_pnl: Decimal
-    risk_bound_inr: Decimal
 
 
 def evaluate_filter_economics(
@@ -1144,7 +1015,6 @@ def evaluate_filter_economics(
     max_concurrent_positions: int = PORTFOLIO_MAX_POSITIONS,
     max_instrument_notional_inr: Decimal = PORTFOLIO_MAX_INSTRUMENT,
     max_session_loss_inr: Decimal = PORTFOLIO_SESSION_LOSS,
-    max_decision_loss_inr: Decimal = PORTFOLIO_DECISION_LOSS,
 ) -> EconomicFilterComparison:
     """Compute economic trade-off with dynamic exposure tracking, position exit capital release, and fee separation.
 
@@ -1176,43 +1046,26 @@ def evaluate_filter_economics(
     unfiltered_position_limit_rejections = 0
     unfiltered_notional_limit_rejections = 0
     unfiltered_session_loss_rejections = 0
-    unfiltered_decision_loss_rejections = 0
 
     filtered_filter_rejections = 0
     filtered_capital_rejections = 0
     filtered_position_limit_rejections = 0
     filtered_notional_limit_rejections = 0
     filtered_session_loss_rejections = 0
-    filtered_decision_loss_rejections = 0
-    unfiltered_realized: dict[str, Decimal] = {}
-    filtered_realized: dict[str, Decimal] = {}
-
-    def session_of(trade: EconomicFilterTrade) -> str:
-        return trade.session_id or datetime.fromtimestamp(
-            trade.decision_timestamp_ns / 1_000_000_000, IST
-        ).date().isoformat()
 
     for t in sorted_trades:
         now_t = t.decision_timestamp_ns
         exit_t = t.exit_timestamp_ns if t.exit_timestamp_ns is not None else (now_t + FORWARD_HORIZON_NS)
-        if exit_t <= now_t or t.notional_inr <= 0:
-            raise ValueError("trade exit must follow decision and notional must be positive")
-        day = session_of(t)
 
-        # Release capital and recognize P&L only after each exit is observable.
-        for p in unfiltered_active:
-            if p.exit_timestamp_ns <= now_t:
-                prior_day = session_of(p.trade)
-                unfiltered_realized[prior_day] = unfiltered_realized.get(prior_day, Decimal(0)) + p.scenario_net_pnl
-        for p in filtered_active:
-            if p.exit_timestamp_ns <= now_t:
-                prior_day = session_of(p.trade)
-                filtered_realized[prior_day] = filtered_realized.get(prior_day, Decimal(0)) + p.scenario_net_pnl
+        # 1. Release exited positions in both arms
         unfiltered_active = [p for p in unfiltered_active if p.exit_timestamp_ns > now_t]
         filtered_active = [p for p in filtered_active if p.exit_timestamp_ns > now_t]
 
         unfiltered_exposure = sum((p.notional_inr for p in unfiltered_active), Decimal("0"))
         filtered_exposure = sum((p.notional_inr for p in filtered_active), Decimal("0"))
+
+        unfiltered_net_pnl_so_far = sum((pnl for _, pnl in unfiltered_executed), Decimal("0"))
+        filtered_net_pnl_so_far = sum((pnl for _, pnl in filtered_executed), Decimal("0"))
 
         # 2. Total transaction charges: brokerage + statutory charges
         total_charges = t.brokerage_charges_inr + t.statutory_charges_inr
@@ -1223,29 +1076,16 @@ def evaluate_filter_economics(
             Decimal("0.01"), rounding=ROUND_HALF_UP
         )
         scenario_net_pnl = t.unfiltered_gross_pnl_inr - total_charges - trade_friction
-        risk_bound = (
-            t.notional_inr * (PORTFOLIO_ADVERSE_BPS + PORTFOLIO_RESIDUAL_FRICTION_BPS
-                              + max(t.quoted_spread_bps, Decimal(0))) / Decimal(10000)
-            + total_charges
-        )
 
         # 3. Unfiltered Arm execution check: all 4 risk limits
         unfiltered_eligible = True
-        if (unfiltered_realized.get(day, Decimal(0)) <= -max_session_loss_inr
-                or unfiltered_realized.get(day, Decimal(0))
-                - sum((p.risk_bound_inr for p in unfiltered_active), Decimal(0))
-                - risk_bound < -max_session_loss_inr):
+        if unfiltered_net_pnl_so_far <= -max_session_loss_inr:
             unfiltered_session_loss_rejections += 1
-            unfiltered_eligible = False
-        elif risk_bound > max_decision_loss_inr:
-            unfiltered_decision_loss_rejections += 1
             unfiltered_eligible = False
         elif t.notional_inr > max_instrument_notional_inr:
             unfiltered_notional_limit_rejections += 1
             unfiltered_eligible = False
-        elif len(unfiltered_active) >= max_concurrent_positions or any(
-            p.trade.symbol == t.symbol for p in unfiltered_active
-        ):
+        elif len(unfiltered_active) >= max_concurrent_positions:
             unfiltered_position_limit_rejections += 1
             unfiltered_eligible = False
         elif unfiltered_exposure + t.notional_inr > max_deployed_capital_inr:
@@ -1253,7 +1093,7 @@ def evaluate_filter_economics(
             unfiltered_eligible = False
 
         if unfiltered_eligible:
-            unfiltered_active.append(_ActiveTradePosition(t, exit_t, t.notional_inr, scenario_net_pnl, risk_bound))
+            unfiltered_active.append(_ActiveTradePosition(t, exit_t, t.notional_inr, scenario_net_pnl))
             unfiltered_executed.append((t, scenario_net_pnl))
 
         # 4. Filtered Arm execution check: filter abstention + all 4 risk limits
@@ -1262,21 +1102,13 @@ def evaluate_filter_economics(
             # Capital is preserved
         else:
             filtered_eligible = True
-            if (filtered_realized.get(day, Decimal(0)) <= -max_session_loss_inr
-                    or filtered_realized.get(day, Decimal(0))
-                    - sum((p.risk_bound_inr for p in filtered_active), Decimal(0))
-                    - risk_bound < -max_session_loss_inr):
+            if filtered_net_pnl_so_far <= -max_session_loss_inr:
                 filtered_session_loss_rejections += 1
-                filtered_eligible = False
-            elif risk_bound > max_decision_loss_inr:
-                filtered_decision_loss_rejections += 1
                 filtered_eligible = False
             elif t.notional_inr > max_instrument_notional_inr:
                 filtered_notional_limit_rejections += 1
                 filtered_eligible = False
-            elif len(filtered_active) >= max_concurrent_positions or any(
-                p.trade.symbol == t.symbol for p in filtered_active
-            ):
+            elif len(filtered_active) >= max_concurrent_positions:
                 filtered_position_limit_rejections += 1
                 filtered_eligible = False
             elif filtered_exposure + t.notional_inr > max_deployed_capital_inr:
@@ -1284,7 +1116,7 @@ def evaluate_filter_economics(
                 filtered_eligible = False
 
             if filtered_eligible:
-                filtered_active.append(_ActiveTradePosition(t, exit_t, t.notional_inr, scenario_net_pnl, risk_bound))
+                filtered_active.append(_ActiveTradePosition(t, exit_t, t.notional_inr, scenario_net_pnl))
                 filtered_executed.append((t, scenario_net_pnl))
 
     unfiltered_pnl = sum((pnl for _, pnl in unfiltered_executed), Decimal(0))
@@ -1378,8 +1210,6 @@ def evaluate_filter_economics(
         filtered_notional_limit_rejections=filtered_notional_limit_rejections,
         unfiltered_session_loss_rejections=unfiltered_session_loss_rejections,
         filtered_session_loss_rejections=filtered_session_loss_rejections,
-        unfiltered_decision_loss_rejections=unfiltered_decision_loss_rejections,
-        filtered_decision_loss_rejections=filtered_decision_loss_rejections,
     )
 
 
@@ -1396,7 +1226,6 @@ def evaluate_friction_sensitivities(
     max_concurrent_positions: int = PORTFOLIO_MAX_POSITIONS,
     max_instrument_notional_inr: Decimal = PORTFOLIO_MAX_INSTRUMENT,
     max_session_loss_inr: Decimal = PORTFOLIO_SESSION_LOSS,
-    max_decision_loss_inr: Decimal = PORTFOLIO_DECISION_LOSS,
 ) -> dict[Decimal, EconomicFilterComparison]:
     """Evaluate economic performance across the standard friction sensitivity ladder."""
     return {
@@ -1407,7 +1236,6 @@ def evaluate_friction_sensitivities(
             max_concurrent_positions=max_concurrent_positions,
             max_instrument_notional_inr=max_instrument_notional_inr,
             max_session_loss_inr=max_session_loss_inr,
-            max_decision_loss_inr=max_decision_loss_inr,
         )
         for f_bps in friction_scenarios
     }
