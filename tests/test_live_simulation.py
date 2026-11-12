@@ -5,11 +5,15 @@ from decimal import Decimal
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
+import pytest
+
 from quant.apps.live_simulation import (
+    PORTFOLIO_DYNAMIC_VERSION,
     PORTFOLIO_VERSION,
     Ledger,
     PortfolioSimulator,
     Simulator,
+    sizing_comparison_report,
 )
 
 
@@ -63,7 +67,7 @@ def _snapshot(
 
 
 def _portfolio_snapshot(when: datetime, quotes: dict[str, tuple[int, int, int]],
-                        *, unverified: bool = False) -> dict:
+                        *, unverified: bool = False, session_id: str = "fixture-connection") -> dict:
     stamp = int(when.timestamp() * 1_000_000_000)
     rows = []
     for sid in range(1, 26):
@@ -77,7 +81,7 @@ def _portfolio_snapshot(when: datetime, quotes: dict[str, tuple[int, int, int]],
                 "source_receive_timestamp_ns": str(stamp),
                 "best_bid_price_nanos": str(bid),
                 "best_ask_price_nanos": str(ask),
-                "provenance": {"feed_session_id": "fixture-connection",
+                "provenance": {"feed_session_id": session_id,
                                "arrival_ordinal": str(ordinal),
                                "source_protocol": "DhanStandardV2",
                                "source_frame_id": str(ordinal),
@@ -87,7 +91,7 @@ def _portfolio_snapshot(when: datetime, quotes: dict[str, tuple[int, int, int]],
         rows.append({"instrument": {"security_id": str(sid),
                                     "symbol": f"FIXTURE{sid}"}, "market": market})
     return {"mode": "OBSERVE_ONLY", "feed_connected": True,
-            "journal_blocked": False, "session_id": "fixture-connection",
+            "journal_blocked": False, "session_id": session_id,
             "no_trade_reasons": ["SESSION_CLASSIFICATION_UNVERIFIED"] if unverified else [],
             "instruments": rows}
 
@@ -135,6 +139,107 @@ def test_portfolio_concurrent_buy_reduce_hold_sell_and_restart(tmp_path: Path) -
                      int(when.timestamp() * 1_000_000_000))
     assert len(recovered_ledger.events) == count
     recovered_ledger.close()
+
+
+def _full_sizing_snapshot(when: datetime, price: int, ordinal: int,
+                          ask_quantity: int = 80) -> dict:
+    bid = price * 1_000_000_000
+    ask = bid + 10_000_000
+    snap = _portfolio_snapshot(when, {"1": (bid, ask, ordinal)})
+    item = snap["instruments"][0]
+    market = item["market"]
+    market["packet_kind"] = "FULL"
+    provenance = market["provenance"]
+    bids = [{"price_nanos": str(bid - index * 1_000_000_000),
+             "displayed_quantity": "100", "order_count": 2} for index in range(5)]
+    asks = [{"price_nanos": str(ask + index * 1_000_000_000),
+             "displayed_quantity": str(ask_quantity if index == 0 else 100),
+             "order_count": 2} for index in range(5)]
+    item["depth"] = {"source": "STANDARD_FULL", "derived_pairing": False,
+                     "receive_timestamp_ns": market["source_receive_timestamp_ns"],
+                     "provenance": dict(provenance), "bids": bids, "asks": asks,
+                     "book_metrics": {"bid_quantity": "500",
+                                      "ask_quantity": str(ask_quantity + 400)}}
+    return snap
+
+
+def test_paired_dynamic_sizing_shrinks_only_and_recovers_without_duplicate(tmp_path: Path) -> None:
+    base_path, dynamic_path = tmp_path / "base.jsonl", tmp_path / "dynamic.jsonl"
+    base_ledger = Ledger(base_path, PORTFOLIO_VERSION)
+    dynamic_ledger = Ledger(dynamic_path, PORTFOLIO_DYNAMIC_VERSION)
+    base = PortfolioSimulator(base_ledger, _universe())
+    dynamic = PortfolioSimulator(dynamic_ledger, _universe(), sizing_policy="DYNAMIC_V1")
+    base.log_comparison_opportunities = dynamic.log_comparison_opportunities = True
+    start = datetime(2026, 11, 3, 9, 45, tzinfo=ZoneInfo("Asia/Kolkata"))
+    for minute, price in ((0, 100), (1, 100), (5, 100), (10, 100), (15, 101),
+                          (16, 98)):
+        when = start + timedelta(minutes=minute)
+        snap = _full_sizing_snapshot(when, price, minute + 1)
+        stamp = int(when.timestamp() * 1_000_000_000)
+        base.ingest(snap, stamp)
+        dynamic.ingest(snap, stamp)
+    base_buy = next(event for event in base_ledger.events if event["kind"] == "BUY")
+    dynamic_buy = next(event for event in dynamic_ledger.events if event["kind"] == "BUY")
+    assert base_buy["shares"] == 49
+    assert 0 < dynamic_buy["shares"] <= 20 < base_buy["shares"]
+    assert not base.positions and not dynamic.positions
+    report = sizing_comparison_report(base_ledger, dynamic_ledger)
+    assert report["status"] == "INSUFFICIENT_PROSPECTIVE_SESSIONS"
+    assert report["paired_decision_inputs"] == 2
+    assert report["paired_candidate_signal_count"] == 1
+    assert report["independent_opportunity_sessions"] == 1
+    for arm in (report["baseline"], report["dynamic"]):
+        assert Decimal(arm["net_reference_inr"]) == (
+            Decimal(arm["gross_reference_inr"]) - Decimal(arm["published_fees_inr"])
+            - Decimal(arm["assumed_residual_friction_inr"]))
+        assert arm["actual_fills"] == 0
+    counts = len(base_ledger.events), len(dynamic_ledger.events)
+    base_ledger.close(); dynamic_ledger.close()
+    recovered_base_ledger = Ledger(base_path, PORTFOLIO_VERSION)
+    recovered_dynamic_ledger = Ledger(dynamic_path, PORTFOLIO_DYNAMIC_VERSION)
+    recovered_base = PortfolioSimulator(recovered_base_ledger, _universe())
+    recovered_dynamic = PortfolioSimulator(recovered_dynamic_ledger, _universe(),
+                                           sizing_policy="DYNAMIC_V1")
+    when = start + timedelta(minutes=16)
+    snap = _full_sizing_snapshot(when, 98, 17)
+    stamp = int(when.timestamp() * 1_000_000_000)
+    recovered_base.ingest(snap, stamp); recovered_dynamic.ingest(snap, stamp)
+    assert (len(recovered_base_ledger.events), len(recovered_dynamic_ledger.events)) == counts
+    assert sizing_comparison_report(recovered_base_ledger, recovered_dynamic_ledger) == report
+    next_day = (start + timedelta(days=1)).date().isoformat()
+    next(event for event in recovered_base_ledger.events if event["kind"] == "SELL")["day"] = next_day
+    censored = sizing_comparison_report(recovered_base_ledger, recovered_dynamic_ledger)
+    assert censored["status"] == "CROSS_SESSION_EXIT_CENSORED"
+    assert censored["baseline"]["cross_session_exits"] == 1
+    assert censored["paired_mean_incremental_net_inr_ci95"] == report["paired_mean_incremental_net_inr_ci95"]
+    altered = next(event for event in recovered_dynamic_ledger.events if event["kind"] == "OBSERVED")
+    altered["book_asks"][0]["displayed_quantity"] = "1"
+    with pytest.raises(ValueError, match="source streams differ"):
+        sizing_comparison_report(recovered_base_ledger, recovered_dynamic_ledger)
+    recovered_base_ledger.close(); recovered_dynamic_ledger.close()
+
+
+def test_dynamic_policy_abstains_without_complete_fresh_standard_book(tmp_path: Path) -> None:
+    base_ledger = Ledger(tmp_path / "base.jsonl", PORTFOLIO_VERSION)
+    dynamic_ledger = Ledger(tmp_path / "dynamic.jsonl", PORTFOLIO_DYNAMIC_VERSION)
+    base = PortfolioSimulator(base_ledger, _universe())
+    dynamic = PortfolioSimulator(dynamic_ledger, _universe(), sizing_policy="DYNAMIC_V1")
+    base.log_comparison_opportunities = dynamic.log_comparison_opportunities = True
+    start = datetime(2026, 11, 3, 9, 45, tzinfo=ZoneInfo("Asia/Kolkata"))
+    for minute, price in ((0, 100), (1, 100), (5, 100), (10, 100), (15, 101)):
+        when = start + timedelta(minutes=minute)
+        snap = _portfolio_snapshot(when, {"1": (price * 1_000_000_000,
+                                                 price * 1_000_000_000 + 10_000_000,
+                                                 minute + 1)})
+        stamp = int(when.timestamp() * 1_000_000_000)
+        base.ingest(snap, stamp); dynamic.ingest(snap, stamp)
+    assert any(row["kind"] == "BUY" for row in base_ledger.events)
+    assert not any(row["kind"] == "BUY" for row in dynamic_ledger.events)
+    assert any(row["kind"] == "REJECT" and
+               row["reason"] == "DYNAMIC_COMPLETE_STANDARD_BOOK_UNAVAILABLE"
+               for row in dynamic_ledger.events)
+    assert sizing_comparison_report(base_ledger, dynamic_ledger)["status"] == "OPEN_VIRTUAL_POSITIONS"
+    base_ledger.close(); dynamic_ledger.close()
 
 
 def test_portfolio_validation_pending_pauses_decisions_without_rewriting_scope(tmp_path: Path) -> None:
@@ -718,3 +823,133 @@ def test_partial_final_ledger_record_fails_closed(tmp_path: Path) -> None:
         assert "partial final record" in str(exc)
     else:
         raise AssertionError("partial ledger record accepted")
+
+
+def test_portfolio_insufficient_lookback_post_restart_rejects_past_lookback_unavailable_and_flat_stock_rejects_momentum(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "portfolio-v2.jsonl"
+    ledger = Ledger(path, PORTFOLIO_VERSION)
+    sim = PortfolioSimulator(ledger, _universe())
+    start = datetime(2026, 11, 3, 9, 45, tzinfo=ZoneInfo("Asia/Kolkata"))
+
+    def make_quotes(p1: int, p2: int, ordinal: int) -> dict[str, tuple[int, int, int]]:
+        return {str(sid): ((p1 if sid == 1 else p2 if sid == 2 else 100) * 1_000_000_000,
+                           (p1 if sid == 1 else p2 if sid == 2 else 100) * 1_000_000_000 + 10_000_000,
+                           ordinal) for sid in range(1, 26)}
+
+    def tick(minutes: int, p1: int = 100, p2: int = 100, ordinal: int = 1, session: str = "session-1") -> None:
+        when = start + timedelta(minutes=minutes)
+        sim.ingest(
+            _portfolio_snapshot(when, make_quotes(p1, p2, ordinal), session_id=session),
+            int(when.timestamp() * 1_000_000_000),
+        )
+
+    # T=0 in session-1
+    tick(0, 100, 100, ordinal=1, session="session-1")
+    # T=1m in session-1 (only 1m history, must reject with PAST_LOOKBACK_UNAVAILABLE)
+    tick(1, 100, 100, ordinal=2, session="session-1")
+    rejections_1m = [e for e in ledger.events if e["kind"] == "REJECT" and "09:46" in e.get("decision_slot", "")]
+    assert len(rejections_1m) == 25
+    assert all(e["reason"] == "PAST_LOOKBACK_UNAVAILABLE" for e in rejections_1m)
+    assert not any(e["reason"] == "NO_POSITIVE_NET_MOMENTUM_PROXY" for e in rejections_1m)
+
+    # Socket restart occurs: new feed session "session-2" at T=2m
+    # First packet triggers FEED_SESSION_CHANGED gap and clears session
+    when_restart = start + timedelta(minutes=2)
+    sim.ingest(
+        _portfolio_snapshot(when_restart, make_quotes(100, 100, 1), session_id="session-2"),
+        int(when_restart.timestamp() * 1_000_000_000),
+    )
+    assert any(e["kind"] == "GAP" and e["reason"] == "FEED_SESSION_CHANGED" for e in ledger.events)
+    assert sim.feed_session is None
+
+    # Next tick in session-2 establishes new session
+    when_established = start + timedelta(minutes=2, seconds=1)
+    sim.ingest(
+        _portfolio_snapshot(when_established, make_quotes(100, 100, 2), session_id="session-2"),
+        int(when_established.timestamp() * 1_000_000_000),
+    )
+    assert sim.feed_session == "session-2"
+    assert len(sim.observations["FIXTURE1"]) == 1
+
+    # T=3m in session-2: 1 minute after restart (buffer age ~60s >= 30s)
+    # Under old defect, 60s fallback produced spurious NO_POSITIVE_NET_MOMENTUM_PROXY.
+    # Now it must strictly abstain with PAST_LOOKBACK_UNAVAILABLE.
+    when_short = start + timedelta(minutes=3)
+    sim.ingest(
+        _portfolio_snapshot(when_short, make_quotes(100, 100, 3), session_id="session-2"),
+        int(when_short.timestamp() * 1_000_000_000),
+    )
+    rejections_3m = [e for e in ledger.events if e["kind"] == "REJECT" and "09:48" in e.get("decision_slot", "")]
+    assert len(rejections_3m) == 25
+    assert all(e["reason"] == "PAST_LOOKBACK_UNAVAILABLE" for e in rejections_3m)
+    assert not any(e["reason"] == "NO_POSITIVE_NET_MOMENTUM_PROXY" for e in rejections_3m)
+
+    # T=17m 1s in session-2: exactly 15 minutes after session-2 established (09:47:01 to 10:02:01)
+    # Full 15-minute lookback is now available within session-2!
+    # Stock 1 advances +100 bps (100 -> 101): passes momentum hurdle -> BUY
+    # Stock 2 is flat (100 -> 100): genuine consolidation -> NO_POSITIVE_NET_MOMENTUM_PROXY
+    when_full = start + timedelta(minutes=17, seconds=1)
+    sim.ingest(
+        _portfolio_snapshot(when_full, make_quotes(101, 100, 4), session_id="session-2"),
+        int(when_full.timestamp() * 1_000_000_000),
+    )
+
+    decisions_17m = [e for e in ledger.events if "10:02" in e.get("decision_slot", "")]
+    buy_events = [e for e in decisions_17m if e["kind"] == "BUY"]
+    assert len(buy_events) == 1
+    assert buy_events[0]["symbol"] == "FIXTURE1"
+
+    reject_events = [e for e in decisions_17m if e["kind"] == "REJECT"]
+    assert any(e["symbol"] == "FIXTURE2" and e["reason"] == "NO_POSITIVE_NET_MOMENTUM_PROXY"
+               for e in reject_events)
+    ledger.close()
+
+
+def test_dynamic_volatility_stress_reduces_size_without_changing_signal(tmp_path: Path) -> None:
+    base_ledger = Ledger(tmp_path / "base.jsonl", PORTFOLIO_VERSION)
+    dynamic_ledger = Ledger(tmp_path / "dynamic.jsonl", PORTFOLIO_DYNAMIC_VERSION)
+    base = PortfolioSimulator(base_ledger, _universe())
+    dynamic = PortfolioSimulator(dynamic_ledger, _universe(), sizing_policy="DYNAMIC_V1")
+    base.log_comparison_opportunities = dynamic.log_comparison_opportunities = True
+    start = datetime(2026, 11, 3, 9, 45, tzinfo=ZoneInfo("Asia/Kolkata"))
+    for minute, price in ((0, 100), (1, 110), (5, 90), (10, 105), (15, 101)):
+        when = start + timedelta(minutes=minute)
+        snap = _full_sizing_snapshot(when, price, minute + 1, ask_quantity=1000)
+        stamp = int(when.timestamp() * 1_000_000_000)
+        base.ingest(snap, stamp); dynamic.ingest(snap, stamp)
+    base_buy = next(event for event in base_ledger.events if event["kind"] == "BUY")
+    dynamic_buy = next(event for event in dynamic_ledger.events if event["kind"] == "BUY")
+    assert 0 < dynamic_buy["shares"] < base_buy["shares"]
+    assert dynamic_buy["shares"] < 250  # Depth cap is loose; volatility sets this bound.
+    sized = next(event for event in dynamic_ledger.events if event["kind"] == "SIZING")
+    assert Decimal(sized["trailing_volatility_15m_bps"]) > 100
+    assert Decimal(dynamic_buy["risk_bound_inr"]) == Decimal(sized["volatility_stress_bound_inr"])
+    assert dynamic._open_risk() <= Decimal("500")
+    assert sizing_comparison_report(base_ledger, dynamic_ledger)["paired_candidate_signal_count"] == 1
+    base_ledger.close(); dynamic_ledger.close()
+
+
+def test_dynamic_rejects_missing_timestamp_incomplete_or_crossed_book(tmp_path: Path) -> None:
+    ledger = Ledger(tmp_path / "dynamic.jsonl", PORTFOLIO_DYNAMIC_VERSION)
+    sim = PortfolioSimulator(ledger, _universe(), sizing_policy="DYNAMIC_V1")
+    start = datetime(2026, 11, 3, 9, 45, tzinfo=ZoneInfo("Asia/Kolkata"))
+    for minute, defect in ((0, None), (15, "incomplete"), (16, None),
+                           (17, "crossed"), (18, "timestamp")):
+        when = start + timedelta(minutes=minute)
+        snap = _full_sizing_snapshot(when, 100 if minute == 0 else 101, minute + 1)
+        item = snap["instruments"][0]
+        if defect == "incomplete":
+            item["depth"]["asks"].pop()
+        elif defect == "crossed":
+            item["market"]["best_ask_price_nanos"] = item["market"]["best_bid_price_nanos"]
+        elif defect == "timestamp":
+            del item["market"]["provenance"]["raw_durable_at_ns"]
+        stamp = int(when.timestamp() * 1_000_000_000)
+        sim.ingest(snap, stamp)
+    reasons = {event["reason"] for event in ledger.events if event["kind"] == "REJECT"}
+    assert {"INVALID_FULL_BOOK", "CROSSED_OR_EMPTY_BOOK", "QUOTE_FIELDS_MISSING",
+            "DYNAMIC_TRAILING_VOLATILITY_UNAVAILABLE"} <= reasons
+    assert not any(event["kind"] == "BUY" for event in ledger.events)
+    ledger.close()

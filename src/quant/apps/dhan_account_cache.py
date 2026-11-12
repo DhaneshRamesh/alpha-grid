@@ -21,7 +21,7 @@ from quant.acquisition.dhan import (
 )
 from quant.apps.live_feed_credentials import _private_bytes
 
-ROOT = Path("data/.secrets/dhan-account-cache")
+ROOT = Path(os.environ.get("ALPHA_GRID_ACCOUNT_CACHE_DIR", "data/.secrets/dhan-account-cache"))
 TOKEN_PATH = Path("data/.secrets/dhan-access-token")
 ENDPOINTS = ("fundlimit", "holdings", "positions", "orders", "trades")
 MIN_INTERVAL = timedelta(minutes=5)

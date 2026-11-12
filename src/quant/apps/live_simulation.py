@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import os
+import random
 import signal
 import stat
 import time
@@ -33,6 +34,13 @@ LOOKBACK_NS = 15 * 60_000_000_000
 HOLD_NS = 30 * 60_000_000_000
 FRICTION_BPS = Decimal("40")
 PORTFOLIO_VERSION = "alpha-grid-live-portfolio-simulation-v2"
+PORTFOLIO_DYNAMIC_VERSION = "alpha-grid-live-portfolio-sizing-v1"
+# Fixed paper-only comparison rule. No threshold is learned from outcomes.
+DYNAMIC_DEPTH_FRACTION = Decimal("0.25")
+DYNAMIC_VOL_STRESS = Decimal("2")
+DYNAMIC_MIN_MINUTE_BUCKETS = 5
+DYNAMIC_MIN_COVERAGE_NS = 10 * 60_000_000_000
+DYNAMIC_MAX_GAP_NS = 5 * 60_000_000_000
 # These values mirror cash-paper-risk-v1 defaults. The v1 ledger is untouched.
 PORTFOLIO_CAPITAL = Decimal("20000")
 PORTFOLIO_MAX_DEPLOYED = Decimal("15000")
@@ -461,14 +469,20 @@ class Simulator:
 class PortfolioSimulator:
     """Concurrent virtual positions over eligible, journaled quote snapshots."""
 
-    def __init__(self, ledger: Ledger, universe: dict) -> None:
+    def __init__(self, ledger: Ledger, universe: dict, lookback_ns: int = LOOKBACK_NS,
+                 sizing_policy: str = "BASELINE") -> None:
         rows = universe.get("instruments", [])
         if universe.get("schema_version") != "alpha-grid-cross-stock-universe-v1" or len(rows) != 25:
             raise ValueError("fixed 25-stock universe required")
         self.ids = {row["security_id"]: row["symbol"] for row in rows}
-        if len(self.ids) != 25 or ledger.version != PORTFOLIO_VERSION:
+        if (len(self.ids) != 25 or sizing_policy not in {"BASELINE", "DYNAMIC_V1"} or
+                ledger.version != (PORTFOLIO_VERSION if sizing_policy == "BASELINE"
+                                   else PORTFOLIO_DYNAMIC_VERSION)):
             raise ValueError("portfolio ledger or universe mismatch")
         self.ledger = ledger
+        self.sizing_policy = sizing_policy
+        self.log_comparison_opportunities = False
+        self.lookback_ns = lookback_ns
         self.cash = PORTFOLIO_CAPITAL
         self.positions: dict[str, dict] = {}
         self.observations: dict[str, deque] = defaultdict(deque)
@@ -600,9 +614,19 @@ class PortfolioSimulator:
             return None
 
     def _old(self, row: dict) -> dict | None:
-        return next((old for old in self.observations[row["symbol"]]
-                     if LOOKBACK_NS <= row["receive_ns"] - old["receive_ns"]
-                     <= LOOKBACK_NS + 60_000_000_000), None)
+        history = self.observations[row["symbol"]]
+        if not history:
+            return None
+        candidates = [
+            old for old in history
+            if old.get("feed_session") == row.get("feed_session")
+            and self.lookback_ns <= row["receive_ns"] - old["receive_ns"]
+            <= self.lookback_ns + 60_000_000_000
+        ]
+        if candidates:
+            target_ns = row["receive_ns"] - self.lookback_ns
+            return min(candidates, key=lambda old: abs(old["receive_ns"] - target_ns))
+        return None
 
     @staticmethod
     def _risk_bound(ask: Decimal, shares: int, spread_bps: Decimal) -> Decimal:
@@ -610,6 +634,55 @@ class PortfolioSimulator:
         fees = Decimal(published_intraday_fees(notional, notional)["total"])
         return notional * (PORTFOLIO_ADVERSE_BPS + PORTFOLIO_RESIDUAL_FRICTION_BPS
                            + spread_bps) / 10_000 + fees
+
+    def _dynamic_size(self, row: dict, shares: int, ask: Decimal,
+                      spread_bps: Decimal) -> tuple[int, str, Decimal | None, Decimal | None]:
+        """Shrink only; use durable, same-packet five-level quotes and past minutes."""
+        if (row.get("book_source") != "LIVE_WS" or
+                not isinstance(row.get("book_bids"), list) or
+                not isinstance(row.get("book_asks"), list) or
+                len(row["book_bids"]) != 5 or len(row["book_asks"]) != 5 or
+                not isinstance(row.get("ask_liquidity_quantity"), int) or
+                row["ask_liquidity_quantity"] < 1):
+            return 0, "DYNAMIC_COMPLETE_STANDARD_BOOK_UNAVAILABLE", None, None
+        end = row["receive_ns"]
+        # Last genuinely observed mid in each minute; a missing interval is not filled.
+        buckets: dict[int, dict] = {}
+        for old in self.observations[row["symbol"]]:
+            stamp = old["receive_ns"]
+            if (old["feed_session"] == row["feed_session"] and
+                    end - self.lookback_ns <= stamp <= end and
+                    old["availability_ns"] <= row["observed_at_ns"]):
+                bucket = stamp // 60_000_000_000
+                if bucket not in buckets or stamp > buckets[bucket]["receive_ns"]:
+                    buckets[bucket] = old
+        points = sorted(buckets.values(), key=lambda item: item["receive_ns"])
+        if (len(points) < DYNAMIC_MIN_MINUTE_BUCKETS or
+                end - points[0]["receive_ns"] < DYNAMIC_MIN_COVERAGE_NS or
+                any(b["receive_ns"] - a["receive_ns"] > DYNAMIC_MAX_GAP_NS
+                    for a, b in zip(points, points[1:]))):
+            return 0, "DYNAMIC_TRAILING_VOLATILITY_UNAVAILABLE", None, None
+        mids = [Decimal(point["bid_nanos"] + point["ask_nanos"]) / 2 for point in points]
+        if any(mid <= 0 for mid in mids):
+            return 0, "DYNAMIC_TRAILING_VOLATILITY_UNAVAILABLE", None, None
+        returns = [(b / a - 1) * 10_000 for a, b in zip(mids, mids[1:])]
+        mean = sum(returns, Decimal(0)) / len(returns)
+        minute_vol = (sum(((value - mean) ** 2 for value in returns), Decimal(0))
+                      / len(returns)).sqrt()
+        vol15 = minute_vol * Decimal(15).sqrt()
+        stress_bps = max(PORTFOLIO_ADVERSE_BPS, DYNAMIC_VOL_STRESS * vol15)
+        shares = min(shares, int(row["ask_liquidity_quantity"] * DYNAMIC_DEPTH_FRACTION))
+        stress = Decimal(0)
+        while shares:
+            notional = ask * shares
+            fees = Decimal(published_intraday_fees(notional, notional)["total"])
+            stress = notional * (stress_bps + PORTFOLIO_RESIDUAL_FRICTION_BPS
+                                 + spread_bps) / 10_000 + fees
+            if stress <= PORTFOLIO_DECISION_LOSS:
+                break
+            shares -= 1
+        return (shares, "DYNAMIC_SIZE_ACCEPTED" if shares else "DYNAMIC_DEPTH_OR_RISK_LIMIT",
+                vol15, stress if shares else None)
 
     def _open_risk(self) -> Decimal:
         return sum((Decimal(position.get("risk_bound_inr") or self._risk_bound(
@@ -792,7 +865,7 @@ class PortfolioSimulator:
                             bid_nanos=bid, ask_nanos=ask)
             fresh.append(row)
             history = self.observations[symbol]
-            while history and received - history[0]["receive_ns"] > LOOKBACK_NS + 60_000_000_000:
+            while history and received - history[0]["receive_ns"] > self.lookback_ns + 60_000_000_000:
                 history.popleft()
         if not fresh:
             return
@@ -813,6 +886,23 @@ class PortfolioSimulator:
             old_mid = ((old["bid_nanos"] + old["ask_nanos"]) // 2) if old else None
             momentum = (Decimal(mid - old_mid) * 10_000 / old_mid) if old_mid else None
             spread = Decimal(row["ask_nanos"] - row["bid_nanos"]) * 10_000 / mid
+            if old_mid is not None and self.log_comparison_opportunities:
+                reference_ask = Decimal(row["ask_nanos"]) / 1_000_000_000
+                reference_shares = int(PORTFOLIO_MAX_INSTRUMENT // reference_ask)
+                reference_fee_bps = (Decimal(published_intraday_fees(
+                    reference_ask * reference_shares,
+                    reference_ask * reference_shares)["total"]) * 10_000
+                    / (reference_ask * reference_shares) if reference_shares else Decimal(0))
+                market_signal = (reference_shares > 0 and spread <= PORTFOLIO_MAX_SPREAD_BPS
+                                 and momentum - spread - PORTFOLIO_RESIDUAL_FRICTION_BPS
+                                 - reference_fee_bps > 0)
+                self.emit("OPPORTUNITY", candidate_id=row["id"], candidate_slot=slot,
+                          symbol=row["symbol"], security_id=row["security_id"],
+                          receive_ns=row["receive_ns"], observed_at_ns=row["observed_at_ns"],
+                          raw_frame_sha256=row["raw_frame_sha256"],
+                          bid_nanos=row["bid_nanos"], ask_nanos=row["ask_nanos"],
+                          momentum_bps=str(momentum), quoted_spread_bps=str(spread),
+                          canonical_market_signal=market_signal)
             position = self.positions.get(row["symbol"])
             if position:
                 entry_ask = Decimal(position["ask_reference_inr"])
@@ -870,7 +960,31 @@ class PortfolioSimulator:
             while shares and (ask * shares + Decimal(
                     published_intraday_fees(ask * shares, Decimal(0))["total"]) > self.cash):
                 shares -= 1
+            baseline_shares = shares
+            size_reason = "BASELINE_UNCHANGED"
+            vol15 = None
+            dynamic_bound = None
+            if self.sizing_policy == "DYNAMIC_V1":
+                shares, size_reason, vol15, dynamic_bound = self._dynamic_size(row, shares, ask, spread)
+                if shares:
+                    fees = Decimal(published_intraday_fees(ask * shares, ask * shares)["total"])
+                    net_proxy = momentum - spread - PORTFOLIO_RESIDUAL_FRICTION_BPS - fees * 10_000 / (ask * shares)
+                    if net_proxy <= 0:
+                        shares, size_reason = 0, "DYNAMIC_COST_EXCEEDS_MOMENTUM_PROXY"
+            if self.log_comparison_opportunities:
+                self.emit("SIZING", candidate_id=row["id"], symbol=row["symbol"],
+                          candidate_slot=slot, policy=self.sizing_policy,
+                          baseline_shares=baseline_shares, chosen_shares=shares,
+                          reason=size_reason, trailing_volatility_15m_bps=(str(vol15) if vol15 is not None else None),
+                          volatility_stress_bound_inr=(str(dynamic_bound) if dynamic_bound is not None else None),
+                          displayed_ask_quantity=row.get("ask_liquidity_quantity"),
+                          quoted_spread_bps=str(spread), assumed_residual_bps=str(PORTFOLIO_RESIDUAL_FRICTION_BPS))
+            if self.sizing_policy == "DYNAMIC_V1" and shares < 1:
+                self._reject_once(row["symbol"], slot, size_reason, row["id"])
+                continue
             bound = self._risk_bound(ask, shares, spread) if shares else Decimal(0)
+            if dynamic_bound is not None:
+                bound = max(bound, dynamic_bound)
             open_quotes_fresh = all(
                 self.observations[position_symbol]
                 and 0 <= row["observed_at_ns"]
@@ -907,11 +1021,13 @@ class PortfolioSimulator:
                        for position in self.positions.values())
         equity = self.cash + deployed
         quotes = []
+        radar = []
+        unrealized_total = Decimal(0)
         now_ns = time.time_ns()
         for symbol, history in self.observations.items():
             if history:
                 row = history[-1]
-                if not 0 <= now_ns - row["receive_ns"] <= MAX_AGE_NS:
+                if not 0 <= now_ns - row["receive_ns"] <= 60_000_000_000:
                     continue
                 quotes.append({"symbol": symbol, "bid_nanos": str(row["bid_nanos"]),
                                "ask_nanos": str(row["ask_nanos"]),
@@ -923,14 +1039,79 @@ class PortfolioSimulator:
                                "book_source": row["book_source"],
                                "raw_frame_sha256": row["raw_frame_sha256"],
                                "rest_snapshot_sha256": row["rest_snapshot_sha256"]})
-        return {"schema_version": PORTFOLIO_VERSION, "state": state,
+                mid = (row["bid_nanos"] + row["ask_nanos"]) // 2
+                old = self._old(row)
+                old_mid = ((old["bid_nanos"] + old["ask_nanos"]) // 2) if old else None
+                momentum = (Decimal(mid - old_mid) * 10_000 / old_mid) if old_mid else Decimal(0)
+                spread = Decimal(row["ask_nanos"] - row["bid_nanos"]) * 10_000 / mid
+                bid_inr = Decimal(row["bid_nanos"]) / 1_000_000_000
+                ask_inr = Decimal(row["ask_nanos"]) / 1_000_000_000
+                position = self.positions.get(symbol)
+                imbalance = Decimal(0)
+                if row.get("book_metrics") and "five_level_imbalance" in row["book_metrics"]:
+                    try:
+                        imbalance = Decimal(str(row["book_metrics"]["five_level_imbalance"]))
+                    except (ValueError, TypeError, ArithmeticError):
+                        imbalance = Decimal(0)
+                if position:
+                    status_code = "OPEN_POSITION"
+                    entry_ask = Decimal(position["ask_reference_inr"])
+                    unrealized_inr = (bid_inr - entry_ask) * position["remaining_shares"]
+                    unrealized_bps = (bid_inr - entry_ask) * 10_000 / entry_ask
+                    unrealized_total += unrealized_inr
+                elif spread > PORTFOLIO_MAX_SPREAD_BPS:
+                    status_code = "SPREAD_FILTERED"
+                    unrealized_inr = Decimal(0)
+                    unrealized_bps = Decimal(0)
+                elif old_mid is None:
+                    status_code = "WARMUP"
+                    unrealized_inr = Decimal(0)
+                    unrealized_bps = Decimal(0)
+                else:
+                    notional = min(PORTFOLIO_MAX_INSTRUMENT, self.cash)
+                    shares = int(notional // ask_inr)
+                    if shares >= 1:
+                        fees = Decimal(published_intraday_fees(ask_inr * shares, ask_inr * shares)["total"])
+                        net_proxy = momentum - spread - PORTFOLIO_RESIDUAL_FRICTION_BPS - fees * 10_000 / (ask_inr * shares)
+                    else:
+                        net_proxy = Decimal(-1)
+                    status_code = "BUY_CANDIDATE" if net_proxy > 0 else "MONITORING"
+                    unrealized_inr = Decimal(0)
+                    unrealized_bps = Decimal(0)
+                age_s = round((now_ns - row["receive_ns"]) / 1_000_000_000, 1)
+                recv_time_str = datetime.fromtimestamp(row["receive_ns"] / 1_000_000_000, IST).strftime("%H:%M:%S")
+                radar.append({
+                    "symbol": symbol,
+                    "security_id": row["security_id"],
+                    "bid_inr": str(bid_inr),
+                    "ask_inr": str(ask_inr),
+                    "spread_bps": str(spread.quantize(Decimal("0.01"))),
+                    "momentum_bps": str(momentum.quantize(Decimal("0.01"))),
+                    "book_imbalance": str(imbalance.quantize(Decimal("0.001"))),
+                    "status": status_code,
+                    "shares_held": position["remaining_shares"] if position else 0,
+                    "entry_price_inr": position["ask_reference_inr"] if position else None,
+                    "unrealized_pnl_inr": str(unrealized_inr.quantize(Decimal("0.01"))),
+                    "unrealized_pnl_bps": str(unrealized_bps.quantize(Decimal("0.01"))),
+                    "age_seconds": age_s,
+                    "receive_time_ist": recv_time_str,
+                })
+        latest_receive_ns = max((int(q["receive_ns"]) for q in quotes), default=None)
+        last_quote_age = round((now_ns - latest_receive_ns) / 1_000_000_000, 1) if latest_receive_ns else None
+        last_quote_time = datetime.fromtimestamp(latest_receive_ns / 1_000_000_000, IST).strftime("%H:%M:%S") if latest_receive_ns else None
+        return {"schema_version": self.ledger.version, "sizing_policy": self.sizing_policy,
+                "state": state,
                 "feed_status": "STALE" if self.stale else "OBSERVING",
                 "universe_count": 25, "monitored_instruments": len(quotes),
+                "last_quote_age_seconds": last_quote_age,
+                "last_quote_time_ist": last_quote_time,
                 "capital_start_inr": str(PORTFOLIO_CAPITAL), "cash_inr": str(self.cash),
                 "equity_inr": str(equity), "equity_basis": "COST_BASIS_NOT_MARKET_VALUE",
+                "unrealized_pnl_inr": str(unrealized_total.quantize(Decimal("0.01"))),
                 "max_drawdown_inr": str(self.drawdown), "positions": list(self.positions.values()),
                 "position": None, "trades": list(self.trades), "decisions": list(self.decisions),
                 "equity_curve": list(self.curve), "observed_quotes": sorted(quotes, key=lambda x: x["symbol"]),
+                "opportunity_radar": sorted(radar, key=lambda x: x["symbol"]),
                 "rejected_count": self.rejected, "ledger_events": len(self.ledger.events),
                 "remaining_deployable_inr": str(max(Decimal(0), PORTFOLIO_MAX_DEPLOYED - deployed)),
                 "capital_buffer_at_full_deployment_inr": str(
@@ -947,6 +1128,127 @@ class PortfolioSimulator:
                                 "max_market_age_ns": str(MAX_AGE_NS)},
                 "source": "LOCAL_GATEWAY_AFTER_QJ01", "actual_fills": 0, "broker_orders": 0,
                 "qp01_writes": 0}
+
+
+def sizing_comparison_report(baseline: Ledger, dynamic: Ledger) -> dict:
+    """Compare identical durable quote/opportunity streams; never infer fills."""
+    if baseline.version != PORTFOLIO_VERSION or dynamic.version != PORTFOLIO_DYNAMIC_VERSION:
+        raise ValueError("sizing comparison ledger versions differ")
+    def source_stream(ledger: Ledger) -> list[tuple]:
+        return [(e["id"], e["symbol"], e["security_id"],
+                 e["receive_ns"], e["bid_nanos"], e["ask_nanos"],
+                 e["raw_frame_sha256"], e["source_frame_id"], e["packet_offset"],
+                 e["raw_durable_at_ns"], e["availability_ns"],
+                 e["rest_snapshot_sha256"], e["book_source"], e["book_bids"],
+                 e["book_asks"], e["bid_liquidity_quantity"],
+                 e["ask_liquidity_quantity"])
+                for e in ledger.events if e["kind"] == "OBSERVED"]
+    base_source, dynamic_source = source_stream(baseline), source_stream(dynamic)
+    if base_source != dynamic_source:
+        raise ValueError("paired sizing source streams differ")
+    def opportunity_stream(ledger: Ledger) -> list[tuple]:
+        return [(e["candidate_id"], e["candidate_slot"], e["momentum_bps"],
+                 e["quoted_spread_bps"], e["canonical_market_signal"])
+                for e in ledger.events if e["kind"] == "OPPORTUNITY"]
+    base_opportunities = opportunity_stream(baseline)
+    dynamic_opportunities = opportunity_stream(dynamic)
+    if base_opportunities != dynamic_opportunities:
+        raise ValueError("paired sizing opportunity streams differ")
+    dates = sorted({datetime.fromtimestamp(e["receive_ns"] / 1_000_000_000,
+                                           IST).date().isoformat()
+                    for e in baseline.events if e["kind"] == "OPPORTUNITY"
+                    and e["canonical_market_signal"]})
+
+    def arm(ledger: Ledger) -> tuple[dict, dict[str, Decimal]]:
+        entries = {e["sequence"]: e for e in ledger.events if e["kind"] == "BUY"}
+        outstanding = {sequence: entry["shares"] for sequence, entry in entries.items()}
+        daily: dict[str, Decimal] = defaultdict(lambda: Decimal(0))
+        gross = fees = residual = net = Decimal(0)
+        peak = running = drawdown = Decimal(0)
+        disposals = 0
+        relevant_gaps = 0
+        cross_session_exits = 0
+        for event in ledger.events:
+            if event["kind"] == "GAP":
+                instant = datetime.fromtimestamp(event["observed_at_ns"] / 1_000_000_000, IST)
+                minute = instant.hour * 60 + instant.minute
+                if instant.date().isoformat() in dates and 9 * 60 + 15 <= minute <= 15 * 60 + 14:
+                    relevant_gaps += 1
+            if event["kind"] not in {"REDUCE", "SELL"}:
+                continue
+            entry = entries[event["entry_sequence"]]
+            outstanding[event["entry_sequence"]] -= event["shares_sold"]
+            if outstanding[event["entry_sequence"]] < 0:
+                raise ValueError("comparison disposal exceeds entry shares")
+            if entry.get("actual_fill") is not False or event.get("actual_fill") is not False:
+                raise ValueError("comparison contains a claimed broker fill")
+            gain = (Decimal(event["sell_notional_inr"])
+                    - Decimal(entry["ask_reference_inr"]) * event["shares_sold"])
+            charge = Decimal(event["fees"]["total"])
+            friction = Decimal(event["residual_friction_inr"])
+            result = Decimal(event["net_reference_inr"])
+            if gain - charge - friction != result:
+                raise ValueError("comparison disposal accounting mismatch")
+            gross += gain; fees += charge; residual += friction; net += result
+            daily[entry["day"]] += result
+            if event["day"] != entry["day"]:
+                cross_session_exits += 1
+            running += result; peak = max(peak, running)
+            drawdown = max(drawdown, peak - running)
+            disposals += 1
+        return ({"gross_reference_inr": str(gross), "published_fees_inr": str(fees),
+                 "assumed_residual_friction_inr": str(residual),
+                 "quoted_spread_treatment": "BID_EXIT_MINUS_ASK_ENTRY_REFERENCE",
+                 "net_reference_inr": str(net), "realized_reference_drawdown_inr": str(drawdown),
+                 "virtual_entries": len(entries), "virtual_disposals": disposals,
+                 "open_virtual_positions": sum(shares > 0 for shares in outstanding.values()),
+                 "abstentions": sum(e["kind"] == "REJECT" for e in ledger.events),
+                 "dynamic_sizing_abstentions": sum(e["kind"] == "SIZING" and
+                                                   e["chosen_shares"] == 0
+                                                   for e in ledger.events),
+                 "gap_events": sum(e["kind"] == "GAP" for e in ledger.events),
+                 "candidate_session_gap_events": relevant_gaps,
+                 "cross_session_exits": cross_session_exits,
+                 "actual_fills": 0}, daily)
+
+    base, base_days = arm(baseline)
+    sized, sized_days = arm(dynamic)
+    def interval(values: list[Decimal], seed: int) -> list[str] | None:
+        if not values:
+            return None
+        rng = random.Random(seed)
+        draws = sorted(sum((values[rng.randrange(len(values))] for _ in values),
+                           Decimal(0)) / len(values) for _ in range(2000))
+        return [str(draws[49].quantize(Decimal("0.01"))),
+                str(draws[1949].quantize(Decimal("0.01")))]
+    dynamic_ci = interval([sized_days[day] for day in dates], 20261108)
+    paired_ci = interval([sized_days[day] - base_days[day] for day in dates], 20261109)
+    status = "NO_PROSPECTIVE_OPPORTUNITIES" if not dates else "NO_PROMOTION"
+    if dates and (base["candidate_session_gap_events"] or
+                  sized["candidate_session_gap_events"]):
+        status = "GAP_CENSORED"
+    elif dates and (base["cross_session_exits"] or sized["cross_session_exits"]):
+        status = "CROSS_SESSION_EXIT_CENSORED"
+    elif dates and (base["open_virtual_positions"] or sized["open_virtual_positions"]):
+        status = "OPEN_VIRTUAL_POSITIONS"
+    elif dates and len(dates) < 20:
+        status = "INSUFFICIENT_PROSPECTIVE_SESSIONS"
+    elif (dates and dynamic_ci is not None and paired_ci is not None and
+          Decimal(sized["net_reference_inr"]) > 0 and
+          Decimal(dynamic_ci[0]) > 0 and Decimal(paired_ci[0]) > 0 and
+          Decimal(sized["realized_reference_drawdown_inr"])
+          <= Decimal(base["realized_reference_drawdown_inr"])):
+        status = "PAPER_EVIDENCE_POSITIVE_NOT_PROMOTED"
+    return {"version": PORTFOLIO_DYNAMIC_VERSION, "status": status,
+            "independent_opportunity_sessions": len(dates),
+            "paired_observed_quote_count": len(base_source),
+            "paired_decision_inputs": len(base_opportunities),
+            "paired_candidate_signal_count": sum(row[4] for row in base_opportunities),
+            "baseline": base, "dynamic": sized,
+            "dynamic_mean_net_inr_ci95": dynamic_ci,
+            "paired_mean_incremental_net_inr_ci95": paired_ci,
+            "no_trade_net_inr": "0", "fills_are_actual": False,
+            "limitations": "Prospective quote references; no queue position or executable fill proof"}
 
 
 def save_status(path: Path, value: dict) -> None:
@@ -990,22 +1292,58 @@ def main() -> None:
     parser.add_argument("--private-dir", type=Path, required=True)
     parser.add_argument("--portfolio-v2", action="store_true",
                         help="Use the separate concurrent virtual portfolio ledger")
+    parser.add_argument("--sizing-comparison", action="store_true",
+                        help="Opt-in paired baseline/dynamic paper ledgers; no order path")
+    parser.add_argument("--report-sizing-comparison", action="store_true",
+                        help="Read paired ledgers offline and print reference economics")
+    parser.add_argument("--lookback-minutes", type=int, default=15,
+                        help="Lookback window in minutes for momentum evaluation")
     parser.add_argument(
         "--universe",
         type=Path,
         default=Path("docs/cross-stock-universe-2026-11-02.json"),
     )
     args = parser.parse_args()
+    if (args.sizing_comparison or args.report_sizing_comparison) and not args.portfolio_v2:
+        parser.error("sizing comparison requires --portfolio-v2")
     private = args.private_dir
     if private.is_symlink() or private.stat().st_mode & 0o077:
         raise PermissionError("private simulation directory required")
+    base_path = private / "simulation-sizing-baseline-v1.jsonl"
+    dynamic_path = private / "simulation-sizing-dynamic-v1.jsonl"
+    if args.report_sizing_comparison:
+        if not base_path.exists() or not dynamic_path.exists():
+            print(json.dumps({"status": "NO_PROSPECTIVE_PAIR_LEDGERS"}))
+            return
+        base = Ledger(base_path, PORTFOLIO_VERSION)
+        dynamic = Ledger(dynamic_path, PORTFOLIO_DYNAMIC_VERSION)
+        try:
+            print(json.dumps(sizing_comparison_report(base, dynamic), indent=2))
+        finally:
+            dynamic.close(); base.close()
+        return
     stop = private / "stop-requested"
-    ledger = Ledger(private / ("simulation-portfolio-v2.jsonl" if args.portfolio_v2
-                               else "simulation-ledger.jsonl"),
+    ledger = Ledger(base_path if args.sizing_comparison else private /
+                    ("simulation-portfolio-v2.jsonl" if args.portfolio_v2
+                     else "simulation-ledger.jsonl"),
                     PORTFOLIO_VERSION if args.portfolio_v2 else VERSION)
-    sim = (PortfolioSimulator if args.portfolio_v2 else Simulator)(
-        ledger, json.loads(args.universe.read_text()))
-    status_path = private / "simulation-status.json"
+    universe_data = json.loads(args.universe.read_text())
+    sim = (PortfolioSimulator(ledger, universe_data, lookback_ns=args.lookback_minutes * 60_000_000_000)
+           if args.portfolio_v2 else Simulator(ledger, universe_data))
+    shadow_ledger = (Ledger(dynamic_path, PORTFOLIO_DYNAMIC_VERSION)
+                     if args.sizing_comparison else None)
+    shadow = (PortfolioSimulator(shadow_ledger, universe_data,
+                                 lookback_ns=args.lookback_minutes * 60_000_000_000,
+                                 sizing_policy="DYNAMIC_V1") if shadow_ledger else None)
+    if shadow:
+        sim.log_comparison_opportunities = True
+        shadow.log_comparison_opportunities = True
+    status_path = private / ("simulation-sizing-comparison-status.json" if shadow
+                             else "simulation-status.json")
+    def current_status(state: str) -> dict:
+        return ({"mode": "SIMULATION_ONLY_SIZING_COMPARISON",
+                 "baseline": sim.status(state), "dynamic": shadow.status(state)}
+                if shadow else sim.status(state))
     halted = False
 
     def halt(*_: object) -> None:
@@ -1017,7 +1355,9 @@ def main() -> None:
     cookie = None
     try:
         sim.emit("START", observed_at_ns=time.time_ns(), mode="SIMULATION_ONLY")
-        save_status(status_path, sim.status("STARTING"))
+        if shadow:
+            shadow.emit("START", observed_at_ns=time.time_ns(), mode="SIMULATION_ONLY")
+        save_status(status_path, current_status("STARTING"))
         while not halted and not stop.exists():
             try:
                 if cookie is None:
@@ -1030,7 +1370,10 @@ def main() -> None:
                 rest = (local_rest_snapshot(cookie) if isinstance(sim, PortfolioSimulator)
                         and snapshot.get("feed_connected") else None)
                 if isinstance(sim, PortfolioSimulator):
-                    sim.ingest(snapshot, time.time_ns(), rest)
+                    now_ns = time.time_ns()
+                    sim.ingest(snapshot, now_ns, rest)
+                    if shadow:
+                        shadow.ingest(snapshot, now_ns, rest)
                 else:
                     sim.ingest(snapshot, time.time_ns())
                 local = datetime.now(IST)
@@ -1048,14 +1391,23 @@ def main() -> None:
                 else:
                     state = "WAITING_FOR_GENUINE_FEED"
             except (OSError, URLError, ValueError, KeyError):
+                if shadow:
+                    now_ns = time.time_ns()
+                    sim.gap("PAIRED_INPUT_OR_LEDGER_FAILURE", now_ns)
+                    shadow.gap("PAIRED_INPUT_OR_LEDGER_FAILURE", now_ns)
+                    raise  # Never continue a paired run after either ledger/input fails.
                 cookie = None
                 sim.gap("GATEWAY_UNAVAILABLE", time.time_ns())
                 state = "GATEWAY_UNAVAILABLE"
-            save_status(status_path, sim.status(state))
+            save_status(status_path, current_status(state))
             time.sleep(1)
     finally:
         sim.emit("STOP", observed_at_ns=time.time_ns(), mode="SIMULATION_ONLY")
-        save_status(status_path, sim.status("STOPPED"))
+        if shadow:
+            shadow.emit("STOP", observed_at_ns=time.time_ns(), mode="SIMULATION_ONLY")
+        save_status(status_path, current_status("STOPPED"))
+        if shadow_ledger:
+            shadow_ledger.close()
         ledger.close()
 
 

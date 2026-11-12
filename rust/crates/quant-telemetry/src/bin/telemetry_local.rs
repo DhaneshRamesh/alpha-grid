@@ -736,7 +736,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         Duration::from_nanos(remaining),
                         run_authenticated_standard_socket(
                             socket, &mut capture, &mut publisher, &mut writer, &mut engine,
-                            &feed_session, Duration::from_secs(30), standard_full, &mut feed_receiver,
+                            &feed_session, Duration::from_secs(60), standard_full, &mut feed_receiver,
                         ),
                     ) => match result {
                         Ok(result) => result,

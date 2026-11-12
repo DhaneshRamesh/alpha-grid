@@ -1324,6 +1324,8 @@ where
             )
         })?;
     let mut first_binary_frame = true;
+    let mut ping_interval = tokio::time::interval(Duration::from_secs(15));
+    ping_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let result = async {
         loop {
             tokio::select! {
@@ -1331,6 +1333,12 @@ where
                     if changed.is_err() || *stop.borrow() {
                         publisher.shared.record_feed_lifecycle(FeedLifecycle::Stopped(FeedStopReason::Cancelled));
                         return Ok(());
+                    }
+                }
+                _ = ping_interval.tick() => {
+                    if let Err(e) = socket.send(Message::Ping(Vec::new().into())).await {
+                        publisher.shared.record_feed_lifecycle(FeedLifecycle::Stopped(FeedStopReason::SocketFailed));
+                        return Err(io::Error::other(format!("Dhan quote ping failed: {e}")));
                     }
                 }
                 incoming = tokio::time::timeout(idle_timeout, socket.next()) => {

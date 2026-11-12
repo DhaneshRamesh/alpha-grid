@@ -337,3 +337,66 @@ def test_dated_25_name_scope_passes_only_offline_evidence(
     assert evaluated_gate(root, private, int(after_close.timestamp() * 1_000_000_000))[
         1:
     ] == ("BLOCKED", "APPROVED_SCOPE_DISABLED_OR_EXPIRED")
+
+
+def test_cached_401_does_not_block_scope_creation_when_broker_active(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    private = tmp_path / "private"
+    private.mkdir(mode=0o700)
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    universe = docs / "cross-stock-universe-2026-11-02.json"
+    universe.write_text(
+        json.dumps({
+            "instruments": [
+                {"symbol": f"S{i}", "security_id": str(i)} for i in range(25)
+            ]
+        })
+    )
+
+    token = "fixture.reused.token"
+    token_hash = hashlib.sha256(token.encode()).hexdigest()
+
+    # Pre-seed cached 401 with matching token SHA-256
+    profile_path = private / "dhan-profile-check.json"
+    profile_path.write_text(
+        json.dumps({
+            "schema_version": "alpha-grid-dhan-profile-check-v1",
+            "token_sha256": token_hash,
+            "result": "PROFILE_HTTP_401",
+            "checked_at": datetime.now(UTC).isoformat(),
+        })
+    )
+    profile_path.chmod(0o600)
+
+    # Monkeypatch credentials and profile check to simulate broker renewal
+    monkeypatch.setattr(
+        "quant.apps.live_feed_scope.load_credentials",
+        lambda *a, **k: (token, "123456", datetime.now(UTC) + timedelta(hours=1)),
+    )
+    checked = []
+
+    def mock_check_profile(root: Path, priv: Path) -> str:
+        checked.append(True)
+        rec = {
+            "schema_version": "alpha-grid-dhan-profile-check-v1",
+            "token_sha256": token_hash,
+            "result": "DHAN_TOKEN_AND_DATA_PLAN_ACTIVE",
+            "checked_at": datetime.now(UTC).isoformat(),
+        }
+        profile_path.write_text(json.dumps(rec))
+        return "DHAN_TOKEN_AND_DATA_PLAN_ACTIVE"
+
+    monkeypatch.setattr(
+        "quant.apps.live_feed_credentials._check_profile", mock_check_profile
+    )
+
+    # Calling ensure_local_read_only_scope MUST re-check broker and create scope
+    ensure_local_read_only_scope(tmp_path, private)
+    assert len(checked) == 1
+    path = private / "feed-scope.json"
+    assert path.is_file()
+    saved = json.loads(path.read_text())
+    assert saved["authorized_security_ids"] == [str(i) for i in range(25)]
+

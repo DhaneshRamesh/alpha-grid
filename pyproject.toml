@@ -17,12 +17,13 @@ dev = [
     "ruff>=0.6,<1",
     "pyarrow>=18,<26",
     "numpy>=2,<3",
+    "scikit-learn==1.7.2",
     "polars>=1,<2",
     "pandas>=2.2,<3",
     "dhanhq>=2.3,<2.4",
     "websockets>=14,<18",
 ]
-research = ["pyarrow>=18,<26", "numpy>=2,<3"]
+research = ["pyarrow>=18,<26", "numpy>=2,<3", "scikit-learn==1.7.2"]
 dhan = ["dhanhq>=2.3,<2.4", "websockets>=14,<18"]
 
 [project.scripts]
@@ -39,6 +40,7 @@ where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src", "."]
 
 [tool.mypy]
 python_version = "3.12"

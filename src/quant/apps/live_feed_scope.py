@@ -137,7 +137,7 @@ def ensure_local_read_only_scope(root: Path, private: Path) -> None:
     path = private / "feed-scope.json"
     if path.exists() or path.is_symlink():
         return
-    token, _client, _expiry = load_credentials(root)
+    token, _client, _expiry = load_credentials(root, None, False)
     token_hash = hashlib.sha256(token.encode()).hexdigest()
     profile_path = private / "dhan-profile-check.json"
     prior = None
@@ -145,19 +145,23 @@ def ensure_local_read_only_scope(root: Path, private: Path) -> None:
         raise PermissionError("private Dhan profile status invalid")
     if profile_path.exists():
         prior = json.loads(profile_path.read_text())
-    if prior is None or prior.get("token_sha256") != token_hash:
+    if (
+        prior is None
+        or prior.get("token_sha256") != token_hash
+        or prior.get("result") != "DHAN_TOKEN_AND_DATA_PLAN_ACTIVE"
+    ):
         from quant.apps.live_feed_credentials import _check_profile
 
         result = _check_profile(root, private)
-        prior = {"schema_version": "alpha-grid-dhan-profile-check-v1",
-                 "token_sha256": token_hash, "result": result,
-                 "checked_at": datetime.now(UTC).isoformat()}
-        descriptor = os.open(profile_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, "O_NOFOLLOW", 0), 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            json.dump(prior, stream, sort_keys=True)
-            stream.write("\n")
-            stream.flush()
-            os.fsync(stream.fileno())
+        if profile_path.exists():
+            prior = json.loads(profile_path.read_text())
+        else:
+            prior = {
+                "schema_version": "alpha-grid-dhan-profile-check-v1",
+                "token_sha256": token_hash,
+                "result": result,
+                "checked_at": datetime.now(UTC).isoformat(),
+            }
     if prior.get("result") != "DHAN_TOKEN_AND_DATA_PLAN_ACTIVE":
         raise ValueError(str(prior.get("result", "PROFILE_CHECK_UNAVAILABLE")))
     universe = root / "docs/cross-stock-universe-2026-11-02.json"
