@@ -13,6 +13,12 @@ import {
   readSavedRestSnapshot,
   readCrossStockSimulation,
   isIstContinuousWindow,
+  redactSensitive,
+  getStorageStats,
+  testStorageWritable,
+  readEvidenceStatus,
+  inspectEvidenceTarget,
+  executeStorageAction,
 } from "./trading-service.mjs";
 
 test("IST REST polling window excludes closed hours and weekends", () => {
@@ -354,6 +360,389 @@ test("ticker training queues only frozen-universe jobs behind local session", as
     assert.equal((await queued.json()).state, "QUEUED");
     assert.equal(JSON.parse(await readFile(join(directory, "training-request.json"))).ticker, "HDFCBANK");
     assert.equal((await fetch(`${base}/trade/training`, { method: "POST", headers, body: JSON.stringify({ ticker: "RELIANCE" }) })).status, 409);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("dhan token status and submission require session and validate format without leaking secrets", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "alpha-grid-token-"));
+  const server = createTradingService("unused", {
+    simulationDir: directory,
+    verifySession: async (cookie) => cookie === "verified-fixture-cookie",
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    assert.equal((await fetch(`${base}/trade/dhan/token-status`)).status, 401);
+
+    const authedGet = await fetch(`${base}/trade/dhan/token-status`, {
+      headers: { Cookie: "verified-fixture-cookie" },
+    });
+    assert.equal(authedGet.status, 200);
+    const getPayload = await authedGet.json();
+    assert.ok(getPayload.status);
+
+    const headers = { "Content-Type": "application/json" };
+    assert.equal((await fetch(`${base}/trade/dhan/token`, { method: "POST", headers, body: "{}" })).status, 403);
+
+    const authedHeaders = {
+      Cookie: "verified-fixture-cookie",
+      Origin: "http://127.0.0.1:5173",
+      "Content-Type": "application/json",
+    };
+    const badClient = await fetch(`${base}/trade/dhan/token`, {
+      method: "POST",
+      headers: authedHeaders,
+      body: JSON.stringify({ clientId: "not-digits", accessToken: "validtoken123" }),
+    });
+    assert.equal(badClient.status, 400);
+
+    const badToken = await fetch(`${base}/trade/dhan/token`, {
+      method: "POST",
+      headers: authedHeaders,
+      body: JSON.stringify({ clientId: "123456", accessToken: "bad token with spaces!" }),
+    });
+    assert.equal(badToken.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("dhan token submission supports omitted clientId and verifies via shared loader", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "alpha-grid-token-"));
+  let stored = { clientId: "1000000001", token: "oldtoken" };
+  let installedPayload = null;
+
+  const mockInstaller = async (_simDir, payload) => {
+    installedPayload = payload;
+    stored = { clientId: payload.clientId, token: payload.accessToken };
+    return { status: "VALID", token_type: "API" };
+  };
+  const mockLoader = async () => stored;
+
+  const server = createTradingService("unused", {
+    simulationDir: directory,
+    verifySession: async (cookie) => cookie === "verified-fixture-cookie",
+    installer: mockInstaller,
+    credentialLoader: mockLoader,
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  try {
+    const base = `http://127.0.0.1:${server.address().port}`;
+    const headers = {
+      Cookie: "verified-fixture-cookie",
+      Origin: "http://127.0.0.1:5173",
+      "Content-Type": "application/json",
+    };
+
+    // 1. Submit without clientId: falls back to stored clientId "1000000001"
+    const freshToken = "fresh+token/with=base64";
+    const res = await fetch(`${base}/trade/dhan/token`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ accessToken: freshToken }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.verified_locally, true);
+    assert.equal(installedPayload.clientId, "1000000001");
+    assert.equal(installedPayload.accessToken, freshToken);
+
+    // 2. Verification failure when loader does not match installed token
+    const failingServer = createTradingService("unused", {
+      simulationDir: directory,
+      verifySession: async (cookie) => cookie === "verified-fixture-cookie",
+      installer: async () => ({ status: "VALID" }),
+      credentialLoader: async () => ({ clientId: "1000000001", token: "unmodified-old-token" }),
+    });
+    await new Promise((resolve) => failingServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const failingBase = `http://127.0.0.1:${failingServer.address().port}`;
+      const failRes = await fetch(`${failingBase}/trade/dhan/token`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ accessToken: "freshToken123" }),
+      });
+      assert.equal(failRes.status, 500);
+      assert.deepEqual(await failRes.json(), { error: "CREDENTIAL_VERIFICATION_FAILED" });
+    } finally {
+      await new Promise((resolve) => failingServer.close(resolve));
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("redactSensitive strips sensitive tokens, clientIds, secrets, and passwords", () => {
+  const payload = {
+    clientId: "1000000001",
+    accessToken: "raw.jwt.token",
+    dhan_api_secret: "supersecret",
+    normalMetric: 42.5,
+    status: "MOUNTED",
+    nested: {
+      password: "pass",
+      cookie: "alpha_grid_session=xyz",
+      safeValue: "safe",
+    },
+    array: [{ apiKey: "key1" }, { ok: true }],
+  };
+  const redacted = redactSensitive(payload);
+  assert.equal(redacted.clientId, "[REDACTED]");
+  assert.equal(redacted.accessToken, "[REDACTED]");
+  assert.equal(redacted.dhan_api_secret, "[REDACTED]");
+  assert.equal(redacted.normalMetric, 42.5);
+  assert.equal(redacted.status, "MOUNTED");
+  assert.equal(redacted.nested.password, "[REDACTED]");
+  assert.equal(redacted.nested.cookie, "[REDACTED]");
+  assert.equal(redacted.nested.safeValue, "safe");
+  assert.equal(redacted.array[0].apiKey, "[REDACTED]");
+  assert.equal(redacted.array[1].ok, true);
+});
+
+test("getStorageStats and testStorageWritable report accurate mount and write metrics", async () => {
+  const missingPath = join(tmpdir(), `non-existent-drive-${Date.now()}`);
+  const unmountedStats = await getStorageStats(missingPath);
+  assert.equal(unmountedStats.mounted, false);
+  assert.equal(unmountedStats.mount_state, "DRIVE_UNMOUNTED");
+  assert.equal(unmountedStats.failure_reason, "DRIVE_UNMOUNTED");
+  assert.equal(unmountedStats.applicable_action, "Connect AlphaGrid Drive");
+
+  const unmountedWrite = await testStorageWritable(missingPath);
+  assert.equal(unmountedWrite.writable, false);
+  assert.equal(unmountedWrite.write_test_result, "FAILED");
+
+  const tempDir = await mkdtemp(join(tmpdir(), "alpha-grid-storage-test-"));
+  try {
+    const mountedStats = await getStorageStats(tempDir);
+    assert.equal(mountedStats.mounted, true);
+    assert.equal(mountedStats.mount_state, "MOUNTED");
+    assert.ok(typeof mountedStats.free_bytes === "number" && mountedStats.free_bytes > 0);
+    assert.ok(typeof mountedStats.total_bytes === "number" && mountedStats.total_bytes > 0);
+
+    const writeTest = await testStorageWritable(tempDir);
+    assert.equal(writeTest.writable, true);
+    assert.equal(writeTest.write_test_result, "PASSED");
+    assert.equal(writeTest.failure_reason, null);
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+
+test("/trade/evidence and /trade/evidence/inspect expose observed evidence with redaction", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "alpha-grid-evidence-api-"));
+  const universePath = join(directory, "universe.json");
+  await writeFile(universePath, JSON.stringify({ instruments: [{ security_id: "2885", symbol: "RELIANCE" }] }));
+
+  const server = createTradingService("unused", {
+    simulationDir: directory,
+    universePath,
+    storageTarget: directory,
+    verifySession: async (cookie) => cookie === "evidence-cookie",
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Unauthenticated request rejected
+    const unauthRes = await fetch(`${base}/trade/evidence`);
+    assert.equal(unauthRes.status, 401);
+
+    // 2. Authenticated evidence returns all 5 headline categories
+    const res = await fetch(`${base}/trade/evidence`, {
+      headers: { Cookie: "evidence-cookie" },
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.schema_version, "alpha-grid-evidence-v1");
+    assert.equal(body.system_mode, "DATA_ONLY / SIMULATION_ONLY / NO TRADE");
+    assert.ok(body.storage);
+    assert.equal(body.storage.mount_state, "MOUNTED");
+    assert.equal(body.storage.write_test_result, "PASSED");
+    assert.ok(body.qj01_journal);
+    assert.ok(body.historical_archive);
+    assert.ok(body.simulation_ledger);
+    assert.ok(body.research_artifacts);
+
+    // 3. Inspect targets
+    for (const target of ["storage", "qj01", "historical", "simulation", "research"]) {
+      const inspectRes = await fetch(`${base}/trade/evidence/inspect?target=${target}`, {
+        headers: { Cookie: "evidence-cookie" },
+      });
+      assert.equal(inspectRes.status, 200);
+      const inspectBody = await inspectRes.json();
+      assert.equal(inspectBody.target, target);
+      assert.ok(inspectBody.redaction_notice);
+      assert.ok(inspectBody.metadata);
+      assert.ok(Array.isArray(inspectBody.recent_records));
+    }
+
+    // 4. Invalid target rejected
+    const invalidInspect = await fetch(`${base}/trade/evidence/inspect?target=invalid_scope`, {
+      headers: { Cookie: "evidence-cookie" },
+    });
+    assert.equal(invalidInspect.status, 400);
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("/trade/storage/action executes valid actions and fails closed on unmounted storage", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "alpha-grid-actions-"));
+  const universePath = join(directory, "universe.json");
+  await writeFile(universePath, JSON.stringify({ instruments: [{ security_id: "2885", symbol: "RELIANCE" }] }));
+
+  const server = createTradingService("unused", {
+    simulationDir: directory,
+    universePath,
+    storageTarget: directory,
+    verifySession: async (cookie) => cookie === "action-cookie",
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    const postAction = async (action) =>
+      fetch(`${base}/trade/storage/action`, {
+        method: "POST",
+        headers: {
+          Origin: "http://127.0.0.1:5173",
+          Cookie: "action-cookie",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action }),
+      });
+
+    // 1. Connect
+    const connRes = await postAction("connect");
+    assert.equal(connRes.status, 200);
+    const connBody = await connRes.json();
+    assert.equal(connBody.success, true);
+    assert.equal(connBody.action, "connect");
+
+    // 2. Verify
+    const verifyRes = await postAction("verify");
+    assert.equal(verifyRes.status, 200);
+    const verifyBody = await verifyRes.json();
+    assert.equal(verifyBody.action, "verify");
+
+    // 3. Start services
+    const startRes = await postAction("start-services");
+    assert.equal(startRes.status, 200);
+    const startBody = await startRes.json();
+    assert.equal(startBody.success, true);
+
+    // 4. Arm read-only capture
+    const armRes = await postAction("arm-capture");
+    assert.equal(armRes.status, 200);
+    const armBody = await armRes.json();
+    assert.equal(armBody.success, true);
+    assert.deepEqual(armBody.access.authorized_feeds, ["STANDARD_QUOTE", "DEPTH_20"]);
+
+    // 5. Stop safely
+    const stopRes = await postAction("stop-safely");
+    assert.equal(stopRes.status, 200);
+    const stopBody = await stopRes.json();
+    assert.equal(stopBody.success, true);
+
+    // 6. Replay
+    const replayRes = await postAction("replay");
+    assert.equal(replayRes.status, 200);
+    const replayBody = await replayRes.json();
+    assert.equal(replayBody.success, true);
+    assert.equal(replayBody.replay_summary.evaluated_slots, 6840);
+    assert.equal(replayBody.replay_summary.abstention_rate, "100.0%");
+
+    // 7. Invalid action rejected
+    const badRes = await postAction("invalid_action");
+    assert.equal(badRes.status, 400);
+
+    // 8. Fail-closed on unmounted storage target
+    const unmountedServer = createTradingService("unused", {
+      simulationDir: join(directory, "nonexistent"),
+      universePath,
+      storageTarget: join(directory, "nonexistent"),
+      verifySession: async (cookie) => cookie === "action-cookie",
+    });
+    await new Promise((resolve) => unmountedServer.listen(0, "127.0.0.1", resolve));
+    try {
+      const unmountedBase = `http://127.0.0.1:${unmountedServer.address().port}`;
+      const unmountedArm = await fetch(`${unmountedBase}/trade/storage/action`, {
+        method: "POST",
+        headers: {
+          Origin: "http://127.0.0.1:5173",
+          Cookie: "action-cookie",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ action: "arm-capture" }),
+      });
+      assert.equal(unmountedArm.status, 503);
+      const unmountedBody = await unmountedArm.json();
+      assert.equal(unmountedBody.success, false);
+      assert.equal(unmountedBody.reason, "DRIVE_UNMOUNTED");
+      assert.equal(unmountedBody.applicable_action, "Connect AlphaGrid Drive");
+    } finally {
+      await new Promise((resolve) => unmountedServer.close(resolve));
+    }
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("/trade/simulation and /trade/simulation/decisions serve offline replay records", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "alpha-grid-replay-test-"));
+  const universePath = join(directory, "universe.json");
+  await writeFile(
+    universePath,
+    JSON.stringify({
+      instruments: [{ symbol: "RELIANCE", security_id: "2885" }],
+    }),
+  );
+
+  const server = createTradingService("unused", {
+    simulationDir: directory,
+    universePath,
+    verifySession: async (cookie) => cookie === "replay-session-cookie",
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const headers = { Cookie: "replay-session-cookie" };
+
+  try {
+    // 1. /trade/simulation falls back to offline simulation status
+    const simRes = await fetch(`${base}/trade/simulation`, { headers });
+    assert.equal(simRes.status, 200);
+    const simBody = await simRes.json();
+    assert.equal(simBody.schema_version, "alpha-grid-live-portfolio-simulation-v2");
+    assert.equal(simBody.state, "OFFLINE_REPLAY_COMPLETED");
+    assert.equal(simBody.cash_inr, "20000.00");
+
+    // 2. /trade/simulation/decisions returns replay records
+    const decRes = await fetch(`${base}/trade/simulation/decisions?limit=10`, { headers });
+    assert.equal(decRes.status, 200);
+    const decBody = await decRes.json();
+    assert.equal(decBody.schema_version, "alpha-grid-replay-decisions-v1");
+    assert.ok(decBody.total > 0);
+    assert.equal(decBody.decisions.length, 10);
+    assert.ok(decBody.decisions[0].action === "NO_TRADE");
+    assert.ok(decBody.decisions[0].reason.includes("MODEL_STAGE3_REJECTED"));
+
+    // 3. /trade/simulation/decisions with symbol filter
+    const symRes = await fetch(`${base}/trade/simulation/decisions?symbol=AXISBANK&limit=5`, { headers });
+    assert.equal(symRes.status, 200);
+    const symBody = await symRes.json();
+    assert.equal(symBody.symbol, "AXISBANK");
+    assert.ok(symBody.decisions.every((d) => d.symbol === "AXISBANK"));
+
+    // 4. Session authentication required
+    const noAuth = await fetch(`${base}/trade/simulation/decisions`);
+    assert.equal(noAuth.status, 401);
   } finally {
     await new Promise((resolve) => server.close(resolve));
     await rm(directory, { recursive: true, force: true });

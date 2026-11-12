@@ -29,14 +29,78 @@ vite="$root/web/node_modules/vite/bin/vite.js"
 command -v node >/dev/null || { echo 'Node.js 24 is required.' >&2; exit 1; }
 command -v openssl >/dev/null || { echo 'OpenSSL is required.' >&2; exit 1; }
 
-# Keep Mac development records separate from the Windows Dhan archive.
-private="$HOME/Library/Application Support/AlphaGrid/offline-dev"
+# Keep persistent market data on the encrypted external APFS volume. The
+# credential store remains under the repository's owner-private data/.secrets.
+plain_hdd="/Volumes/Danny's HDD/AlphaGrid-Plain"
+data_volume="${ALPHA_GRID_STORAGE_TARGET:-${ALPHA_GRID_DATA_VOLUME:-$plain_hdd}}"
+data_image="/Volumes/Danny's HDD/AlphaGridData-2026-11-05-v2.sparsebundle"
+data_key_service="com.alphagrid.external-data.2026-11-05-v2"
+external_data_mounted() {
+  if [[ -d "$plain_hdd" ]]; then
+    mount | grep -F " on /Volumes/Danny's HDD (" | grep -Evq 'read-only'
+  else
+    mount | grep -F " on $data_volume (" | grep -Evq 'noowners|read-only'
+  fi
+}
+offline_fallback=false
+if ! external_data_mounted; then
+  if mount | grep -Fq " on $data_volume (apfs,"; then
+    echo 'Alpha Grid data volume is read-only or lacks APFS ownership checks.' >&2
+    exit 1
+  fi
+  if [[ -d "$data_image" ]]; then
+    attached=false
+    if security find-generic-password -a "$(id -un)" -s "$data_key_service" >/dev/null 2>&1; then
+      if security find-generic-password -a "$(id -un)" -s "$data_key_service" -w |
+        "$python" -c 'import sys; sys.stdout.buffer.write(sys.stdin.buffer.read().removesuffix(b"\n") + b"\0")' |
+        hdiutil attach -stdinpass -owners on -mountpoint "$data_volume" -nobrowse "$data_image" >/dev/null; then
+        attached=true
+      fi
+    fi
+    if [[ "$attached" != true ]] && ! external_data_mounted; then
+      echo 'Unlock the Alpha Grid data image to continue.' >&2
+      if [[ -t 0 ]]; then
+        hdiutil attach -stdinpass -owners on -mountpoint "$data_volume" -nobrowse "$data_image" </dev/tty >/dev/null || {
+          echo 'Alpha Grid HDD image could not be mounted; no local-data fallback.' >&2
+          exit 1
+        }
+      else
+        hdiutil attach -agentpass -owners on -mountpoint "$data_volume" -nobrowse "$data_image" >/dev/null || {
+          echo 'Alpha Grid HDD image could not be mounted; no local-data fallback.' >&2
+          exit 1
+        }
+      fi
+    fi
+  else
+    echo 'Alpha Grid HDD image is unavailable; running in offline DATA_ONLY fallback mode.' >&2
+    offline_fallback=true
+  fi
+fi
+if [[ "$offline_fallback" == true ]]; then
+  private="$root/.local/offline-dev"
+  mkdir -m 700 -p "$private"
+  if [[ -f "$root/data/telemetry/offline_simulation_status.json" && ! -f "$private/simulation-status.json" ]]; then
+    cp "$root/data/telemetry/offline_simulation_status.json" "$private/simulation-status.json"
+  fi
+else
+  external_data_mounted || {
+    echo 'Alpha Grid data volume lacks APFS ownership checks.' >&2
+    exit 1
+  }
+  private="$data_volume/Live/offline-dev"
+fi
 if [[ -L "$private" ]]; then
   echo 'Private development directory cannot be a symlink.' >&2
   exit 1
 fi
 if [[ ! -e "$private" ]]; then
   mkdir -m 700 -p "$private"
+fi
+if [[ -f "$root/data/telemetry/offline_simulation_status.json" && ! -f "$private/simulation-status.json" ]]; then
+  cp "$root/data/telemetry/offline_simulation_status.json" "$private/simulation-status.json"
+fi
+if [[ -f "$root/data/telemetry/paper-approvals.qp" && ! -f "$private/paper-approvals.qp" ]]; then
+  cp "$root/data/telemetry/paper-approvals.qp" "$private/paper-approvals.qp"
 fi
 [[ -d "$private" && ! -L "$private" && "$(stat -f %u "$private")" == "$(id -u)" ]] || {
   echo 'Private development directory owner invalid.' >&2
@@ -135,7 +199,7 @@ for port in 8765 8767 5173; do
     case "$port:$command_line" in
       8765:*"$root/rust/target/"*"telemetry_local"*|\
       8767:*"$root/web/server/trading-service.mjs"*|\
-      5173:*"$root/web/node_modules/vite/"*) kill -TERM "$pid" 2>/dev/null || true ;;
+      5173:*"$root/web/node_modules/"*vite*) kill -TERM "$pid" 2>/dev/null || true ;;
       *) echo "Port $port belongs to another application; cannot replace it." >&2; abort_startup ;;
     esac
   done < <(lsof -nP -iTCP:"$port" -sTCP:LISTEN -t 2>/dev/null || true)
@@ -161,8 +225,10 @@ pids=()
 depth_pid=0
 gateway_stop="$private/gateway-stop-requested"
 cleanup() {
-  : > "$private/stop-requested"
-  : > "$gateway_stop"
+  if external_data_mounted || [[ "$offline_fallback" == true ]]; then
+    : > "$private/stop-requested"
+    : > "$gateway_stop"
+  fi
   # Give the gateway a chance to close and sync its QJ01 writer.
   for attempt in {1..20}; do
     if [[ ${#pids[@]} -lt 2 ]] || ! kill -0 "${pids[1]}" 2>/dev/null; then break; fi
@@ -191,6 +257,7 @@ rm -f "$private/stop-requested"
 rm -f "$gateway_stop"
 
 scope_plan() {
+  if [[ "$offline_fallback" == true ]]; then return 1; fi
   # The daily budget limits NEW connections; never stop an active socket solely
   # because its successful connection consumed the final attempt.
   if [[ "${1:-}" != live ]] && ! "$python" - "$private" <<'PY'
@@ -213,7 +280,7 @@ if log.exists():
                  if str(row.get("event", {}).get("detail", "")).startswith("STOPPED:")]
         reason = ("UPGRADE_HTTP_400_DAILY_ATTEMPTS_EXHAUSTED"
                   if stops and stops[-1] == "STOPPED:UPGRADE_HTTP_400"
-                  else "DAILY_FEED_ATTEMPTS_EXHAUSTED") if len(attempts) >= 12 else None
+                  else "DAILY_FEED_ATTEMPTS_EXHAUSTED") if len(attempts) >= 120 else None
     except (OSError, ValueError, KeyError, TypeError):
         reason = "FEED_ATTEMPT_LOG_INVALID"
     if reason:
@@ -250,6 +317,7 @@ launch_gateway() {
       ALPHA_GRID_UI_SESSION_SECRET="$session_secret" ALPHA_GRID_PYTHON="$python" \
       PYTHONPATH="$root/src" "$python" -m quant.apps.live_feed_credentials \
       --root "$root" --private-dir "$private" --gateway "$gateway" &
+    gateway_pid=$!
     gateway_mode=live
     if [[ "$depth_flag" == 1 ]]; then
       env -u DHAN_API_KEY -u DHAN_API_SECRET \
@@ -274,6 +342,7 @@ launch_gateway() {
         --universe "$root/docs/cross-stock-universe-2026-11-02.json" \
         --approval-ledger "$private/paper-approvals.qp" \
         --stop-file "$gateway_stop" &
+      gateway_pid=$!
     else
       env -u DHAN_ACCESS_TOKEN -u DHAN_API_KEY -u DHAN_API_SECRET -u DHAN_CLIENT_ID \
         -u ALPHA_GRID_ONLINE_MODE -u ALPHA_GRID_ENABLE_DHAN_QUOTE \
@@ -281,10 +350,10 @@ launch_gateway() {
         PYTHONPATH="$root/src" \
         "$gateway" --security-id 2885 --approval-ledger "$private/paper-approvals.qp" \
         --stop-file "$gateway_stop" &
+      gateway_pid=$!
     fi
     gateway_mode=offline
   fi
-  gateway_pid=$!
   pids[1]="$gateway_pid"
 }
 
@@ -310,14 +379,20 @@ stop_gateway() {
 }
 
 start_node() {
+  local account_offline=0
+  if [[ "$offline_fallback" == true ]]; then
+    account_offline=1
+  fi
   # Account reads are limited to funds, holdings and positions; no order writes.
   env -u DHAN_ACCESS_TOKEN -u DHAN_API_KEY -u DHAN_API_SECRET -u DHAN_CLIENT_ID \
     -u ALPHA_GRID_ONLINE_MODE -u ALPHA_GRID_ENABLE_DHAN_QUOTE \
-    ALPHA_GRID_ACCOUNT_OFFLINE=0 ALPHA_GRID_ACCOUNT_SYNC=1 \
+    ALPHA_GRID_ACCOUNT_OFFLINE="$account_offline" ALPHA_GRID_ACCOUNT_SYNC=1 \
     ALPHA_GRID_ACCOUNT_READ_ONLY_LIMITED=1 \
     ALPHA_GRID_PYTHON="$python" PYTHONPATH="$root/src" \
     ALPHA_GRID_TRADING_SETTINGS="$private/settings.json" \
     ALPHA_GRID_SIMULATION_DIR="$private" \
+    ALPHA_GRID_STORAGE_TARGET="$data_volume" \
+    ALPHA_GRID_ACCOUNT_CACHE_DIR="$private/dhan-account-cache" \
     ALPHA_GRID_UNIVERSE_PATH="$root/docs/cross-stock-universe-2026-11-02.json" \
     ALPHA_GRID_DEPTH_AVAILABLE="$(test -x "$depth_binary" && echo 1 || echo 0)" \
     ALPHA_GRID_UI_SESSION_SECRET="$session_secret" \
@@ -424,6 +499,10 @@ for attempt in {1..160}; do
     gateway_failed=0
     attempt_day="$(TZ=Asia/Kolkata date +%Y-%m-%d)"
     while true; do
+      if [[ "$offline_fallback" != true ]] && ! external_data_mounted; then
+        echo 'Alpha Grid HDD disconnected; stopping local services.' >&2
+        exit 1
+      fi
       if [[ -e "$private/stop-requested" ]]; then exit 0; fi
       if [[ "$gateway_mode" == live ]] && (( $(date +%s) >= gateway_expiry )); then
         stop_gateway
@@ -433,7 +512,7 @@ for attempt in {1..160}; do
       if [[ "$day" != "$attempt_day" ]]; then attempt_day="$day"; live_attempts=0; offline_restarts=0; gateway_failed=0; fi
       if (( gateway_failed == 0 )) && ! kill -0 "$gateway_pid" 2>/dev/null; then
         wait "$gateway_pid" 2>/dev/null || true
-        if [[ "$gateway_mode" == live && "$live_attempts" -lt 12 ]] && next_scope="$(scope_plan)"; then
+        if [[ "$gateway_mode" == live && "$live_attempts" -lt 120 ]] && next_scope="$(scope_plan)"; then
           live_attempts=$((live_attempts + 1))
           launch_gateway "$next_scope"
         else
@@ -459,7 +538,7 @@ for attempt in {1..160}; do
         check_counter=0
         if next_scope="$(scope_plan "$gateway_mode")"; then
           IFS='|' read -r _ _ _ _ _ _ _ _ next_standard_mode _ _ _ <<< "$next_scope"
-          if [[ "$gateway_mode" != live ]] && (( live_attempts < 12 )); then
+          if [[ "$gateway_mode" != live ]] && (( live_attempts < 120 )); then
             stop_gateway
             live_attempts=$((live_attempts + 1))
             launch_gateway "$next_scope"
@@ -467,7 +546,7 @@ for attempt in {1..160}; do
           elif [[ ( "$gateway_capture_mode" == RAW_CAPTURE_ONLY &&
                   "$next_scope" == *'|RAW_CAPTURE_WITH_ELIGIBLE_PROJECTION|'* ) ||
                   "$gateway_standard_mode" != "$next_standard_mode" ]] &&
-                  (( live_attempts < 12 )); then
+                  (( live_attempts < 120 )); then
             # A new dated proof can enable the optional projection after one
             # bounded reconnect; raw capture was already active until now.
             stop_gateway

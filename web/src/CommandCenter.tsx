@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { WireEngineSnapshot, WireInstrumentSnapshot } from "./generated/engine-snapshot";
 import type { RestSnapshot } from "./TradingWorkspace";
 import { amount, dateTime, price, time } from "./format";
+import StorageSessionPanel from "./StorageSessionPanel";
 
 export const FOCUS = [
   "2885",   // RELIANCE
@@ -1008,6 +1009,7 @@ export default function CommandCenter({
 
   return (
     <section className="command-center gamified-theme" aria-label="Command Center">
+      <StorageSessionPanel onInspectStock={onInspect} />
       {/* -------------------------------------------------------------------
           A. GLOBAL SESSION HUD (Top Persistent Status Strip)
           ------------------------------------------------------------------- */}

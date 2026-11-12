@@ -655,6 +655,14 @@ type MarketAccess = {
   revoked_at: string | null;
 };
 
+interface TokenDetailsResponse {
+  status?: "VALID" | "EXPIRING" | "EXPIRED" | "AUTH REQUIRED";
+  expires_at_ist?: string | null;
+  token_type?: string | null;
+  is_renewable?: boolean;
+  client_id_masked?: string;
+}
+
 function MarketDataConnection() {
   const [access, setAccess] = useState<MarketAccess | null>(null);
   const [universe, setUniverse] = useState<{ symbol: string; security_id: string }[]>([]);
@@ -671,13 +679,22 @@ function MarketDataConnection() {
   const [feed, setFeed] = useState("STARTING");
   const [reason, setReason] = useState<string | null>(null);
   const [profileStatus, setProfileStatus] = useState("");
+  const [tokenStatus, setTokenStatus] = useState<"VALID" | "EXPIRING" | "EXPIRED" | "AUTH REQUIRED">("AUTH REQUIRED");
+  const [tokenDetails, setTokenDetails] = useState<TokenDetailsResponse | null>(null);
+  const [clientIdInput, setClientIdInput] = useState("");
+  const [tokenInput, setTokenInput] = useState("");
+  const [tokenTypeInput, setTokenTypeInput] = useState<"API" | "WEB">("API");
+  const [expiryInput, setExpiryInput] = useState("");
+  const [tokenActionMsg, setTokenActionMsg] = useState("");
+  const [renewing, setRenewing] = useState(false);
   useEffect(() => {
     const controller = new AbortController();
     async function refresh() {
       try {
-        const [permission, capability] = await Promise.all([
+        const [permission, capability, tokenRes] = await Promise.all([
           fetch("/trade/market-data-access", { cache: "no-store", signal: controller.signal }),
           fetch("/trade/capabilities", { cache: "no-store", signal: controller.signal }),
+          fetch("/trade/dhan/token-status", { cache: "no-store", signal: controller.signal }).catch(() => null),
         ]);
         if (!permission.ok || !capability.ok) throw new Error("Market data controls unavailable");
         const saved = await permission.json() as { access: MarketAccess | null; universe: { symbol: string; security_id: string }[]; depth_available: boolean };
@@ -691,6 +708,11 @@ function MarketDataConnection() {
         setDepthAvailable(saved.depth_available === true);
         setFeed(health.feed);
         setReason(health.feed_reason);
+        if (tokenRes && tokenRes.ok) {
+          const tData = await tokenRes.json() as TokenDetailsResponse;
+          if (tData.status) setTokenStatus(tData.status);
+          setTokenDetails(tData);
+        }
         setMessage("");
       } catch (error) {
         if (!controller.signal.aborted)
@@ -701,6 +723,60 @@ function MarketDataConnection() {
     const timer = setInterval(() => void refresh(), 5000);
     return () => { controller.abort(); clearInterval(timer); };
   }, []);
+  async function submitToken(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setTokenActionMsg("");
+    try {
+      const res = await fetch("/trade/dhan/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          clientId: clientIdInput.trim() || undefined,
+          accessToken: tokenInput.trim(),
+          tokenType: tokenTypeInput,
+          expiryTime: expiryInput || undefined,
+        }),
+      });
+      const data = await res.json() as { error?: string; verified_locally?: boolean };
+      if (!res.ok) throw new Error(data.error ?? "Token installation failed");
+      if (!data.verified_locally) throw new Error("Credential could not be verified by shared loader");
+      setTokenActionMsg("DhanHQ token securely saved in private storage and verified.");
+      setClientIdInput("");
+      setTokenInput("");
+      setExpiryInput("");
+      const tRes = await fetch("/trade/dhan/token-status");
+      if (tRes.ok) {
+        const tData = await tRes.json() as TokenDetailsResponse;
+        if (tData.status) setTokenStatus(tData.status);
+        setTokenDetails(tData);
+      }
+    } catch (err) {
+      setTokenActionMsg(err instanceof Error ? err.message : "Token installation failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function renewToken() {
+    setRenewing(true);
+    setTokenActionMsg("");
+    try {
+      const res = await fetch("/trade/dhan/renew-token", { method: "POST" });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Renewal failed");
+      setTokenActionMsg("Dhan token successfully renewed via RenewToken API.");
+      const tRes = await fetch("/trade/dhan/token-status");
+      if (tRes.ok) {
+        const tData = await tRes.json() as TokenDetailsResponse;
+        if (tData.status) setTokenStatus(tData.status);
+        setTokenDetails(tData);
+      }
+    } catch (err) {
+      setTokenActionMsg(err instanceof Error ? err.message : "Renewal failed");
+    } finally {
+      setRenewing(false);
+    }
+  }
   async function act(action: "approve" | "connect" | "disconnect" | "revoke") {
     setBusy(true);
     setMessage("");
@@ -735,9 +811,74 @@ function MarketDataConnection() {
   return <section className="trade-settings" aria-label="Market Data Connection">
     <h2>Market Data Connection</h2>
     <p>Read-only Dhan data for the frozen 25 NSE cash equities. Virtual simulation only; broker orders remain disabled.</p>
-    <details><summary>Install a fresh Dhan Client ID and Access Token locally</summary>
+
+    <div className="token-status-hud" style={{ border: "1px solid #315652", borderRadius: 4, padding: "8px 12px", margin: "8px 0", background: "rgba(0,0,0,0.15)" }}>
+      <p style={{ margin: "4px 0" }}>
+        <strong>Dhan Access Token:</strong>{" "}
+        <span className={`status-badge status-${tokenStatus.toLowerCase().replace(/\s+/g, "-")}`}
+              style={{ fontWeight: "bold", padding: "2px 6px", borderRadius: 3,
+                       background: tokenStatus === "VALID" ? "#1e4620" : tokenStatus === "EXPIRING" ? "#614000" : "#5c1d1d" }}>
+          {tokenStatus}
+        </span>
+        {tokenDetails?.client_id_masked && <span> · Client {tokenDetails.client_id_masked}</span>}
+        {tokenDetails?.token_type && <span> · Type {tokenDetails.token_type}</span>}
+        {tokenDetails?.expires_at_ist && <span> · Expires {tokenDetails.expires_at_ist}</span>}
+      </p>
+      <p style={{ margin: "4px 0", fontSize: "0.85em", color: "#888" }}>
+        Automatic renewal: <em>Disabled</em> (Requires explicit operator approval per session rules).
+      </p>
+      {tokenDetails?.is_renewable && tokenStatus !== "EXPIRED" && tokenStatus !== "AUTH REQUIRED" && (
+        <button type="button" disabled={busy || renewing} onClick={() => void renewToken()} style={{ marginTop: 4 }}>
+          {renewing ? "Renewing…" : "Renew Active Token Now (via RenewToken API)"}
+        </button>
+      )}
+    </div>
+
+    <details open={tokenStatus === "AUTH REQUIRED" || tokenStatus === "EXPIRED"}>
+      <summary>Supply DhanHQ Access Token (No Browser Login Required)</summary>
+      <form onSubmit={(e) => void submitToken(e)} style={{ display: "flex", flexDirection: "column", gap: 8, margin: "8px 0" }}>
+        <p style={{ margin: "2px 0", fontSize: "0.9em" }}>
+          Paste your DhanHQ Access Token below. Tokens are written atomically to owner-private storage and never exposed to browser storage, logs, or telemetry.
+        </p>
+        <label>
+          Dhan Client ID:{" "}
+          <input
+            type="text"
+            pattern="[0-9]*"
+            value={clientIdInput}
+            onChange={(e) => setClientIdInput(e.target.value)}
+            placeholder={tokenDetails?.client_id_masked ? `Using stored ${tokenDetails.client_id_masked} (or enter new)` : "e.g. 1000000001"}
+          />
+        </label>
+        <label>
+          Access Token:{" "}
+          <input type="password" autoComplete="off" required value={tokenInput} onChange={(e) => setTokenInput(e.target.value)} placeholder="Paste token here" />
+        </label>
+        <label>
+          Token Type:{" "}
+          <select value={tokenTypeInput} onChange={(e) => setTokenTypeInput(e.target.value as "API" | "WEB")}>
+            <option value="API">DhanHQ API Access Token (Standard)</option>
+            <option value="WEB">Dhan Web Access Token (Renewable via RenewToken)</option>
+          </select>
+        </label>
+        <label>
+          Optional Expiry IST:{" "}
+          <input type="datetime-local" value={expiryInput} onChange={(e) => setExpiryInput(e.target.value)} />
+        </label>
+        <button
+          type="submit"
+          disabled={busy || !tokenInput.trim() || (!clientIdInput.trim() && !tokenDetails?.client_id_masked)}
+          style={{ alignSelf: "flex-start" }}
+        >
+          Save Token Locally
+        </button>
+        {tokenActionMsg && <p role="status" style={{ margin: "4px 0" }}>{tokenActionMsg}</p>}
+      </form>
+    </details>
+
+    <details><summary>Install a fresh Dhan Client ID and Access Token via Terminal</summary>
       <p>Run this in Terminal. The prompts hide both values and store them in owner-private backend files:</p>
-      <pre>{'cd ~/alpha-grid && PYTHONPATH=src .venv/bin/python -m quant.apps.live_feed_credentials --root . --private-dir "$HOME/Library/Application Support/AlphaGrid/offline-dev" --install-web-token'}</pre>
+      <pre>{'cd ~/alpha-grid && PYTHONPATH=src .venv/bin/python -m quant.apps.live_feed_credentials --root . --private-dir "/Volumes/AlphaGrid Data/Live/offline-dev" --install-token'}</pre>
       <p>Enter the expiry shown by Dhan. A new valid local token creates the standard-feed 25-stock scope unless you previously revoked it.</p>
     </details>
     <button type="button" disabled={busy} onClick={() => { setProfileStatus("CHECKING"); void fetch("/trade/dhan/profile", { method: "POST" }).then(async (response) => {

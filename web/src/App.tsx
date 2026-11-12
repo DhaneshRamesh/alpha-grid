@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Chart from "./Chart";
 import CommandCenter from "./CommandCenter";
+import StorageSessionPanel from "./StorageSessionPanel";
+import LiveMonitor from "./LiveMonitor";
 import PaperWorkspace from "./PaperWorkspace";
 import ResearchWorkspace from "./ResearchWorkspace";
 import SimulationWorkspace from "./SimulationWorkspace";
@@ -37,6 +39,8 @@ type View =
   | "Trade desk"
   | "Trading settings"
   | "Overview"
+  | "Storage & Session"
+  | "Live Monitor"
   | "Market intelligence"
   | "Candle workstation"
   | "Order book"
@@ -50,6 +54,8 @@ const views: { name: View; icon: string; short: string }[] = [
   { name: "Trade desk", icon: "◎", short: "DESK" },
   { name: "Trading settings", icon: "⚙", short: "RULES" },
   { name: "Overview", icon: "◫", short: "01" },
+  { name: "Storage & Session", icon: "⛁", short: "STOR" },
+  { name: "Live Monitor", icon: "⌖", short: "LIVE" },
   { name: "Market intelligence", icon: "◈", short: "02" },
   { name: "Candle workstation", icon: "▥", short: "03" },
   { name: "Order book", icon: "≡", short: "04" },
@@ -1579,6 +1585,27 @@ export default function App() {
                   historical={visibleHistorical} restSnapshot={restSnapshot} />
               </details>
             </>
+          )}
+          {view === "Storage & Session" && (
+            <div className="storage-view-wrapper">
+              <StorageSessionPanel
+                onInspectStock={(key) => {
+                  setInstrumentKey(key);
+                  setView("Candle workstation");
+                }}
+              />
+            </div>
+          )}
+          {view === "Live Monitor" && (
+            <LiveMonitor
+              snapshot={snapshot}
+              connection={connection}
+              historical={visibleHistorical}
+              restSnapshot={restSnapshot}
+              selectedInstrumentKey={instrumentKey}
+              onSelectInstrument={(key) => setInstrumentKey(key)}
+              feedState={capabilities?.feed}
+            />
           )}
           {view === "Market intelligence" && (
             <MarketIntelligence
