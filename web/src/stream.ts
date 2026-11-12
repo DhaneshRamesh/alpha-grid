@@ -21,12 +21,107 @@ export const initialState: StreamState = {
   reconnects: 0,
 };
 
+let localBootstrap: Promise<void> | null = null;
+
 function validSnapshot(value: unknown): value is WireEngineSnapshot {
+  const hasReason = (reason: string) =>
+    (value as WireEngineSnapshot).no_trade_reasons.includes(reason);
+  const validDepth = (item: WireEngineSnapshot["instruments"][number]) => {
+    if (item.depth == null) return true;
+    const { market, depth } = item;
+    if (depth.source === "DEPTH_20") {
+      return (
+        depth.bids.length <= 20 &&
+        depth.asks.length <= 20 &&
+        depth.derived_pairing === true &&
+        typeof depth.receive_timestamp_ns === "string"
+      );
+    }
+    if (!market || !depth.provenance ||
+        !["RAW_FULL", "FULL"].includes(market.packet_kind ?? "") ||
+        depth.source !== (market.packet_kind === "RAW_FULL" ? "STANDARD_FULL_RAW" : "STANDARD_FULL") ||
+        (market.packet_kind === "RAW_FULL") !== hasReason("RAW_CAPTURE_VALIDATION_PENDING") ||
+        depth.receive_timestamp_ns !== market.source_receive_timestamp_ns ||
+        depth.provenance.source_protocol !== "DhanStandardV2" ||
+        depth.provenance.feed_session_id !== market.provenance.feed_session_id ||
+        depth.provenance.source_frame_id !== market.provenance.source_frame_id ||
+        depth.provenance.packet_offset !== market.provenance.packet_offset ||
+        !/^[0-9a-f]{64}$/i.test(market.provenance.raw_frame_sha256 ?? "") ||
+        depth.provenance.raw_frame_sha256 !== market.provenance.raw_frame_sha256 ||
+        depth.bids.length !== 5 || depth.asks.length !== 5)
+      return false;
+    return true;
+  };
+  const usable = (value: unknown) => {
+    if (typeof value !== "object" || value === null) return false;
+    const item = value as WireEngineSnapshot["instruments"][number];
+    return [item.market, item.features].every(
+      (observation) =>
+        observation == null ||
+        (typeof observation.quality?.stale === "boolean" &&
+          typeof observation.quality?.source_time_unverified === "boolean" &&
+          ["DhanStandardV2", "DhanDepth20"].includes(
+            observation.provenance?.source_protocol ?? "",
+          )),
+    );
+  };
   return (
     typeof value === "object" &&
     value !== null &&
+    "mode" in value &&
+    "journal_blocked" in value &&
     "instruments" in value &&
     Array.isArray(value.instruments) &&
+    "approved_security_ids" in value &&
+    Array.isArray(value.approved_security_ids) &&
+    "no_trade_reasons" in value &&
+    Array.isArray(value.no_trade_reasons) &&
+    ((value.mode === "OBSERVE_ONLY" &&
+      value.journal_blocked === false &&
+      (!("paper" in value) || value.paper == null) &&
+      (value.no_trade_reasons as string[]).includes("OBSERVATION_ONLY") &&
+      (value.no_trade_reasons as string[]).includes("NO_ELIGIBLE_DHAN_FEED") &&
+      (!hasReason("RAW_CAPTURE_VALIDATION_PENDING") ||
+        hasReason("SESSION_CLASSIFICATION_UNVERIFIED")) &&
+      (value.instruments.length === 1 || value.instruments.length === 25) &&
+      new Set(value.instruments.map((item: WireEngineSnapshot["instruments"][number]) =>
+        item.instrument.security_id)).size === value.instruments.length &&
+      value.instruments.every(usable) &&
+      value.instruments.every(
+        (item: WireEngineSnapshot["instruments"][number]) =>
+          item.instrument.venue === "NSE" &&
+          item.instrument.exchange_segment === "NSE_EQ" &&
+          /^[0-9]+$/.test(item.instrument.security_id) &&
+          ((value.instruments as WireEngineSnapshot["instruments"]).length === 25 || item.instrument.security_id === "2885") &&
+          item.features == null &&
+          validDepth(item) &&
+          item.candles.length === 0 &&
+          (!item.market?.packet_kind ||
+            !item.market.packet_kind.startsWith("RAW_") ||
+            hasReason("RAW_CAPTURE_VALIDATION_PENDING")) &&
+          (!item.market ||
+            item.market.provenance.source_protocol === "DhanStandardV2") &&
+          (!item.market?.quality.stale ||
+            (value.no_trade_reasons as string[]).includes(
+              "MARKET_DATA_STALE",
+            )) &&
+          (!item.market?.quality.source_time_unverified ||
+            (value.no_trade_reasons as string[]).includes(
+              "SOURCE_TIME_UNVERIFIED",
+            )),
+      )) ||
+      (value.mode === "DATA_ONLY" &&
+        "feed_connected" in value &&
+        value.feed_connected === false &&
+        "paper" in value &&
+        value.paper == null &&
+        value.instruments.every(
+          (item: WireEngineSnapshot["instruments"][number]) =>
+            item.market == null &&
+            item.features == null &&
+            item.depth == null &&
+            item.candles.length === 0,
+        ))) &&
     "counters" in value
   );
 }
@@ -87,6 +182,8 @@ export function applyEnvelope(
     instruments,
     audit: next.audit,
   };
+  if (!validSnapshot(snapshot))
+    return { ...initialState, connection: state.connection };
   return {
     ...state,
     snapshot,
@@ -96,28 +193,85 @@ export function applyEnvelope(
   };
 }
 
-export function useEngineStream(): StreamState {
+export function useEngineStream(enabled = true): StreamState {
   const [state, setState] = useState<StreamState>(initialState);
   useEffect(() => {
+    if (!enabled) return;
     let closed = false;
     let socket: WebSocket | null = null;
     let retry: ReturnType<typeof setTimeout> | null = null;
     let failures = 0;
-    async function resync() {
-      try {
-        const response = await fetch("/api/snapshot", { cache: "no-store" });
-        if (response.ok) {
-          const envelope = (await response.json()) as Envelope;
-          if (!closed)
-            setState((current) =>
-              current.snapshot ? current : applyEnvelope(current, envelope),
-            );
-        }
-      } catch {
-        /* WebSocket retry owns connection status. */
-      }
+    function scheduleRetry() {
+      if (closed) return;
+      setState((current) => ({
+        ...current,
+        snapshot: null,
+        connection: "DISCONNECTED",
+        reconnects: current.reconnects + 1,
+      }));
+      failures += 1;
+      retry = setTimeout(
+        () => void connect(),
+        Math.min(5_000, 250 * 2 ** Math.min(failures, 5)),
+      );
     }
-    function connect() {
+    async function connect() {
+      if (closed) return;
+      const bootstrap = /^#bootstrap=([0-9a-f]{64})$/.exec(
+        window.location.hash,
+      )?.[1];
+      if (window.location.hash.startsWith("#bootstrap=")) {
+        window.history.replaceState(
+          null,
+          "",
+          window.location.pathname + window.location.search,
+        );
+      }
+      try {
+        if (bootstrap && !localBootstrap) {
+          localBootstrap = fetch("/trade/session/bootstrap", {
+            method: "POST",
+            credentials: "same-origin",
+            cache: "no-store",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ token: bootstrap }),
+          })
+            .then((response) => {
+              if (!response.ok) throw new Error("Local sign-in unavailable");
+            })
+            .finally(() => {
+              localBootstrap = null;
+            });
+        }
+        if (localBootstrap) await localBootstrap;
+        let session = await fetch("/api/session", {
+          credentials: "same-origin",
+          cache: "no-store",
+        });
+        if (session.status === 401) {
+          if (!localBootstrap) {
+            localBootstrap = fetch("/trade/session/local", {
+              method: "POST",
+              credentials: "same-origin",
+              cache: "no-store",
+              headers: { "X-Alpha-Grid-Local": "1" },
+            })
+              .then((response) => {
+                if (!response.ok) throw new Error("Local sign-in unavailable");
+              })
+              .finally(() => { localBootstrap = null; });
+          }
+          await localBootstrap;
+          session = await fetch("/api/session", {
+            credentials: "same-origin",
+            cache: "no-store",
+          });
+        }
+        if (!session.ok) throw new Error("UI session unavailable");
+      } catch {
+        scheduleRetry();
+        return;
+      }
       if (closed) return;
       const scheme = location.protocol === "https:" ? "wss" : "ws";
       socket = new WebSocket(`${scheme}://${location.host}/ws`);
@@ -135,12 +289,16 @@ export function useEngineStream(): StreamState {
                 BigInt(current.sequence) + 1n
             ) {
               void fetch("/api/snapshot", { cache: "no-store" })
-                .then((response) => response.json())
+                .then((response) => {
+                  if (!response.ok)
+                    throw new Error("resynchronization unavailable");
+                  return response.json();
+                })
                 .then((full) =>
                   setState((latest) => applyEnvelope(latest, full as Envelope)),
                 )
                 .catch(() => {});
-              return current;
+              return { ...current, snapshot: null, connection: "DISCONNECTED" };
             }
             return applyEnvelope(current, message);
           });
@@ -149,27 +307,25 @@ export function useEngineStream(): StreamState {
         }
       };
       socket.onclose = () => {
-        if (closed) return;
-        setState((current) => ({
-          ...current,
-          connection: "DISCONNECTED",
-          reconnects: current.reconnects + 1,
-        }));
-        failures += 1;
-        retry = setTimeout(
-          connect,
-          Math.min(5_000, 250 * 2 ** Math.min(failures, 5)),
-        );
+        scheduleRetry();
       };
       socket.onerror = () => socket?.close();
     }
-    void resync();
-    connect();
+    void connect();
     return () => {
       closed = true;
       if (retry) clearTimeout(retry);
       socket?.close();
     };
-  }, []);
+  }, [enabled]);
   return state;
+}
+
+export async function forgetCockpitSession(): Promise<boolean> {
+  const response = await fetch("/api/session", {
+    method: "DELETE",
+    credentials: "same-origin",
+    cache: "no-store",
+  });
+  return response.ok;
 }

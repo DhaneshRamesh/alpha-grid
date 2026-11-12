@@ -1,0 +1,508 @@
+{
+  "schema_version": "alpha-grid-cross-stock-universe-v1",
+  "selection_asof": "2026-10-30",
+  "assembled_at_utc": "2026-11-01T19:33:18.237847+00:00",
+  "selection": "Top 25 by median TtlTrfVal across all 20 October 2026 NSE CM regular F1 trading dates; require one NSE STK/EQ row each date, stable NSE FinInstrmId and INE ISIN, unique Oct 30 MII EQ normal-market row, and matching verified Nov 1 Dhan NSE E EQUITY EQ security ID. Historical traded value is not observed spread or executable depth.",
+  "nse_bhavcopy_sources": [
+    {
+      "trade_date": "2026-10-01",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261001_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:53.632683+00:00",
+      "sha256": "ccc5fb27872716bbcc99d2d87e522ab304f6620e11c3a5045c30e1ff25cbfb73",
+      "bytes": 208712,
+      "rows": 3712
+    },
+    {
+      "trade_date": "2026-10-05",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261005_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:53.902612+00:00",
+      "sha256": "43913a4ef72663e2d3fbb0c3b9c686ed8c3d23e5df6ee6b756f8a5c954559ceb",
+      "bytes": 207906,
+      "rows": 3712
+    },
+    {
+      "trade_date": "2026-10-06",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261006_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:54.141194+00:00",
+      "sha256": "f444e5ba9821fe09ac3bff69f53144369ce536be6481acc78ab00d175ae55b56",
+      "bytes": 207085,
+      "rows": 3701
+    },
+    {
+      "trade_date": "2026-10-07",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261007_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:54.332969+00:00",
+      "sha256": "e11ec2f3c54236e4fae5fc19e88f45d2a2159a31308c77c5ff5dcf051b632b95",
+      "bytes": 206975,
+      "rows": 3695
+    },
+    {
+      "trade_date": "2026-10-08",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261008_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:54.529240+00:00",
+      "sha256": "07fdfc3409b83fac6ee4a736ceb4fde20069c5d1a490d960b332c178cb703e39",
+      "bytes": 208947,
+      "rows": 3733
+    },
+    {
+      "trade_date": "2026-10-09",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261009_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:54.682324+00:00",
+      "sha256": "8adbb3410c8cf4372290484a9b1798490ef279d30fc2439c93f082cc20ed198c",
+      "bytes": 206974,
+      "rows": 3687
+    },
+    {
+      "trade_date": "2026-10-12",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261012_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:54.819449+00:00",
+      "sha256": "818f673b3cdb96ae8ec4e466c7c4fd3a28d035482173a675dd24f9437a3ecd99",
+      "bytes": 207055,
+      "rows": 3713
+    },
+    {
+      "trade_date": "2026-10-13",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261013_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:54.993501+00:00",
+      "sha256": "b3aba7f1e20587e4c77a5de2b720cbcd5d8f4c8fe42e1b67f06f0d7deaabbf46",
+      "bytes": 204601,
+      "rows": 3648
+    },
+    {
+      "trade_date": "2026-10-14",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261014_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:55.194783+00:00",
+      "sha256": "db0b3819da45da615d3aa5ac7888a2b0670189d73f8d33f1e377146c89d9c94f",
+      "bytes": 205416,
+      "rows": 3672
+    },
+    {
+      "trade_date": "2026-10-15",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261015_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:55.365532+00:00",
+      "sha256": "3d1c7039e2c70868cc44b51d1f9e4b0f942afc0575fe8c4a524aed9e01eac3e8",
+      "bytes": 205668,
+      "rows": 3673
+    },
+    {
+      "trade_date": "2026-10-16",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261016_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:55.539432+00:00",
+      "sha256": "d2c4406c1ecbfbcb9acdafa424f921caad7467d97da47c65973b34aa0aac70bc",
+      "bytes": 206122,
+      "rows": 3675
+    },
+    {
+      "trade_date": "2026-10-19",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261019_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:55.738973+00:00",
+      "sha256": "f0a2e9bf7cb185bb112704355772d2954d662abee3d7295414aabc26d6ecfbde",
+      "bytes": 205000,
+      "rows": 3668
+    },
+    {
+      "trade_date": "2026-10-21",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261021_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:56.078212+00:00",
+      "sha256": "7d19ef4c8f7e3bf80828a7a33c4fe7d2cd8a56cbecc5e2ce42ce81a35e2ba243",
+      "bytes": 208135,
+      "rows": 3708
+    },
+    {
+      "trade_date": "2026-10-22",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261022_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:56.235007+00:00",
+      "sha256": "4e1e097210a023fa6a2bfd67610528d28ac0307c6417c8c85cfa4b01196d37b2",
+      "bytes": 204286,
+      "rows": 3649
+    },
+    {
+      "trade_date": "2026-10-23",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261023_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:56.449290+00:00",
+      "sha256": "009b57f15cb36e14fa956b2e585b69b23f279eb8532c2c63c0adf0aa2ed77689",
+      "bytes": 209421,
+      "rows": 3730
+    },
+    {
+      "trade_date": "2026-10-26",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261026_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:25.217682+00:00",
+      "sha256": "723bee076946c104b9cd56d09ca9b3776b062f19c136acc289c7c279290377e3",
+      "bytes": 206563,
+      "rows": 3686
+    },
+    {
+      "trade_date": "2026-10-27",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261027_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:25.402270+00:00",
+      "sha256": "d6de1583722c44599c1fa394072a9b496a9041b40e81cd670720f91f2834330e",
+      "bytes": 205255,
+      "rows": 3670
+    },
+    {
+      "trade_date": "2026-10-28",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261028_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:25.636007+00:00",
+      "sha256": "4e93e09854c535af09dcf656677f7e960dddbe55c38d379b02c98ff2e88edccf",
+      "bytes": 205394,
+      "rows": 3682
+    },
+    {
+      "trade_date": "2026-10-29",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261029_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:25.847331+00:00",
+      "sha256": "715d25908016922815de203654ea5ef0c22cb32175b315814789f7f42aba5516",
+      "bytes": 206458,
+      "rows": 3697
+    },
+    {
+      "trade_date": "2026-10-30",
+      "url": "https://nsearchives.nseindia.com/content/cm/BhavCopy_NSE_CM_0_0_0_20261030_F_0000.csv.zip",
+      "retrieved_at_utc": "2026-11-01T19:28:01.464495+00:00",
+      "sha256": "ce2b0e6615bbc48990bb32ab081f85568451bb6f16fc54bff7d786faa7d2ca44",
+      "bytes": 203326,
+      "rows": 3641
+    }
+  ],
+  "nse_mii_source": {
+    "url": "https://nsearchives.nseindia.com/content/cm/NSE_CM_security_30102026.csv.gz",
+    "retrieved_at_utc": "2026-11-01T19:29:46.114644+00:00",
+    "sha256": "ee3e9a578fd8ea71aab1af5ba82e7b05490700da1e99974a6a3a5d48f0dbc209",
+    "bytes": 1277713
+  },
+  "dhan_master_source": {
+    "retrieved_at": "2026-10-31T19:17:33.734087+00:00",
+    "schema_version": "dhan-instrument-master-v1",
+    "sha256": "ad00a05b69606346a5e796bef8715a981242eab8063d615294ce8b3e54981a6a",
+    "source_url": "https://images.dhan.co/api-data/api-scrip-master.csv"
+  },
+  "eligible_ranked_count": 2226,
+  "instruments": [
+    {
+      "rank": 1,
+      "symbol": "HDFCBANK",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "1333",
+      "isin": "INE040A01034",
+      "october_median_traded_value_inr": 19128980374.1,
+      "october_min_traded_value_inr": 12842603523.45,
+      "october_median_transactions": 265216,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 2,
+      "symbol": "RELIANCE",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "2885",
+      "isin": "INE002A01018",
+      "october_median_traded_value_inr": 17359789548.15,
+      "october_min_traded_value_inr": 8951196490.0,
+      "october_median_transactions": 275546,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 3,
+      "symbol": "INFY",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "1594",
+      "isin": "INE009A01021",
+      "october_median_traded_value_inr": 16690515170.6,
+      "october_min_traded_value_inr": 7474377015.35,
+      "october_median_transactions": 223111,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 4,
+      "symbol": "ICICIBANK",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "4963",
+      "isin": "INE090A01021",
+      "october_median_traded_value_inr": 16196423455.05,
+      "october_min_traded_value_inr": 7448205913.3,
+      "october_median_transactions": 173934,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 5,
+      "symbol": "BHARTIARTL",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "10604",
+      "isin": "INE397D01024",
+      "october_median_traded_value_inr": 13857652136.6,
+      "october_min_traded_value_inr": 5692151509.8,
+      "october_median_transactions": 184813,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 6,
+      "symbol": "BSE",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "19585",
+      "isin": "INE118H01025",
+      "october_median_traded_value_inr": 12454910618.4,
+      "october_min_traded_value_inr": 5715569658.3,
+      "october_median_transactions": 158208,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 7,
+      "symbol": "TCS",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "11536",
+      "isin": "INE467B01029",
+      "october_median_traded_value_inr": 10863890786.1,
+      "october_min_traded_value_inr": 2819489886.3,
+      "october_median_transactions": 160116,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 8,
+      "symbol": "PCJEWELLER",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "29124",
+      "isin": "INE785M01021",
+      "october_median_traded_value_inr": 10684432434.4,
+      "october_min_traded_value_inr": 1738751041.95,
+      "october_median_transactions": 288417,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "0"
+    },
+    {
+      "rank": 9,
+      "symbol": "KOTAKBANK",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "1922",
+      "isin": "INE237A01036",
+      "october_median_traded_value_inr": 10324669888.6,
+      "october_min_traded_value_inr": 5198849607.75,
+      "october_median_transactions": 199594,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 10,
+      "symbol": "AXISBANK",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "5900",
+      "isin": "INE238A01034",
+      "october_median_traded_value_inr": 9171384600.4,
+      "october_min_traded_value_inr": 4411031069.5,
+      "october_median_transactions": 136311,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 11,
+      "symbol": "ETERNAL",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "5097",
+      "isin": "INE758T01015",
+      "october_median_traded_value_inr": 8327020109.58,
+      "october_min_traded_value_inr": 3960643499.1,
+      "october_median_transactions": 164580,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 12,
+      "symbol": "SBIN",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "3045",
+      "isin": "INE062A01020",
+      "october_median_traded_value_inr": 7840779955.4,
+      "october_min_traded_value_inr": 5579023058.0,
+      "october_median_transactions": 140770,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 13,
+      "symbol": "BAJFINANCE",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "317",
+      "isin": "INE296A01032",
+      "october_median_traded_value_inr": 7496645645.73,
+      "october_min_traded_value_inr": 3649772472.15,
+      "october_median_transactions": 162160,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 14,
+      "symbol": "LT",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "11483",
+      "isin": "INE018A01030",
+      "october_median_traded_value_inr": 6887873731.25,
+      "october_min_traded_value_inr": 4185049097.2,
+      "october_median_transactions": 105304,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 15,
+      "symbol": "MONEYVIEW",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "766325",
+      "isin": "INE0PTN01011",
+      "october_median_traded_value_inr": 6821377951.14,
+      "october_min_traded_value_inr": 1441560001.36,
+      "october_median_transactions": 256041,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "0"
+    },
+    {
+      "rank": 16,
+      "symbol": "M&M",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "2031",
+      "isin": "INE101A01026",
+      "october_median_traded_value_inr": 6726917648.35,
+      "october_min_traded_value_inr": 3471842081.0,
+      "october_median_transactions": 93522,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 17,
+      "symbol": "NETWEB",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "17433",
+      "isin": "INE0NT901020",
+      "october_median_traded_value_inr": 6216816723.4,
+      "october_min_traded_value_inr": 2797050551.1,
+      "october_median_transactions": 113988,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "0"
+    },
+    {
+      "rank": 18,
+      "symbol": "CUPID",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "18520",
+      "isin": "INE509F01029",
+      "october_median_traded_value_inr": 6110523787.23,
+      "october_min_traded_value_inr": 1985767094.25,
+      "october_median_transactions": 157372,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "0"
+    },
+    {
+      "rank": 19,
+      "symbol": "TECHM",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "13538",
+      "isin": "INE669C01036",
+      "october_median_traded_value_inr": 5363678518.4,
+      "october_min_traded_value_inr": 1878899025.6,
+      "october_median_transactions": 100994,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 20,
+      "symbol": "BHEL",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "438",
+      "isin": "INE257A01026",
+      "october_median_traded_value_inr": 5208469175.05,
+      "october_min_traded_value_inr": 2614043449.8,
+      "october_median_transactions": 96317,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 21,
+      "symbol": "DIVISLAB",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "10940",
+      "isin": "INE361B01024",
+      "october_median_traded_value_inr": 5194416936.75,
+      "october_min_traded_value_inr": 3362007577.0,
+      "october_median_transactions": 57997,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 22,
+      "symbol": "SHRIRAMFIN",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "4306",
+      "isin": "INE721A01047",
+      "october_median_traded_value_inr": 5001993421.27,
+      "october_min_traded_value_inr": 1848181021.65,
+      "october_median_transactions": 99562,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 23,
+      "symbol": "HCLTECH",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "7229",
+      "isin": "INE860A01027",
+      "october_median_traded_value_inr": 4944020683.35,
+      "october_min_traded_value_inr": 2149652762.8,
+      "october_median_transactions": 98718,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 24,
+      "symbol": "MCX",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "31181",
+      "isin": "INE745G01043",
+      "october_median_traded_value_inr": 4901151419.4,
+      "october_min_traded_value_inr": 2814769924.8,
+      "october_median_transactions": 90426,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    },
+    {
+      "rank": 25,
+      "symbol": "MARUTI",
+      "exchange_segment": "NSE_EQ",
+      "instrument": "EQUITY",
+      "security_id": "10999",
+      "isin": "INE585B01010",
+      "october_median_traded_value_inr": 4864445134.0,
+      "october_min_traded_value_inr": 3048175281.0,
+      "october_median_transactions": 54127,
+      "nse_2026_10_30_normal_market_eligible": "1",
+      "nse_2026_10_30_cas_eligible": "1"
+    }
+  ]
+}

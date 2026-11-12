@@ -11,7 +11,7 @@ pub const SCHEMA_VERSION: u16 = 1;
 
 /// The caller supplies exchange-approved sessions, including holidays and
 /// special sessions. No default weekday/trading-hour guess is provided.
-pub trait MarketCalendar {
+pub trait MarketCalendar: Send {
     fn session_at(&self, timestamp_ns: i64) -> Option<String>;
 }
 

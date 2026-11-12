@@ -1,8 +1,9 @@
 use crate::health::CaptureMetrics;
-use quant_core::{DepthSide, MarketEvent};
+use quant_core::{DepthEvent, DepthSide, DepthSideUpdate, MarketEvent};
 use quant_journal::segmented::{SegmentConfig, SegmentedJournal, count_recovered_records};
-use quant_journal::{Commit, JournalRecord};
-use quant_market_data::dhan20::{DecodeError, DecodedPacket, assemble_frame, decode_frame};
+use quant_journal::{Commit, JournalRecord, raw_depth_record};
+use quant_market_data::dhan20::{DecodeError, DecodedPacket, decode_frame};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
@@ -49,6 +50,11 @@ pub struct Capture {
     pub session_id: String,
     frame_id: u64,
     root: PathBuf,
+    poisoned: bool,
+    allowed_ids: Option<BTreeSet<String>>,
+    latest_sides: BTreeMap<String, (Option<DepthSideUpdate>, Option<DepthSideUpdate>)>,
+    latest_books: BTreeMap<String, DepthEvent>,
+    last_receive_ns: Option<i64>,
 }
 
 impl Capture {
@@ -90,7 +96,116 @@ impl Capture {
             session_id,
             frame_id: 0,
             root: root.into(),
+            poisoned: false,
+            allowed_ids: None,
+            latest_sides: BTreeMap::new(),
+            latest_books: BTreeMap::new(),
+            last_receive_ns: None,
         })
+    }
+
+    /// Bind live capture to its preflighted NSE cash subscriptions.
+    pub fn allow_security_ids(&mut self, ids: BTreeSet<String>) -> io::Result<()> {
+        if ids.is_empty() || self.frame_id != 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "invalid depth scope",
+            ));
+        }
+        self.allowed_ids = Some(ids);
+        Ok(())
+    }
+
+    pub fn new_feed_session(&mut self, session_id: String) {
+        self.session_id = session_id;
+        self.latest_sides.clear();
+        self.latest_books.clear();
+        self.last_receive_ns = None;
+    }
+
+    pub fn all_latest_books(&self) -> &BTreeMap<String, DepthEvent> {
+        &self.latest_books
+    }
+
+    fn pair_side(&mut self, side: &DepthSideUpdate) -> Option<DepthEvent> {
+        let entry = self
+            .latest_sides
+            .entry(side.instrument.security_id.clone())
+            .or_default();
+        match side.side {
+            DepthSide::Bid => entry.0 = Some(side.clone()),
+            DepthSide::Ask => entry.1 = Some(side.clone()),
+        }
+        let (Some(bid), Some(ask)) = (&entry.0, &entry.1) else {
+            self.metrics.unpaired_sides += 1;
+            return None;
+        };
+        if bid.feed_session_id != ask.feed_session_id
+            || bid.receive_timestamp_ns.abs_diff(ask.receive_timestamp_ns) > 1_000_000_000
+        {
+            self.metrics.stale_pairs += 1;
+            self.metrics.unpaired_sides += 1;
+            return None;
+        }
+        if bid
+            .levels
+            .iter()
+            .chain(ask.levels.iter())
+            .any(|level| level.price_nanos <= 0 || level.quantity == 0)
+        {
+            self.metrics.incomplete_books += 1;
+            return None;
+        }
+        if bid.levels[0].price_nanos >= ask.levels[0].price_nanos {
+            self.metrics.crossed_books += 1;
+            return None;
+        }
+        let event = DepthEvent {
+            instrument: side.instrument.clone(),
+            exchange_timestamp_ns: None,
+            receive_timestamp_ns: bid.receive_timestamp_ns.max(ask.receive_timestamp_ns),
+            sequence: None,
+            bids: bid.levels,
+            asks: ask.levels,
+        };
+        self.latest_books
+            .insert(side.instrument.security_id.clone(), event.clone());
+        Some(event)
+    }
+
+    async fn commit(&mut self, records: Vec<JournalRecord>, started: Instant) -> io::Result<()> {
+        let count = records.len() as u64;
+        let (reply, recv) = oneshot::channel();
+        let queued_at = Instant::now();
+        if self.sender.try_send(FrameBatch { records, reply }).is_err() {
+            self.metrics.queue_rejections += 1;
+            self.metrics.last_quality_error = Some(started);
+            self.poisoned = true;
+            return Err(io::Error::new(
+                io::ErrorKind::WouldBlock,
+                "bounded journal queue full or writer stopped",
+            ));
+        }
+        self.metrics.queue_accepted += count;
+        let result = recv
+            .await
+            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "journal writer stopped"))?;
+        self.metrics.queue_wait_time_ns += queued_at.elapsed().as_nanos() as u64;
+        match result {
+            Ok(ack) => {
+                self.metrics.kernel_written += ack.kernel_written;
+                self.metrics.fsync_confirmed += ack.fsync_confirmed;
+                self.metrics.journal_time_ns += ack.journal_time_ns;
+                self.metrics.disk_remaining_bytes = Some(ack.disk_remaining_bytes);
+                Ok(())
+            }
+            Err(error) => {
+                self.metrics.fsync_errors += 1;
+                self.metrics.last_quality_error = Some(started);
+                self.poisoned = true;
+                Err(error)
+            }
+        }
     }
 
     pub async fn ingest_frame(
@@ -98,10 +213,29 @@ impl Capture {
         bytes: &[u8],
         receive_timestamp_ns: i64,
     ) -> io::Result<bool> {
+        if self.poisoned {
+            return Err(io::Error::other("depth capture poisoned"));
+        }
         let started = Instant::now();
         self.metrics.websocket_frames += 1;
         self.metrics.last_frame = Some(started);
-        self.frame_id += 1;
+        self.frame_id = self
+            .frame_id
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("depth frame order overflow"))?;
+        let raw = raw_depth_record(&self.session_id, self.frame_id, receive_timestamp_ns, bytes)?;
+        self.commit(vec![raw], started).await?;
+        if self
+            .last_receive_ns
+            .is_some_and(|last| receive_timestamp_ns < last)
+        {
+            self.poisoned = true;
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "depth receipt clock moved backward",
+            ));
+        }
+        self.last_receive_ns = Some(receive_timestamp_ns);
         let packets =
             match decode_frame(bytes, receive_timestamp_ns, &self.session_id, self.frame_id) {
                 Ok(packets) => packets,
@@ -117,19 +251,32 @@ impl Capture {
                     ) {
                         self.metrics.unexpected_lengths += 1;
                     }
+                    self.poisoned = true;
                     return Err(io::Error::new(io::ErrorKind::InvalidData, error));
                 }
             };
         self.metrics.decode_time_ns += started.elapsed().as_nanos() as u64;
         self.metrics.parsed_packets += packets.len() as u64;
         let mut records = Vec::new();
-        let mut side_count = 0_u64;
+        let mut books = Vec::new();
         let mut disconnected = false;
         for packet in &packets {
             match packet {
                 DecodedPacket::Side(side) => {
                     self.metrics.packet_received += 1;
-                    side_count += 1;
+                    if side.instrument.exchange_segment != "NSE_EQ"
+                        || self
+                            .allowed_ids
+                            .as_ref()
+                            .is_some_and(|ids| !ids.contains(&side.instrument.security_id))
+                    {
+                        self.metrics.identity_rejections += 1;
+                        self.poisoned = true;
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "unexpected depth instrument",
+                        ));
+                    }
                     match side.side {
                         DepthSide::Bid => self.metrics.bid_packets += 1,
                         DepthSide::Ask => self.metrics.ask_packets += 1,
@@ -147,14 +294,22 @@ impl Capture {
                         session_id: self.session_id.clone(),
                         event: MarketEvent::DepthSide(side.clone()),
                     });
+                    if let Some(book) = self.pair_side(side) {
+                        books.push(book);
+                    }
                 }
-                DecodedPacket::Unsupported { .. } => self.metrics.unsupported_packets += 1,
+                DecodedPacket::Unsupported { .. } => {
+                    self.metrics.unsupported_packets += 1;
+                    self.poisoned = true;
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported depth packet",
+                    ));
+                }
                 DecodedPacket::Disconnect { .. } => disconnected = true,
             }
         }
-        let books = assemble_frame(&packets);
         self.metrics.complete_books += books.len() as u64;
-        self.metrics.unpaired_sides += side_count - 2 * books.len() as u64;
         for book in books {
             records.push(JournalRecord {
                 session_id: self.session_id.clone(),
@@ -164,35 +319,7 @@ impl Capture {
         if records.is_empty() {
             return Ok(disconnected);
         }
-        let count = records.len() as u64;
-        let (reply, recv) = oneshot::channel();
-        let queued_at = Instant::now();
-        if self.sender.try_send(FrameBatch { records, reply }).is_err() {
-            self.metrics.queue_rejections += 1;
-            self.metrics.last_quality_error = Some(started);
-            return Err(io::Error::new(
-                io::ErrorKind::WouldBlock,
-                "bounded journal queue full or writer stopped",
-            ));
-        }
-        self.metrics.queue_accepted += count;
-        let result = recv
-            .await
-            .map_err(|_| io::Error::new(io::ErrorKind::BrokenPipe, "journal writer stopped"))?;
-        self.metrics.queue_wait_time_ns += queued_at.elapsed().as_nanos() as u64;
-        match result {
-            Ok(ack) => {
-                self.metrics.kernel_written += ack.kernel_written;
-                self.metrics.fsync_confirmed += ack.fsync_confirmed;
-                self.metrics.journal_time_ns += ack.journal_time_ns;
-                self.metrics.disk_remaining_bytes = Some(ack.disk_remaining_bytes);
-            }
-            Err(error) => {
-                self.metrics.fsync_errors += 1;
-                self.metrics.last_quality_error = Some(started);
-                return Err(error);
-            }
-        }
+        self.commit(records, started).await?;
         Ok(disconnected)
     }
 
@@ -244,7 +371,14 @@ mod tests {
         p.extend_from_slice(&1333_i32.to_le_bytes());
         p.extend_from_slice(&0_u32.to_le_bytes());
         for i in 0..20 {
-            p.extend_from_slice(&(100.0 + i as f64).to_le_bytes());
+            p.extend_from_slice(
+                &(if code == 51 {
+                    200.0 + i as f64
+                } else {
+                    100.0 + i as f64
+                })
+                .to_le_bytes(),
+            );
             p.extend_from_slice(&10_u32.to_le_bytes());
             p.extend_from_slice(&1_u32.to_le_bytes());
         }
@@ -264,25 +398,87 @@ mod tests {
                 metrics.queue_accepted,
                 metrics.fsync_confirmed
             ),
-            (2, 3, 3)
+            (2, 4, 4)
         );
         let rows = replay_segments(dir.path()).unwrap();
-        assert_eq!(rows.len(), 3);
-        assert!(matches!(rows[0].event, MarketEvent::DepthSide(_)));
+        assert_eq!(rows.len(), 4);
+        assert!(matches!(rows[0].event, MarketEvent::RawDepthFrame(_)));
         assert!(matches!(rows[1].event, MarketEvent::DepthSide(_)));
-        assert!(matches!(rows[2].event, MarketEvent::Depth(_)));
+        assert!(matches!(rows[2].event, MarketEvent::DepthSide(_)));
+        assert!(matches!(rows[3].event, MarketEvent::Depth(_)));
     }
     #[tokio::test]
-    async fn malformed_frame_is_rejected_without_journal_rows() {
+    async fn malformed_frame_is_retained_before_decode_and_stops_capture() {
         let dir = tempfile::tempdir().unwrap();
         let mut capture = Capture::open(dir.path(), config(), 1, "mock-b".into()).unwrap();
         assert!(capture.ingest_frame(&[1, 2], 123).await.is_err());
         assert_eq!(capture.metrics.decode_errors, 1);
-        let mut valid = side(41);
-        valid.extend(side(51));
-        capture.ingest_frame(&valid, 124).await.unwrap();
+        assert!(capture.ingest_frame(&side(41), 124).await.is_err());
         capture.close().await.unwrap();
-        assert_eq!(replay_segments(dir.path()).unwrap().len(), 3);
+        let rows = replay_segments(dir.path()).unwrap();
+        assert_eq!(rows.len(), 1);
+        let MarketEvent::RawDepthFrame(raw) = &rows[0].event else {
+            panic!("raw depth required")
+        };
+        assert_eq!(raw.bytes, [1, 2]);
+    }
+
+    #[tokio::test]
+    async fn separate_sides_pair_only_when_fresh_and_uncrossed() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut capture = Capture::open(dir.path(), config(), 2, "separate".into()).unwrap();
+        capture
+            .ingest_frame(&side(41), 1_000_000_000)
+            .await
+            .unwrap();
+        capture
+            .ingest_frame(&side(51), 1_500_000_000)
+            .await
+            .unwrap();
+        assert_eq!(capture.metrics.complete_books, 1);
+        capture
+            .ingest_frame(&side(41), 3_000_000_000)
+            .await
+            .unwrap();
+        assert_eq!(capture.metrics.stale_pairs, 1);
+        let mut crossed_ask = side(51);
+        crossed_ask[12..20].copy_from_slice(&99.0_f64.to_le_bytes());
+        capture
+            .ingest_frame(&crossed_ask, 3_500_000_000)
+            .await
+            .unwrap();
+        assert_eq!(capture.metrics.crossed_books, 1);
+        let metrics = capture.close().await.unwrap();
+        assert_eq!(metrics.complete_books, 1);
+        let rows = replay_segments(dir.path()).unwrap();
+        assert_eq!(
+            rows.iter()
+                .filter(|r| matches!(r.event, MarketEvent::Depth(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|r| matches!(r.event, MarketEvent::RawDepthFrame(_)))
+                .count(),
+            4
+        );
+    }
+
+    #[tokio::test]
+    async fn wrong_instrument_is_retained_raw_then_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut capture = Capture::open(dir.path(), config(), 2, "scope".into()).unwrap();
+        capture
+            .allow_security_ids(["1333".to_string()].into())
+            .unwrap();
+        let mut wrong = side(41);
+        wrong[4..8].copy_from_slice(&2885_i32.to_le_bytes());
+        assert!(capture.ingest_frame(&wrong, 123).await.is_err());
+        capture.close().await.unwrap();
+        let rows = replay_segments(dir.path()).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(rows[0].event, MarketEvent::RawDepthFrame(_)));
     }
 
     #[tokio::test]

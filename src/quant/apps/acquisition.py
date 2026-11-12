@@ -387,7 +387,11 @@ def run(argv: list[str]) -> dict[str, object]:
         if not token:
             raise ValueError("DHAN_ACCESS_TOKEN must be set locally")
         paths = run_backfill(
-            requests, output_dir=args.output_dir, enabled=True, token=token
+            requests,
+            output_dir=args.output_dir,
+            enabled=True,
+            token=token,
+            max_retries=0,
         )
         audits = _saved(args, requests)
         return {

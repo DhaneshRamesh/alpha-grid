@@ -39,7 +39,11 @@ export interface Envelope {
 export interface WireProvenance {
   arrival_ordinal?: string | null;
   feed_session_id: string;
+  packet_offset?: number | null;
+  raw_durable_at_ns?: string | null;
+  raw_frame_sha256?: string | null;
   source_exchange_timestamp_ns?: string | null;
+  source_frame_id?: string | null;
   source_last_trade_timestamp_ns?: string | null;
   source_protocol: string;
   [k: string]: unknown;

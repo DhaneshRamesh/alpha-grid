@@ -32,6 +32,23 @@ def verify_master_identity(
     max_age: timedelta = timedelta(days=7),
 ) -> MasterIdentity:
     """Verify current listing evidence; historical ID continuity remains unknown."""
+    return verify_master_identities(
+        master, manifest_path, [(symbol, security_id)], now=now, max_age=max_age
+    )[0]
+
+
+def verify_master_identities(
+    master: Path,
+    manifest_path: Path,
+    symbols_and_ids: list[tuple[str, str]],
+    *,
+    now: datetime | None = None,
+    max_age: timedelta = timedelta(days=7),
+) -> list[MasterIdentity]:
+    """Verify a fixed universe with one checksum and one original-master scan."""
+    expected = dict(symbols_and_ids)
+    if not expected or len(expected) != len(symbols_and_ids):
+        raise ValueError("duplicate or empty Dhan instrument scope")
     metadata = json.loads(manifest_path.read_text())
     if (
         metadata.get("schema_version") != "dhan-instrument-master-v1"
@@ -61,20 +78,21 @@ def verify_master_identity(
         }
         if reader.fieldnames is None or not required.issubset(reader.fieldnames):
             raise ValueError("Dhan compact instrument master schema mismatch")
-        matching = [
-            row
-            for row in reader
-            if row["SEM_EXM_EXCH_ID"] == "NSE"
-            and row["SEM_SEGMENT"] == "E"
-            and row["SEM_INSTRUMENT_NAME"] == "EQUITY"
-            and row["SEM_SERIES"] == "EQ"
-            and row["SEM_TRADING_SYMBOL"] == symbol
-        ]
-    if len(matching) != 1 or matching[0]["SEM_SMST_SECURITY_ID"] != security_id:
-        raise ValueError("NSE equity symbol/security ID not uniquely confirmed")
-    return MasterIdentity(
-        CashInstrument("NSE", "NSE_EQ", security_id, symbol),
-        matching[0]["SM_SYMBOL_NAME"],
-        metadata["sha256"],
-        retrieved_at,
-    )
+        matches: dict[str, list[dict[str, str]]] = {symbol: [] for symbol in expected}
+        for row in reader:
+            symbol = row["SEM_TRADING_SYMBOL"]
+            if (symbol in expected and row["SEM_EXM_EXCH_ID"] == "NSE"
+                    and row["SEM_SEGMENT"] == "E"
+                    and row["SEM_INSTRUMENT_NAME"] == "EQUITY"
+                    and row["SEM_SERIES"] == "EQ"):
+                matches[symbol].append(row)
+    result = []
+    for symbol, security_id in symbols_and_ids:
+        matching = matches[symbol]
+        if len(matching) != 1 or matching[0]["SEM_SMST_SECURITY_ID"] != security_id:
+            raise ValueError("NSE equity symbol/security ID not uniquely confirmed")
+        result.append(MasterIdentity(
+            CashInstrument("NSE", "NSE_EQ", security_id, symbol),
+            matching[0]["SM_SYMBOL_NAME"], metadata["sha256"], retrieved_at,
+        ))
+    return result

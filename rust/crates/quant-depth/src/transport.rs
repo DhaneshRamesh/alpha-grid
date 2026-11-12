@@ -2,12 +2,17 @@
 //! documented depth subscription; live connectivity is feature/runtime gated.
 use crate::capture::Capture;
 use futures_util::{SinkExt, StreamExt};
+use quant_core::DepthEvent;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::io;
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::sync::watch;
+#[cfg(feature = "live-readonly")]
+use tokio_tungstenite::tungstenite::Error as WebSocketError;
 use tokio_tungstenite::{WebSocketStream, tungstenite::Message};
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -83,6 +88,90 @@ fn unix_ns() -> io::Result<i64> {
         .map_err(|_| io::Error::other("clock overflow"))
 }
 
+fn write_local_status(connected: bool, last_frame_ns: Option<i64>, frames: u64) -> io::Result<()> {
+    let Ok(path) = std::env::var("ALPHA_GRID_DEPTH_STATUS_FILE") else {
+        return Ok(());
+    };
+    let target = Path::new(&path);
+    let temporary = target.with_extension(format!("{}.tmp", std::process::id()));
+    let body = serde_json::json!({
+        "schema_version": "alpha-grid-depth-status-v1",
+        "connected": connected,
+        "last_frame_received_ns": last_frame_ns.map(|value| value.to_string()),
+        "frames_received": frames,
+        "checked_at_ns": unix_ns()?,
+    });
+    std::fs::write(&temporary, serde_json::to_vec(&body)?)?;
+    std::fs::rename(temporary, target)?;
+    Ok(())
+}
+
+fn write_local_books(books: &BTreeMap<String, DepthEvent>) -> io::Result<()> {
+    let Ok(path) = std::env::var("ALPHA_GRID_DEPTH_BOOKS_FILE") else {
+        return Ok(());
+    };
+    if books.is_empty() {
+        return Ok(());
+    }
+    let target = Path::new(&path);
+    let temporary = target.with_extension(format!("books_{}.tmp", std::process::id()));
+    let wire_books: Vec<serde_json::Value> = books
+        .values()
+        .map(|book| {
+            let mut cumulative_bid = 0_u64;
+            let bids: Vec<serde_json::Value> = book
+                .bids
+                .iter()
+                .map(|l| {
+                    cumulative_bid = cumulative_bid.saturating_add(l.quantity);
+                    serde_json::json!({
+                        "price_nanos": l.price_nanos.to_string(),
+                        "displayed_quantity": l.quantity.to_string(),
+                        "order_count": l.order_count,
+                        "cumulative_visible_quantity": cumulative_bid.to_string(),
+                    })
+                })
+                .collect();
+            let mut cumulative_ask = 0_u64;
+            let asks: Vec<serde_json::Value> = book
+                .asks
+                .iter()
+                .map(|l| {
+                    cumulative_ask = cumulative_ask.saturating_add(l.quantity);
+                    serde_json::json!({
+                        "price_nanos": l.price_nanos.to_string(),
+                        "displayed_quantity": l.quantity.to_string(),
+                        "order_count": l.order_count,
+                        "cumulative_visible_quantity": cumulative_ask.to_string(),
+                    })
+                })
+                .collect();
+            serde_json::json!({
+                "security_id": book.instrument.security_id,
+                "exchange_segment": book.instrument.exchange_segment,
+                "symbol": book.instrument.symbol,
+                "receive_timestamp_ns": book.receive_timestamp_ns.to_string(),
+                "exchange_timestamp_ns": book.exchange_timestamp_ns.map(|n| n.to_string()),
+                "derived_pairing": true,
+                "atomic_exchange_snapshot_verified": false,
+                "source": "DEPTH_20",
+                "bids": bids,
+                "asks": asks,
+            })
+        })
+        .collect();
+
+    let body = serde_json::json!({
+        "schema_version": "alpha-grid-depth-books-v1",
+        "checked_at_ns": unix_ns()?,
+        "book_count": books.len(),
+        "books": wire_books,
+    });
+    std::fs::write(&temporary, serde_json::to_vec(&body)?)?;
+    std::fs::rename(temporary, target)?;
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SessionExit {
     Disconnected,
@@ -104,12 +193,19 @@ where
         .await
         .map_err(|_| io::Error::other("depth subscription send failed"))?;
     capture.metrics.connected = true;
+    write_local_status(true, None, capture.metrics.websocket_frames)?;
+    let mut last_report = std::time::Instant::now() - Duration::from_secs(2);
+    let mut last_frame_ns = None;
     loop {
         tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                write_local_status(true, last_frame_ns, capture.metrics.websocket_frames)?;
+            }
             changed = stop.changed() => {
                 if changed.is_err() || *stop.borrow() {
                     let _ = socket.close(None).await;
                     capture.metrics.connected = false;
+                    write_local_status(false, None, capture.metrics.websocket_frames)?;
                     return Ok(SessionExit::Shutdown);
                 }
             }
@@ -120,7 +216,14 @@ where
                         let received_ns = unix_ns()?;
                         if capture.ingest_frame(&bytes, received_ns).await? {
                             capture.metrics.connected = false;
+                            write_local_status(false, None, capture.metrics.websocket_frames)?;
                             return Ok(SessionExit::Disconnected);
+                        }
+                        last_frame_ns = Some(received_ns);
+                        if last_report.elapsed() >= Duration::from_secs(1) {
+                            write_local_status(true, Some(received_ns), capture.metrics.websocket_frames)?;
+                            let _ = write_local_books(capture.all_latest_books());
+                            last_report = std::time::Instant::now();
                         }
                     }
                     Ok(Some(Ok(Message::Ping(payload)))) => {
@@ -129,6 +232,7 @@ where
                     }
                     Ok(Some(Ok(Message::Close(_)))) | Ok(None) | Ok(Some(Err(_))) | Err(_) => {
                         capture.metrics.connected = false;
+                        write_local_status(false, None, capture.metrics.websocket_frames)?;
                         return Ok(SessionExit::Disconnected);
                     }
                     Ok(Some(Ok(Message::Text(_)))) => {
@@ -154,15 +258,19 @@ where
     S: AsyncRead + AsyncWrite + Unpin,
 {
     config.validate()?;
+    let mut last_connect_error = None;
     for attempt in 0..=config.max_reconnects {
         if *stop.borrow() {
             return Ok(());
         }
         capture.metrics.invalidate_session();
-        capture.session_id = format!("feed-{}-{attempt}", unix_ns()?);
+        capture.new_feed_session(format!("feed-{}-{attempt}", unix_ns()?));
         let outcome = match connect().await {
             Ok(socket) => run_socket(socket, capture, config, stop).await?,
-            Err(_) => SessionExit::Disconnected,
+            Err(error) => {
+                last_connect_error = Some(error);
+                SessionExit::Disconnected
+            }
         };
         if outcome == SessionExit::Shutdown {
             return Ok(());
@@ -183,10 +291,12 @@ where
             _ = stop.changed() => { if *stop.borrow() { return Ok(()); } }
         }
     }
-    Err(io::Error::new(
-        io::ErrorKind::ConnectionAborted,
-        "depth reconnect limit reached",
-    ))
+    Err(last_connect_error.unwrap_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::ConnectionAborted,
+            "DEPTH_SOCKET_DISCONNECTED",
+        )
+    }))
 }
 
 /// Requires `--features live-readonly`, explicit runtime opt-in, and local env.
@@ -233,7 +343,13 @@ pub async fn run_live(
                 tokio_tungstenite::connect_async(url.as_str())
                     .await
                     .map(|(socket, _)| socket)
-                    .map_err(|_| io::Error::other("depth connection failed"))
+                    .map_err(|error| match error {
+                        WebSocketError::Http(response) => io::Error::other(format!(
+                            "DEPTH_UPGRADE_HTTP_{}",
+                            response.status().as_u16()
+                        )),
+                        _ => io::Error::other("DEPTH_CONNECT_FAILED"),
+                    })
             }
         },
         capture,
@@ -362,6 +478,40 @@ mod tests {
                 .is_none()
         );
         capture.close().await.unwrap();
-        assert_eq!(replay_segments(dir.path()).unwrap().len(), 2);
+        let recovered = replay_segments(dir.path()).unwrap();
+        assert_eq!(recovered.len(), 4); // Each side has its original raw frame.
+        assert_eq!(
+            recovered
+                .iter()
+                .filter(|record| matches!(record.event, quant_core::MarketEvent::RawDepthFrame(_)))
+                .count(),
+            2
+        );
+    }
+
+    #[tokio::test]
+    async fn bounded_connect_preserves_sanitized_http_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let journal_config = SegmentConfig {
+            max_bytes: 10_000,
+            max_age: Duration::from_secs(60),
+            max_disk_bytes: 1_000_000,
+            min_free_bytes: 0,
+            durability: DurabilityPolicy::EveryEvent,
+        };
+        let mut capture = Capture::open(dir.path(), journal_config, 2, "fixture".into()).unwrap();
+        let (_stop_tx, mut stop_rx) = watch::channel(false);
+        let mut bounded = config();
+        bounded.max_reconnects = 0;
+        let result = run_reconnecting(
+            || async {
+                Err::<WebSocketStream<TcpStream>, _>(io::Error::other("DEPTH_UPGRADE_HTTP_403"))
+            },
+            &mut capture,
+            &bounded,
+            &mut stop_rx,
+        )
+        .await;
+        assert_eq!(result.unwrap_err().to_string(), "DEPTH_UPGRADE_HTTP_403");
     }
 }

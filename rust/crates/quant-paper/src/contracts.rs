@@ -43,6 +43,7 @@ pub enum PaperOrderStatus {
     Expired,
     Rejected,
     UnknownUnresolved,
+    PaperAcknowledged,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum EstimateStatus {
@@ -70,6 +71,8 @@ pub enum DecisionReason {
     Duplicate,
     Halted,
     SessionEnded,
+    ApprovalRequired,
+    SessionCloseUnverified,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AttributionCategory {

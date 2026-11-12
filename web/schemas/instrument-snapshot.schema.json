@@ -1,5 +1,84 @@
 {
   "$defs": {
+    "WireBookMetrics": {
+      "properties": {
+        "ask_depletion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ask_orders": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "ask_quantity": {
+          "type": "string"
+        },
+        "ask_quantity_change": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ask_replenishment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bid_depletion": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bid_orders": {
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "bid_quantity": {
+          "type": "string"
+        },
+        "bid_quantity_change": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "bid_replenishment": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "five_level_imbalance": {
+          "format": "double",
+          "type": "number"
+        },
+        "ofi_proxy_quantity": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "quoted_spread_bps": {
+          "format": "double",
+          "type": "number"
+        }
+      },
+      "required": [
+        "quoted_spread_bps",
+        "bid_quantity",
+        "ask_quantity",
+        "bid_orders",
+        "ask_orders",
+        "five_level_imbalance"
+      ],
+      "type": "object"
+    },
     "WireCandle": {
       "properties": {
         "close_nanos": {
@@ -106,6 +185,17 @@
           },
           "type": "array"
         },
+        "book_metrics": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireBookMetrics"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "derived_pairing": {
           "type": "boolean"
         },
@@ -115,8 +205,26 @@
             "null"
           ]
         },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireProvenance"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "receive_timestamp_ns": {
           "type": "string"
+        },
+        "source": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -307,6 +415,12 @@
             "null"
           ]
         },
+        "cumulative_traded_volume": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "depth_receive_timestamp_ns": {
           "type": [
             "string",
@@ -317,6 +431,13 @@
           "type": "string"
         },
         "incremental_volume": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "packet_kind": {
+          "default": null,
           "type": [
             "string",
             "null"
@@ -363,7 +484,33 @@
         "feed_session_id": {
           "type": "string"
         },
+        "packet_offset": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "raw_durable_at_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "raw_frame_sha256": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "source_exchange_timestamp_ns": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source_frame_id": {
           "type": [
             "string",
             "null"

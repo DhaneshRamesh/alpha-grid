@@ -6,6 +6,7 @@ use quant_engine::pipeline::MarketEngine;
 use quant_engine::{MarketCalendar, TimestampPolicy};
 use quant_journal::{DurabilityPolicy, JournalReader, JournalRecord, JournalWriter};
 use quant_market_data::{dhan_standard, dhan20};
+use quant_paper::DecisionReason;
 use quant_paper::fees::FeeSchedule;
 use quant_paper::oms::PaperEngine;
 use quant_paper::policy::{PolicyConfig, PolicyMode};
@@ -207,6 +208,37 @@ fn build_fixture(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
     writer.sync()?;
     Ok(())
 }
+
+fn sync_paper_approvals(
+    paper: &mut PaperEngine,
+    controls: &DemoControls,
+    shared: &TelemetryShared,
+) -> std::io::Result<()> {
+    if !paper.approval_changes_allowed() {
+        return Ok(());
+    }
+    if controls.halt_requested.swap(false, Ordering::AcqRel) {
+        let snapshot = paper.snapshot();
+        if !snapshot.portfolio.halted {
+            paper.halt(
+                snapshot.last_source_record_index,
+                DecisionReason::Halted,
+                now_ns(),
+            )?;
+            shared.publish_paper(&paper.snapshot());
+        }
+    }
+    let changes = controls.take_approval_changes();
+    if changes.is_empty() {
+        return Ok(());
+    }
+    for (security_id, approved) in changes {
+        paper.set_stock_approval(&security_id, approved, now_ns())?;
+    }
+    shared.publish_paper(&paper.snapshot());
+    Ok(())
+}
+
 fn replay(
     path: PathBuf,
     paper_ledger: Option<PathBuf>,
@@ -233,7 +265,7 @@ fn replay(
                 PolicyConfig::default(),
                 RiskConfig::default(),
                 FeeSchedule::dhan_delivery_research(),
-                PolicyMode::RiskFilteredSignal,
+                PolicyMode::ApprovedMultiHorizon,
             ) {
                 Ok(value) => Some(value),
                 Err(error) => {
@@ -267,6 +299,13 @@ fn replay(
                 std::thread::sleep(Duration::from_millis(25));
                 continue;
             }
+            if let Some(paper) = &mut paper
+                && let Err(error) = sync_paper_approvals(paper, &controls, &shared)
+            {
+                shared.set_journal_blocked(true);
+                eprintln!("paper approval ledger: {error}");
+                break 'run;
+            }
             let record = match reader.next_record() {
                 Ok(Some(v)) => v,
                 Ok(None) => {
@@ -290,6 +329,13 @@ fn replay(
                     while !stop.load(Ordering::Acquire)
                         && controls.restart_requested.load(Ordering::Acquire) == seen_restart
                     {
+                        if let Some(paper) = &mut paper
+                            && let Err(error) = sync_paper_approvals(paper, &controls, &shared)
+                        {
+                            shared.set_journal_blocked(true);
+                            eprintln!("paper approval ledger: {error}");
+                            break 'run;
+                        }
                         std::thread::sleep(Duration::from_millis(50));
                     }
                     continue 'run;
@@ -365,6 +411,9 @@ fn replay(
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if !cfg!(test) {
+        return Err("DATA UNAVAILABLE / NO TRADE: synthetic replay is test-only; verified Dhan QJ01 provenance is unavailable".into());
+    }
     let mut journal = PathBuf::from(".local/phase2c/demo.qj");
     let mut paper_ledger = None::<PathBuf>;
     let mut research_manifest = None::<PathBuf>;
@@ -386,6 +435,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let instruments = instruments();
     let shared = TelemetryShared::new(&instruments, "REPLAY", SESSION)?;
     let controls = DemoControls::new(Arc::clone(&shared));
+    controls
+        .paper_enabled
+        .store(paper_ledger.is_some(), Ordering::Release);
     let mut gateway = Gateway::new(Arc::clone(&shared), GatewayConfig::default())?
         .with_demo_controls(Arc::clone(&controls));
     if let Some(path) = &research_manifest {

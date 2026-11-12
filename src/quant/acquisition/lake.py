@@ -19,6 +19,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 
 from quant.acquisition.contracts import SCHEMA_VERSION, HistoricalBar
+from quant.acquisition.dhan import _sync_directory as _fsync_dir
 from quant.acquisition.nse import file_sha256
 
 OHLCV_SCHEMA = pa.schema(
@@ -114,14 +115,6 @@ def stage_raw_file(source_file: Path, raw_root: Path, source: str) -> Path:
     finally:
         temporary.unlink(missing_ok=True)
     return target
-
-
-def _fsync_dir(path: Path) -> None:
-    descriptor = os.open(path, os.O_RDONLY)
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 def _partition(bar: HistoricalBar) -> str:
@@ -222,7 +215,7 @@ def write_dataset(
         flush()
         if writer is not None and current_file is not None:
             writer.close()
-            with current_file.open("rb") as stream:
+            with current_file.open("r+b" if os.name == "nt" else "rb") as stream:
                 os.fsync(stream.fileno())
             files.append(
                 PartitionInfo(

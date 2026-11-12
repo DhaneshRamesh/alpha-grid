@@ -30,6 +30,11 @@ pub enum LedgerEvent {
     Resume {
         timestamp_ns: i64,
     },
+    StockApproval {
+        security_id: String,
+        approved: bool,
+        timestamp_ns: i64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

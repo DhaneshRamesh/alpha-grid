@@ -10,9 +10,15 @@ permissions:
 
 jobs:
   validate:
-    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7.0.1
+      - name: Check macOS offline launcher syntax
+        run: bash -n tools/start-cockpit-macos.sh
       - uses: actions/setup-python@v7.0.0
         with:
           python-version: '3.12'
@@ -32,6 +38,8 @@ jobs:
           uv sync --extra dev --locked --python python3.12
       - name: Python tests and static checks
         run: |
+          umask 077
+          mkdir -p data/.secrets
           uv run --locked --extra dev python -m pytest -q
           uv run --locked --extra dev ruff check .
           uv run --locked --extra dev ruff format --check .
@@ -61,3 +69,24 @@ jobs:
           npm run format:check --prefix web
           npm test --prefix web
           npm run build --prefix web
+      - name: macOS offline startup smoke
+        if: matrix.os == 'macos-15'
+        run: |
+          bash tools/start-cockpit-macos.sh --no-browser &
+          launcher=$!
+          trap 'kill "$launcher" 2>/dev/null || true; wait "$launcher" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in {1..60}; do
+            if curl --silent --fail http://127.0.0.1:5173/ >/dev/null &&
+               curl --silent --fail http://127.0.0.1:8765/api/health >/dev/null &&
+               curl --silent --fail http://127.0.0.1:8767/trade/status >/dev/null; then
+              ready=1
+              break
+            fi
+            kill -0 "$launcher"
+            sleep 0.25
+          done
+          test "$ready" -eq 1
+          private="$HOME/Library/Application Support/AlphaGrid/offline-dev"
+          test "$(stat -f %Lp "$private")" = 700
+          test "$(stat -f %Lp "$private/paper-approvals.qp")" = 600

@@ -88,7 +88,9 @@ pub fn load_experiences(path: &Path) -> io::Result<Vec<ExperienceRecord>> {
                 experience.updated_at_ns = Some(timestamp_ns);
                 experience.attribution = Some(attribution);
             }
-            LedgerEvent::Halt { .. } | LedgerEvent::Resume { .. } => {}
+            LedgerEvent::Halt { .. }
+            | LedgerEvent::Resume { .. }
+            | LedgerEvent::StockApproval { .. } => {}
         }
     }
     Ok(experiences.into_values().collect())
